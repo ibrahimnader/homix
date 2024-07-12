@@ -123,6 +123,18 @@ class UserService {
       console.error(error);
     }
   }
+  static async getAllUsers() {
+    try {
+      const users = await User.findAll();
+      return {
+        status: true,
+        statusCode: 200,
+        data: users,
+      };
+    } catch (error) {
+      console.error(error);
+    }
+  }
 }
 
 module.exports = UserService;

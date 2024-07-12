@@ -41,7 +41,14 @@ class UserService {
       });
 
       // Return the token
-      return token;
+      return {
+        status: true,
+        statusCode: 200, 
+        data: {
+          token,
+          user,
+        },
+      };
     } catch (error) {
       console.error(error);
     }

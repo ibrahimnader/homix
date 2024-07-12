@@ -1,0 +1,14 @@
+node_modules/*
+device_software/*
+apidoc/*
+uploads/*
+\.idea/
+.env
+npm-debug.log
+mongodb/*
+tmp/*
+nbproject
+*.log
+*.heapsnapshot
+fingerprintstat.csv
+.vscode/launch.json

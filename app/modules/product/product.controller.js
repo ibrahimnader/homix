@@ -13,7 +13,7 @@ class productsController {
   static async getProducts(req, res, next) {
     try {
       const { page, size } = req.query;
-      const result = await productsService.getProducts(page, size);
+      const result = await productsService.getProducts(page, Number(size));
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));

@@ -19,7 +19,11 @@ class VendorsService {
   }
   static async getAllVendors() {
     const vendors = await Vendor.findAll();
-    return vendors;
+    return {
+      status: true,
+      data: vendors,
+      statusCode: 200,
+    };
   }
 }
 

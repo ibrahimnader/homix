@@ -100,7 +100,7 @@ class productsService {
     };
   }
   static async getProducts(page = 1, size = 50) {
-    const products = await Product.findAll({
+    const products =  await Product.findAll({
       offset: (page - 1) * size,
       limit : size,
     });

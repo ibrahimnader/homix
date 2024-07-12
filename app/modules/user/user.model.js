@@ -26,10 +26,16 @@ const User = sequelize.define(
       type: DataTypes.ENUM(USER_TYPES.ADMIN, USER_TYPES.USER),
       defaultValue: USER_TYPES.USER,
     },
+    removed: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
   },
   {
     tableName: "users",
     timestamps: true,
+    paranoid: true,
+    deletedAt: 'destroyTime',
   }
 );
 

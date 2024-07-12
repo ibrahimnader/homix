@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
 
-const Employee = sequelize.define(
-  "Employee",
+const Customer = sequelize.define(
+  "Customer",
   {
     firstName: {
       type: DataTypes.STRING,
@@ -20,17 +20,21 @@ const Employee = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
-    salary: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
+    address: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    shopifyId: {
+      type: DataTypes.STRING,
+      allowNull: true,
     },
   },
   {
-    tableName: "employees",
+    tableName: "customers",
     timestamps: true,
     paranoid: true,
     deletedAt: "destroyTime",
   }
 );
 
-module.exports = Employee;
+module.exports = Customer;

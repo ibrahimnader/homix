@@ -13,6 +13,8 @@ const Vendor = sequelize.define(
   {
     tableName: "vendors",
     timestamps: true,
+    paranoid: true,
+    deletedAt: 'destroyTime',
   }
 );
 module.exports = Vendor;

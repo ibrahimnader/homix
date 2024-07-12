@@ -28,6 +28,8 @@ const Product = sequelize.define(
   {
     tableName: "products",
     timestamps: true,
+    paranoid: true,
+    deletedAt: 'destroyTime',
   }
 );
 

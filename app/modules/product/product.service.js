@@ -2,39 +2,12 @@ const { where } = require("sequelize");
 const shopifyClient = require("../../../config/shopify");
 const VendorsService = require("../vendor/vendor.service");
 const Product = require("./product.model");
+const ShopifyHelper = require("../helpers/shopifyHelper");
 
 class productsService {
   static async importProducts() {
     const fields = ["id", "title", "vendor", "variants", "image"];
-    const query = {
-      limit: 250,
-      fields: fields.join(","),
-    };
-    const products = [];
-    let response = await shopifyClient.get({
-      path: `products`,
-      query,
-    });
-    let { body, pageInfo } = response;
-    products.push(...body.products);
-
-    while (
-      body.products.length > 0 &&
-      pageInfo.nextPage &&
-      pageInfo.nextPage.query &&
-      pageInfo.nextPage.query.page_info
-    ) {
-      query.page_info = pageInfo.nextPage.query.page_info;
-
-      response = await shopifyClient.get({
-        path: `products`,
-        query,
-      });
-
-      body = response.body;
-      pageInfo = response.pageInfo;
-      products.push(...body.products);
-    }
+    const products = await ShopifyHelper.importData("products", fields);
 
     const result = await productsService.saveImportedProducts(products);
     return result;
@@ -100,14 +73,18 @@ class productsService {
     };
   }
   static async getProducts(page = 1, size = 50) {
-    const products =  await Product.findAll({
+    const productsCount = await Product.count();
+    const products = await Product.findAll({
       offset: (page - 1) * size,
-      limit : size,
+      limit: size,
     });
     return {
       status: true,
       statusCode: 200,
-      data: products,
+      data: {
+        products,
+        totalPages: Math.ceil(productsCount / size),
+      },
     };
   }
 }

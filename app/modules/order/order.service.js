@@ -1,8 +1,10 @@
-const shopifyClient = require("../../../config/shopify");
+const ShopifyHelper = require("../helpers/shopifyHelper");
 
 class OrderService {
-  static async getOrders() {
-    const orders = await shopifyClient.get({ path: "orders" });
+  static async importOrders() {
+    const fields = [];
+    const orders = await ShopifyHelper.importData("orders", fields);
+
     console.log(11);
   }
 }

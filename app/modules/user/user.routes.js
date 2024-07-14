@@ -7,6 +7,6 @@ UserRouter.get("/", UserController.getAllUsers);
 UserRouter.get("/:id", UserController.getUser);
 UserRouter.put("/:id", UserController.editUser);
 UserRouter.post("/login", AuthController.login);
-UserRouter.post("/", AuthController.register);
+UserRouter.post("/", AuthController.addUser);
 
 module.exports = UserRouter;

@@ -2,6 +2,8 @@ const User = require("./user.model");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const { USER_TYPES } = require("../../../config/constants");
+const Vendor = require("../vendor/vendor.model");
+const { use } = require("./user.routes");
 
 class UserService {
   static async login(email, password) {
@@ -57,7 +59,7 @@ class UserService {
     }
   }
   // Register endpoint
-  static async register(body) {
+  static async addUser(body) {
     const { email, password } = body;
 
     // Check if email and password are provided
@@ -81,12 +83,15 @@ class UserService {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create new user
-    const test = {
+    const userObj = {
       ...body,
       password: hashedPassword,
     };
 
-    const newUser = await User.create(test);
+    const newUser = await User.create({
+      userObj,
+      userType: USER_TYPES.ADMIN,
+    });
     return {
       status: true,
       statusCode: 200,
@@ -154,7 +159,7 @@ class UserService {
   }
   static async getAllUsers() {
     try {
-      const users = await User.findAll()
+      const users = await User.findAll();
       return {
         status: true,
         statusCode: 200,
@@ -173,7 +178,7 @@ class UserService {
         firstName: vendor.name,
         userType: USER_TYPES.VENDOR,
         vendorId: vendor.id,
-      })
+      });
     });
     let vendorsUsers = await Promise.all(promises);
     return vendorsUsers;
@@ -209,18 +214,39 @@ class UserService {
       });
     }
   }
-  static async deleteUserForVendor(vendorId) {
-    const user = await User.findOne({
-      where: { vendorId },
-    });
-    if (user) {
-      await user.destroy();
+  static async changeActiveStatus(vendorId) {
+    const transaction = await Vendor.sequelize.transaction();
+    try {
+      const vendor = await Vendor.findOne({
+        where: { id: vendorId },
+      });
+      if (!vendor) {
+        return {
+          status: false,
+          statusCode: 404,
+          message: "Vendor not found",
+        };
+      }
+      const user = await User.findOne({
+        where: { vendorId },
+        paranoid: false,
+      });
+      if (user.deletedAt) {
+        await user.restore();
+      } else {
+        await user.destroy();
+      }
+
+      await transaction.commit();
+      return {
+        status: true,
+        statusCode: 200,
+        message: "Vendor active status changed successfully",
+      };
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
     }
-    return {
-      status: true,
-      statusCode: 200,
-      message: "Vendor deactivated successfully",
-    };
   }
 }
 

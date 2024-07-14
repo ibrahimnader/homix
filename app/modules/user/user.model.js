@@ -24,7 +24,7 @@ const User = sequelize.define(
     },
     userType: {
       type: DataTypes.ENUM(USER_TYPES.ADMIN, USER_TYPES.VENDOR),
-      defaultValue: USER_TYPES.ADMIN,
+      defaultValue: USER_TYPES.VENDOR,
     },
     vendorId: {
       type: DataTypes.INTEGER,

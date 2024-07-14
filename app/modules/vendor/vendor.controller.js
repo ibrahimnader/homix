@@ -10,10 +10,10 @@ class VendorsController {
       res.status(500).json({ message: error.message });
     }
   }
-  static async deleteUserForVendor(req, res) {
+  static async changeActiveStatus(req, res) {
     try {
       const { id } = req.params;
-      const response = await UserService.deleteUserForVendor(id);
+      const response = await UserService.changeActiveStatus(id);
       res.status(response.statusCode).json(response);
     } catch (error) {
       res.status(500).json({ message: error.message });

@@ -6,7 +6,7 @@ VendorRouter.get("/:id", VendorsController.getOneVendor);
 VendorRouter.post("/", VendorsController.createVendor);
 VendorRouter.put("/:id", VendorsController.updateVendor);
 VendorRouter.delete("/:id", VendorsController.deleteVendor);
-VendorRouter.put("/:id/deactivate", VendorsController.deleteUserForVendor);
+VendorRouter.put("/:id/activeStatus", VendorsController.changeActiveStatus);
 
 
 module.exports = VendorRouter;

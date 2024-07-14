@@ -3,6 +3,9 @@ const shopifyClient = require("../../../config/shopify");
 const VendorsService = require("../vendor/vendor.service");
 const Product = require("./product.model");
 const ShopifyHelper = require("../helpers/shopifyHelper");
+const Vendor = require("../vendor/vendor.model");
+const { Op } = require("sequelize");
+const { sequelize } = require("../../../config/db.config");
 
 class productsService {
   static async importProducts() {
@@ -55,10 +58,17 @@ class productsService {
       .map((product) => {
         return {
           title: product.title,
-          vendor: product.vendor,
           vendorId: vendorsMap.get(product.vendor),
           image: product.image ? product.image.src : null,
           shopifyId: String(product.id),
+          variants: product.variants.map((variant) => {
+            return {
+              title: variant.title,
+              price: variant.price,
+              sku: variant.sku,
+              shopifyId: String(variant.id),
+            };
+          }),
         };
       });
 
@@ -72,19 +82,52 @@ class productsService {
       statusCode: 200,
     };
   }
-  static async getProducts(page = 1, size = 50) {
-    const productsCount = await Product.count();
-    const products = await Product.findAll({
-      offset: (page - 1) * size,
-      limit: size,
+  static async getProducts(page = 1, size = 50, searchQuery = "") {
+    // search if product title contains search query or product vendor contains search query or product variant title contains search query
+    const products = await Product.findAndCountAll({
+      include: [
+        {
+          model: Vendor,
+          as: "vendor",
+          attributes: ["name"],
+        },
+      ],
+      where: {
+        [Op.or]: [
+          sequelize.where(sequelize.fn("lower", sequelize.col("title")), {
+            [Op.like]: `%${searchQuery.toLowerCase()}%`,
+          }),
+          sequelize.where(sequelize.fn("lower", sequelize.col("vendor.name")), {
+            [Op.like]: `%${searchQuery.toLowerCase()}%`,
+          }),
+        ],
+      },
+      limit: Number(size),
+      offset: (page - 1) * Number(size),
     });
     return {
       status: true,
       statusCode: 200,
       data: {
-        products,
-        totalPages: Math.ceil(productsCount / size),
+        products: products.rows,
+        totalPages: Math.ceil(products.count / Number(size)),
       },
+    };
+  }
+  static async getOneProduct(id) {
+    const product = await Product.findByPk(id, {
+      include: [
+        {
+          model: Vendor,
+          as: "vendor",
+          attributes: ["name"],
+        },
+      ],
+    });
+    return {
+      status: true,
+      statusCode: 200,
+      data: product,
     };
   }
 }

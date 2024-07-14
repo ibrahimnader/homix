@@ -20,23 +20,36 @@ const User = sequelize.define(
     },
     lastName: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     userType: {
-      type: DataTypes.ENUM(USER_TYPES.ADMIN, USER_TYPES.USER),
-      defaultValue: USER_TYPES.USER,
+      type: DataTypes.ENUM(USER_TYPES.ADMIN, USER_TYPES.VENDOR),
+      defaultValue: USER_TYPES.ADMIN,
     },
-    removed: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,
+    vendorId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
     },
   },
   {
     tableName: "users",
-    timestamps: true,
     paranoid: true,
-    deletedAt: 'destroyTime',
+    timestamps: true,
+    defaultScope: {
+      attributes: { exclude: ["password"] },
+    },
+    scopes: {
+      withPassword: {
+        attributes: {},
+      }
+    }
   }
 );
+
+User.prototype.toJSON = function () {
+  const values = { ...this.get() };
+  delete values.password;
+  return values;
+};
 
 module.exports = User;

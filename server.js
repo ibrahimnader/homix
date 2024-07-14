@@ -1,15 +1,12 @@
 require("dotenv").config();
-
+require("./config/db.config");
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const db = require("./config/db.config");
 const mainRouter = require("./config/routes");
 const { NotFoundError } = require("./app/middlewares/errors");
 const globalErrorHandler = require("./app/middlewares/errorhandler");
 require("./config/shopify");
-db.sequelize.sync();
-
 global.express = express;
 //create the express app
 const app = express();

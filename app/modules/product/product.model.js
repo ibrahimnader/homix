@@ -1,5 +1,6 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
+const Vendor = require("../vendor/vendor.model");
 
 const Product = sequelize.define(
   "Product",
@@ -9,11 +10,7 @@ const Product = sequelize.define(
       allowNull: false,
     },
     vendorId: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    vendor: {
-      type: DataTypes.STRING,
+      type: DataTypes.INTEGER,
       allowNull: false,
     },
     image: {
@@ -24,13 +21,19 @@ const Product = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    variants: {
+      type: DataTypes.JSON,
+      allowNull: true,
+    },
   },
   {
     tableName: "products",
     timestamps: true,
     paranoid: true,
-    deletedAt: 'destroyTime',
   }
 );
+
+Product.belongsTo(Vendor, { as: 'vendor', foreignKey: 'id' });
+
 
 module.exports = Product;

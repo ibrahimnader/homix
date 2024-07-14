@@ -1,6 +1,6 @@
 const USER_TYPES = {
   ADMIN: "1",
-  USER: "2",
+  VENDOR: "2",
 };
 
 module.exports = {

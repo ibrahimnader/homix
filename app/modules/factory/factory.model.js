@@ -53,7 +53,6 @@ const Factory = sequelize.define(
     tableName: "factories",
     timestamps: true,
     paranoid: true,
-    deletedAt: 'destroyTime',
   }
 );
 

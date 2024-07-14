@@ -1,6 +1,5 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
-
 const Vendor = sequelize.define(
   "Vendor",
   {
@@ -14,7 +13,6 @@ const Vendor = sequelize.define(
     tableName: "vendors",
     timestamps: true,
     paranoid: true,
-    deletedAt: 'destroyTime',
   }
 );
 module.exports = Vendor;

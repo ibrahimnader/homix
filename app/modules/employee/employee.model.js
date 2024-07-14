@@ -29,7 +29,6 @@ const Employee = sequelize.define(
     tableName: "employees",
     timestamps: true,
     paranoid: true,
-    deletedAt: "destroyTime",
   }
 );
 

@@ -24,6 +24,10 @@ const Customer = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    address2: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     shopifyId: {
       type: DataTypes.STRING,
       allowNull: true,

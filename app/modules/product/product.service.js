@@ -7,12 +7,16 @@ const Vendor = require("../vendor/vendor.model");
 const { Op } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
 
-class productsService {
-  static async importProducts() {
+class ProductsService {
+  static async importProducts(parameters) {
     const fields = ["id", "title", "vendor", "variants", "image"];
-    const products = await ShopifyHelper.importData("products", fields);
+    const products = await ShopifyHelper.importData(
+      "products",
+      fields,
+      parameters
+    );
 
-    const result = await productsService.saveImportedProducts(products);
+    const result = await ProductsService.saveImportedProducts(products);
     return result;
   }
   static async saveImportedProducts(products) {
@@ -72,13 +76,13 @@ class productsService {
         };
       });
 
-    await Product.bulkCreate(products, {
+    const importData = await Product.bulkCreate(products, {
       updateOnDuplicate: ["shopifyId"],
-      ignoreDuplicates: true,
     });
     return {
       status: true,
       message: "Products imported successfully",
+      data: importData,
       statusCode: 200,
     };
   }
@@ -130,5 +134,32 @@ class productsService {
       data: product,
     };
   }
+  static async getNonExistingProducts(productsIds) {}
+  static async getProductsMappedByShopifyIds(productsIds) {
+    const products = await Product.findAll({
+      where: {
+        shopifyId: productsIds,
+      },
+      attributes: ["shopifyId", "id"],
+    });
+    const result = {};
+    const existingShopifyIds = new Set();
+    for (const product of products) {
+      result[product.shopifyId] = product.id;
+      existingShopifyIds.add(product.shopifyId.toString());
+    }
+    const nonExistingProductsIds = productsIds.filter(
+      (id) => !existingShopifyIds.has(id.toString())
+    );
+    if (nonExistingProductsIds.length > 0) {
+      const res = await ProductsService.importProducts({
+        ids: nonExistingProductsIds.join(","),
+      });
+      for (const product of res.data) {
+        result[product.shopifyId] = product.id;
+      }
+    }
+    return result;
+  }
 }
-module.exports = productsService;
+module.exports = ProductsService;

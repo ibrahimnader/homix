@@ -2,7 +2,18 @@ const USER_TYPES = {
   ADMIN: "1",
   VENDOR: "2",
 };
+ORDER_STATUS = {
+  PENDING: 1,
+  IN_PROGRESS: 2,
+  REJECTED: 3,
+  COMPLETED: 4,
+  OUT_FOR_DELIVERY: 5,
+  DELIVERED: 6,
+  REFUNDED: 7,
+  CANCELLED: 8,
+};
 
 module.exports = {
-  USER_TYPES, 
+  USER_TYPES,
+  ORDER_STATUS,
 };

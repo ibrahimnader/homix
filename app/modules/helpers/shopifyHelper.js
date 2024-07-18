@@ -1,9 +1,10 @@
 const shopifyClient = require("../../../config/shopify");
 class ShopifyHelper {
-  static async importData(path, fields) {
+  static async importData(path, fields, parameters = {}) {
     const query = {
       limit: 250,
       fields: fields.join(","),
+      ...parameters,
     };
     const data = [];
     let response = await shopifyClient.get({

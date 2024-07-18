@@ -1,7 +1,8 @@
 const express = require("express");
-const OrderService = require("./order.service");
+const OrderController = require("./order.controller");
 const OrderRouter = express.Router();
 
-OrderRouter.post("/import", OrderService.importOrders);
+OrderRouter.post("/import", OrderController.importOrders);
+OrderRouter.get("/", OrderController.getOrders);
 
 module.exports = OrderRouter;

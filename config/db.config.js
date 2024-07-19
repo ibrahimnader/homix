@@ -5,12 +5,13 @@ const sequelize = new Sequelize(
   process.env.DB_PASSWORD,
   {
     host: process.env.DB_HOST,
-    dialect: "mysql",
-    pool: {
-      max: 5,
-      min: 0,
-      acquire: 30000,
-      idle: 10000,
+    dialect: process.env.DB_DIALECT,
+    logging : false,
+    dialectOptions: {
+      ssl: {
+        require: true,
+        rejectUnauthorized: false,
+      },
     },
   }
 );
@@ -18,9 +19,9 @@ const sequelize = new Sequelize(
 const db = {};
 async function testConnection() {
   try {
-    // sequelize.sync({ force: true }).then(() => {
-    //   console.log("Database & tables created!");
-    // });
+    sequelize.sync({ force: true }).then(() => {
+      console.log("Database & tables created!");
+    });
     await sequelize.authenticate();
     console.log("Database connected succefully");
   } catch (error) {

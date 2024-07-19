@@ -15,7 +15,5 @@ const Vendor = sequelize.define(
     paranoid: true,
   }
 );
-Vendor.associate = (models) => {
-  Vendor.hasMany(models.Product, { as: "products", foreignKey: "id" });
-};
+
 module.exports = Vendor;

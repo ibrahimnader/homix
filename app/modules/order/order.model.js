@@ -29,19 +29,25 @@ const Order = sequelize.define(
     totalPrice: {
       type: DataTypes.DECIMAL,
       allowNull: false,
+      defaultValue: 0,
     },
     totalDiscounts: {
       type: DataTypes.DECIMAL,
       allowNull: false,
+      defaultValue: 0,
     },
     orderDate: {
       type: DataTypes.DATE,
-      allowNull: false,
+      allowNull: true,
     },
     status: {
       type: DataTypes.INTEGER,
       allowNull: false,
       defaultValue: ORDER_STATUS.PENDING,
+    },
+    financialStatus: {
+      type: DataTypes.STRING,
+      allowNull: true,
     },
   },
   {
@@ -51,6 +57,7 @@ const Order = sequelize.define(
   }
 );
 
-Order.hasMany(OrderLine, { as: "lines", foreignKey: "orderId" });
+Order.hasMany(OrderLine, { as: "orderLines", foreignKey: "orderId" });
+OrderLine.belongsTo(Order, { as: "order", foreignKey: "orderId" });
 
 module.exports = Order;

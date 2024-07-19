@@ -6,14 +6,16 @@ const ProductsRouter = require("../app/modules/product/product.routes");
 const VendorRouter = require("../app/modules/vendor/vendor.routes");
 const EmployeeRouter = require("../app/modules/employee/employee.routes");
 const CustomerRouter = require("../app/modules/customer/customer.routes");
+const verifyToken = require("../app/middlewares/protectApi");
+const isAdmin = require("../app/middlewares/isAdmin");
 const mainRouter = express.Router({ mergeParams: true });
 
 mainRouter.use("/users", UserRouter);
-mainRouter.use("/factories", FactoryRouter);
-mainRouter.use("/orders", OrderRouter);
-mainRouter.use("/products", ProductsRouter);
-mainRouter.use("/vendors", VendorRouter);
-mainRouter.use("/employees", EmployeeRouter);
-mainRouter.use("/customers", CustomerRouter);
+mainRouter.use("/factories", verifyToken, isAdmin, FactoryRouter);
+mainRouter.use("/orders", verifyToken, OrderRouter);
+mainRouter.use("/products", verifyToken, ProductsRouter);
+mainRouter.use("/vendors", verifyToken, VendorRouter);
+mainRouter.use("/employees", verifyToken, isAdmin, EmployeeRouter);
+mainRouter.use("/customers", verifyToken, isAdmin, CustomerRouter);
 
 module.exports = mainRouter;

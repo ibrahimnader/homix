@@ -86,7 +86,7 @@ class ProductsService {
       statusCode: 200,
     };
   }
-  static async getProducts(page = 1, size = 50, searchQuery = "") {
+  static async getProducts(page = 1, size = 50, searchQuery = "", vendorId) {
     // search if product title contains search query or product vendor contains search query or product variant title contains search query
     const products = await Product.findAndCountAll({
       include: [
@@ -94,18 +94,25 @@ class ProductsService {
           model: Vendor,
           as: "vendor",
           attributes: ["name"],
+          where: vendorId ? { id: vendorId } : {},
+          required: true,
         },
       ],
-      where: {
-        [Op.or]: [
-          sequelize.where(sequelize.fn("lower", sequelize.col("title")), {
-            [Op.like]: `%${searchQuery.toLowerCase()}%`,
-          }),
-          sequelize.where(sequelize.fn("lower", sequelize.col("vendor.name")), {
-            [Op.like]: `%${searchQuery.toLowerCase()}%`,
-          }),
-        ],
-      },
+      where: searchQuery
+        ? {
+            [Op.or]: [
+              sequelize.where(sequelize.fn("lower", sequelize.col("title")), {
+                [Op.like]: `%${searchQuery.toLowerCase()}%`,
+              }),
+              sequelize.where(
+                sequelize.fn("lower", sequelize.col("vendor.name")),
+                {
+                  [Op.like]: `%${searchQuery.toLowerCase()}%`,
+                }
+              ),
+            ],
+          }
+        : {},
       limit: Number(size),
       offset: (page - 1) * Number(size),
     });

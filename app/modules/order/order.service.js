@@ -1,4 +1,4 @@
-const { Op } = require("sequelize");
+const { Op, where } = require("sequelize");
 const CustomerService = require("../customer/customer.service");
 const ShopifyHelper = require("../helpers/shopifyHelper");
 const OrderLine = require("../orderLines/orderline.model");
@@ -6,6 +6,7 @@ const Product = require("../product/product.model");
 const ProductsService = require("../product/product.service");
 const Order = require("./order.model");
 const { sequelize } = require("../../../config/db.config");
+const Vendor = require("../vendor/vendor.model");
 
 class OrderService {
   static async importOrders() {
@@ -19,7 +20,7 @@ class OrderService {
     for (const order of orders) {
       const products = order.line_items;
       for (const product of products) {
-        productsIds.add(product.product_id);
+        productsIds.add(String(product.product_id));
       }
     }
     const productsIdsMap = await ProductsService.getProductsMappedByShopifyIds([
@@ -95,35 +96,61 @@ class OrderService {
       message: "Orders imported successfully",
     };
   }
-  static async getOrders(page = 1, size = 50, searchQuery = "") {
-    const orders = await Order.findAndCountAll({
-      include: [
-        {
-          model: OrderLine,
-          as: "lines",
-          required: false,
-        },
-      ],
-      where: {
-        [Op.or]: [
-          sequelize.where(sequelize.fn("lower", sequelize.col("order.name")), {
-            [Op.like]: `%${searchQuery.toLowerCase()}%`,
-          }),
-          sequelize.where(sequelize.fn("lower", sequelize.col("number")), {
-            [Op.like]: `%${searchQuery.toLowerCase()}%`,
-          }),
-          sequelize.where(sequelize.fn("lower", sequelize.col("orderNumber")), {
-            [Op.like]: `%${searchQuery.toLowerCase()}%`,
-          }),
-          sequelize.where(
-            sequelize.literal(
-              `EXISTS (SELECT 1 FROM \`OrderLines\` AS \`lines\` WHERE \`lines\`.\`OrderId\` = \`Order\`.\`id\` AND \`lines\`.\`title\` LIKE '%${searchQuery.toLowerCase()}%')`
-            ),
-            true
-          ),
-        ],
-      },
+  static async getOrders({
+    page,
+    size,
+    vendorName,
+    vendorId,
+    orderNumber,
+    financialStatus,
+    status,
+  }) {
+    let whereClause = {};
 
+    if (orderNumber) {
+      whereClause[Op.or] = [
+        sequelize.where(sequelize.fn("lower", sequelize.col("order.name")), {
+          [Op.like]: `%${orderNumber.toLowerCase()}%`,
+        }),
+        sequelize.where(sequelize.fn("lower", sequelize.col("number")), {
+          [Op.like]: `%${orderNumber.toLowerCase()}%`,
+        }),
+        sequelize.where(sequelize.fn("lower", sequelize.col("orderNumber")), {
+          [Op.like]: `%${orderNumber.toLowerCase()}%`,
+        }),
+      ];
+    }
+
+    if (financialStatus) {
+      whereClause.financialStatus = { [Op.like]: `%${financialStatus}%` };
+    }
+    if (vendorName) {
+      whereClause["$orderLines.product.vendor.name$"] = {
+        [Op.like]: `%${vendorName}%`,
+      };
+    }
+    if (vendorId) {
+      whereClause["$orderLines.product.vendor.id$"] = vendorId;
+    }
+
+    if (status) {
+      whereClause.status = status;
+    }
+    const orders = await Order.findAndCountAll({
+      include: {
+        model: OrderLine,
+        required: true,
+        as: "orderLines",
+        include: {
+          model: Product,
+          as: "product",
+          include: {
+            model: Vendor,
+            as: "vendor",
+          },
+        },
+      },
+      where: whereClause,
       limit: Number(size),
       offset: (page - 1) * Number(size),
     });

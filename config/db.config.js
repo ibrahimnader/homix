@@ -1,3 +1,4 @@
+require("dotenv").config();
 const Sequelize = require("sequelize");
 const sequelize = new Sequelize(
   process.env.DB_NAME,
@@ -6,7 +7,7 @@ const sequelize = new Sequelize(
   {
     host: process.env.DB_HOST,
     dialect: process.env.DB_DIALECT,
-    logging : false,
+    logging: false,
     dialectOptions: {
       ssl: {
         require: true,
@@ -16,12 +17,15 @@ const sequelize = new Sequelize(
   }
 );
 
-const db = {};
 async function testConnection() {
   try {
-    sequelize.sync({ force: true }).then(() => {
-      console.log("Database & tables created!");
-    });
+    // await sequelize
+    //   .sync({
+    //     force: true,
+    //   })
+    //   .then(() => {
+    //     console.log("Database & tables created!");
+    //   });
     await sequelize.authenticate();
     console.log("Database connected succefully");
   } catch (error) {

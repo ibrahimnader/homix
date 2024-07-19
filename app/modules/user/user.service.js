@@ -3,7 +3,6 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const { USER_TYPES } = require("../../../config/constants");
 const Vendor = require("../vendor/vendor.model");
-const { use } = require("./user.routes");
 
 class UserService {
   static async login(email, password) {
@@ -42,7 +41,7 @@ class UserService {
 
       // Create JWT token
       const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
-        expiresIn: "1h",
+        expiresIn: "3d",
       });
 
       // Return the token
@@ -247,5 +246,6 @@ class UserService {
     }
   }
 }
+   
 
 module.exports = UserService;

@@ -35,5 +35,4 @@ const Product = sequelize.define(
 
 Product.belongsTo(Vendor, { as: 'vendor', foreignKey: 'vendorId' });
 
-
 module.exports = Product;

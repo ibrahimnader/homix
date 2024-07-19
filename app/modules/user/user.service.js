@@ -86,12 +86,10 @@ class UserService {
     const userObj = {
       ...body,
       password: hashedPassword,
+      userType: USER_TYPES.ADMIN,
     };
 
-    const newUser = await User.create({
-      userObj,
-      userType: USER_TYPES.ADMIN,
-    });
+    const newUser = await User.create(userObj);
     return {
       status: true,
       statusCode: 200,

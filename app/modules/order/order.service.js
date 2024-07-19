@@ -41,6 +41,14 @@ class OrderService {
     orders = orders
       .filter((order) => !existingShopifyIds.has(String(order.id)))
       .map((order) => {
+        order.line_items.forEach((line) => {
+          const discount_allocations = line.discount_allocations || [];
+          const lineDiscount = discount_allocations.reduce(
+            (acc, item) => acc + Number(item.amount),
+            0
+          );
+          line.discount = lineDiscount;
+        });
         lines.push({
           order_id: order.id,
           line_items: order.line_items,
@@ -75,7 +83,7 @@ class OrderService {
           quantity: line.quantity,
           sku: line.sku,
           variant_id: line.variant_id,
-          discount: line.total_discount,
+          discount: line.discount,
         });
       }
     }
@@ -108,7 +116,9 @@ class OrderService {
             [Op.like]: `%${searchQuery.toLowerCase()}%`,
           }),
           sequelize.where(
-            sequelize.literal(`EXISTS (SELECT 1 FROM \`OrderLines\` AS \`lines\` WHERE \`lines\`.\`OrderId\` = \`Order\`.\`id\` AND \`lines\`.\`title\` LIKE '%${searchQuery.toLowerCase()}%')`),
+            sequelize.literal(
+              `EXISTS (SELECT 1 FROM \`OrderLines\` AS \`lines\` WHERE \`lines\`.\`OrderId\` = \`Order\`.\`id\` AND \`lines\`.\`title\` LIKE '%${searchQuery.toLowerCase()}%')`
+            ),
             true
           ),
         ],

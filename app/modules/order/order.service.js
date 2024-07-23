@@ -7,6 +7,7 @@ const ProductsService = require("../product/product.service");
 const Order = require("./order.model");
 const { sequelize } = require("../../../config/db.config");
 const Vendor = require("../vendor/vendor.model");
+const Customer = require("../customer/customer.model");
 
 class OrderService {
   static async importOrders() {
@@ -26,7 +27,10 @@ class OrderService {
     const productsIdsMap = await ProductsService.getProductsMappedByShopifyIds([
       ...productsIds,
     ]);
-
+    const customersIdsMap =
+      await CustomerService.getCustomersMappedByShopifyIds(
+        orders.map((order) => order.customer.id.toString())
+      );
     const existingOrders = await Order.findAll({
       where: {
         shopifyId: orders.map((order) => String(order.id)),
@@ -38,7 +42,6 @@ class OrderService {
       existingShopifyIds.add(order.shopifyId);
     }
     const lines = [];
-    const customers = [];
     orders = orders
       .filter((order) => !existingShopifyIds.has(String(order.id)))
       .map((order) => {
@@ -54,7 +57,6 @@ class OrderService {
           order_id: order.id,
           line_items: order.line_items,
         });
-        customers.push(order.customer);
         return {
           shopifyId: String(order.id),
           name: order.name,
@@ -64,8 +66,10 @@ class OrderService {
           totalPrice: order.total_price,
           totalDiscounts: order.total_discounts,
           orderDate: order.created_at,
+          customerId: customersIdsMap[order.customer.id.toString()],
         };
       });
+
     const result = await Order.bulkCreate(orders);
     const savedOrders = result.map((order) => order.toJSON());
     const orderLines = [];
@@ -89,7 +93,6 @@ class OrderService {
       }
     }
     await OrderLine.bulkCreate(orderLines);
-    await CustomerService.saveCustomers(customers);
     return {
       status: true,
       statusCode: 200,
@@ -109,7 +112,7 @@ class OrderService {
 
     if (orderNumber) {
       whereClause[Op.or] = [
-        sequelize.where(sequelize.fn("lower", sequelize.col("order.name")), {
+        sequelize.where(sequelize.fn("lower", sequelize.col("Order.name")), {
           [Op.like]: `%${orderNumber.toLowerCase()}%`,
         }),
         sequelize.where(sequelize.fn("lower", sequelize.col("number")), {
@@ -137,19 +140,25 @@ class OrderService {
       whereClause.status = status;
     }
     const orders = await Order.findAndCountAll({
-      include: {
-        model: OrderLine,
-        required: true,
-        as: "orderLines",
-        include: {
-          model: Product,
-          as: "product",
+      include: [
+        {
+          model: OrderLine,
+          required: true,
+          as: "orderLines",
           include: {
-            model: Vendor,
-            as: "vendor",
+            model: Product,
+            as: "product",
+            include: {
+              model: Vendor,
+              as: "vendor",
+            },
           },
         },
-      },
+        {
+          model: Customer,
+          as: "customer",
+        },
+      ],
       where: whereClause,
       limit: Number(size),
       offset: (page - 1) * Number(size),

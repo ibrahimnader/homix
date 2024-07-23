@@ -2,7 +2,18 @@ const ShopifyHelper = require("../helpers/shopifyHelper");
 const Customer = require("./customer.model");
 
 class CustomerService {
-  static async saveCustomers(customers) {
+  static async importCustomers(parameters) {
+    const fields = [];
+    const customers = await ShopifyHelper.importData(
+      "customers",
+      fields,
+      parameters
+    );
+
+    const result = await CustomerService.saveImportedCustomers(customers);
+    return result;
+  }
+  static async saveImportedCustomers(customers) {
     const existingCustomers = await Customer.findAll({
       where: {
         shopifyId: customers.map((customer) => String(customer.id)),
@@ -11,8 +22,9 @@ class CustomerService {
     });
     const existingShopifyIds = new Set();
     for (const customer of existingCustomers) {
-      existingShopifyIds.add(customer.shopifyId);
+      existingShopifyIds.add(product.shopifyId);
     }
+
     customers = customers
       .filter((customer) => !existingShopifyIds.has(String(customer.id)))
       .map((customer) => {
@@ -26,10 +38,41 @@ class CustomerService {
           address2: customer.default_address.address2,
         };
       });
-    if (customers.length === 0) {
-      return [];
+
+    const importData = await Customer.bulkCreate(customers, {
+      updateOnDuplicate: ["shopifyId"],
+    });
+    return {
+      status: true,
+      message: "Customers imported successfully",
+      data: importData,
+      statusCode: 200,
+    };
+  }
+  static async getCustomersMappedByShopifyIds(customersIds) {
+    const customers = await Customer.findAll({
+      where: {
+        shopifyId: customersIds,
+      },
+      attributes: ["shopifyId", "id"],
+    });
+    const result = {};
+    const existingShopifyIds = new Set();
+    for (const customer of customers) {
+      result[customer.shopifyId] = customer.id;
+      existingShopifyIds.add(customer.shopifyId.toString());
     }
-    const result = await Customer.bulkCreate(customers);
+    const nonExistingCustomersIds = customersIds.filter(
+      (id) => !existingShopifyIds.has(id.toString())
+    );
+    if (nonExistingCustomersIds.length > 0) {
+      const res = await CustomerService.importCustomers({
+        ids: nonExistingCustomersIds.join(","),
+      });
+      for (const customer of res.data) {
+        result[customer.shopifyId.toString()] = customer.id;
+      }
+    }
     return result;
   }
 }

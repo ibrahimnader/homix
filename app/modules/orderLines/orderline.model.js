@@ -45,6 +45,10 @@ const OrderLine = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
     },
+    cost: {
+      type: DataTypes.DECIMAL,
+      allowNull: false,
+    },
   },
   {
     tableName: "orderLines",

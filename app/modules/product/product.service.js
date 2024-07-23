@@ -141,7 +141,6 @@ class ProductsService {
       data: product,
     };
   }
-  static async getNonExistingProducts(productsIds) {}
   static async getProductsMappedByShopifyIds(productsIds) {
     const products = await Product.findAll({
       where: {

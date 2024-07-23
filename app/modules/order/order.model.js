@@ -2,6 +2,7 @@ const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
 const { ORDER_STATUS } = require("../../../config/constants");
 const OrderLine = require("../orderLines/orderline.model");
+const Customer = require("../customer/customer.model");
 
 const Order = sequelize.define(
   "Order",
@@ -15,7 +16,7 @@ const Order = sequelize.define(
       allowNull: false,
     },
     number: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.STRING,
       allowNull: false,
     },
     orderNumber: {
@@ -49,6 +50,15 @@ const Order = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    customerId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    totalCost: {
+      type: DataTypes.DECIMAL,
+      allowNull: false,
+      defaultValue: 0,
+    },
   },
   {
     tableName: "orders",
@@ -59,5 +69,14 @@ const Order = sequelize.define(
 
 Order.hasMany(OrderLine, { as: "orderLines", foreignKey: "orderId" });
 OrderLine.belongsTo(Order, { as: "order", foreignKey: "orderId" });
+Order.hasOne(Customer, { as: "customer", foreignKey: "id" });
+Customer.hasMany(Order, { as: "order", foreignKey: "customerId" });
+Order.sync({
+  alter: true,
+})
+  .then((result) => {
+    console.log(result);
+  })
+  .catch((err) => {});
 
 module.exports = Order;

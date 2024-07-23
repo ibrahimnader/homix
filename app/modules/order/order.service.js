@@ -144,19 +144,26 @@ class OrderService {
         {
           model: OrderLine,
           required: true,
+          duplicating: false,
           as: "orderLines",
           include: {
             model: Product,
             as: "product",
+            required: true,
+            duplicating: false,
             include: {
               model: Vendor,
               as: "vendor",
+              required: true,
+              duplicating: false,
             },
           },
         },
         {
           model: Customer,
           as: "customer",
+          required: true,
+          duplicating: false,
         },
       ],
       where: whereClause,

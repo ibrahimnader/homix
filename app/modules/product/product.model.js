@@ -34,5 +34,6 @@ const Product = sequelize.define(
 );
 
 Product.belongsTo(Vendor, { as: 'vendor', foreignKey: 'vendorId' });
+Vendor.hasMany(Product, { as: 'product', foreignKey: 'vendorId' });
 
 module.exports = Product;

@@ -19,7 +19,8 @@ const OrderLine = sequelize.define(
     },
     price: {
       type: DataTypes.DECIMAL,
-      allowNull: false,
+      allowNull: true,
+      defaultValue: 0,
     },
     quantity: {
       type: DataTypes.INTEGER,
@@ -35,7 +36,8 @@ const OrderLine = sequelize.define(
     },
     discount: {
       type: DataTypes.DECIMAL,
-      allowNull: false,
+      allowNull: true,
+      defaultValue: 0,
     },
     title: {
       type: DataTypes.STRING,
@@ -47,7 +49,8 @@ const OrderLine = sequelize.define(
     },
     cost: {
       type: DataTypes.DECIMAL,
-      allowNull: false,
+      allowNull: true,
+      defaultValue: 0,
     },
   },
   {
@@ -60,4 +63,5 @@ const OrderLine = sequelize.define(
 OrderLine.hasOne(Product, { as: "product", foreignKey: "id" });
 Product.hasMany(OrderLine, { as: "orderLines", foreignKey: "productId" });
 
+OrderLine.sync({ alter: true });
 module.exports = OrderLine;

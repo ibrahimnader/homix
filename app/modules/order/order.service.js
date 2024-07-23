@@ -153,17 +153,9 @@ class OrderService {
     }
     if (vendorId) {
       whereClause[Op.or].push(
-        sequelize.where(
-          sequelize.fn(
-            "lower",
-            sequelize
-              .col("orderLines.product.vendor.id")
-              .cast(sequelize.Sequelize.STRING)
-          ),
-          {
-            [Op.eq]: `%${String(vendorId).toLowerCase()}%`,
-          }
-        )
+        sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
+          [Op.eq]: vendorId,
+        })
       );
     }
 

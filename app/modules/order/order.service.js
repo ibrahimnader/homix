@@ -144,18 +144,15 @@ class OrderService {
         {
           model: OrderLine,
           required: true,
-          duplicating: false,
           as: "orderLines",
           include: {
             model: Product,
             as: "product",
             required: true,
-            duplicating: false,
             include: {
               model: Vendor,
               as: "vendor",
               required: true,
-              duplicating: false,
             },
           },
         },
@@ -163,12 +160,12 @@ class OrderService {
           model: Customer,
           as: "customer",
           required: true,
-          duplicating: false,
         },
       ],
       where: whereClause,
       limit: Number(size),
       offset: (page - 1) * Number(size),
+      subQuery: false,
     });
     return {
       status: true,

@@ -109,25 +109,30 @@ class OrderService {
     status,
   }) {
     let whereClause = {
-      [Op.or]: [],
+      [Op.and]: [],
     };
 
     if (orderNumber) {
-      whereClause[Op.or].push(
-        sequelize.where(sequelize.fn("lower", sequelize.col("Order.name")), {
-          [Op.like]: `%${orderNumber.toLowerCase()}%`,
-        }),
-        sequelize.where(sequelize.fn("lower", sequelize.col("number")), {
-          [Op.like]: `%${orderNumber.toLowerCase()}%`,
-        }),
-        sequelize.where(sequelize.fn("lower", sequelize.col("orderNumber")), {
-          [Op.like]: `%${orderNumber.toLowerCase()}%`,
-        })
+      
+      whereClause[Op.and].push(
+        {
+          [Op.or]: [
+            sequelize.where(sequelize.fn("lower", sequelize.col("Order.name")), {
+              [Op.like]: `%${orderNumber.toLowerCase()}%`,
+            }),
+            sequelize.where(sequelize.fn("lower", sequelize.col("number")), {
+              [Op.like]: `%${orderNumber.toLowerCase()}%`,
+            }),
+            sequelize.where(sequelize.fn("lower", sequelize.col("orderNumber")), {
+              [Op.like]: `%${orderNumber.toLowerCase()}%`,
+            }),
+          ],
+        }
       );
     }
 
     if (financialStatus) {
-      whereClause[Op.or].push(
+      whereClause[Op.and].push(
         sequelize.where(
           sequelize
             .fn("lower", sequelize.col("financialStatus"))
@@ -139,7 +144,7 @@ class OrderService {
       );
     }
     if (vendorName) {
-      whereClause[Op.or].push(
+      whereClause[Op.and].push(
         sequelize.where(
           sequelize.fn(
             "lower",
@@ -152,7 +157,7 @@ class OrderService {
       );
     }
     if (vendorId) {
-      whereClause[Op.or].push(
+      whereClause[Op.and].push(
         sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
           [Op.eq]: vendorId,
         })
@@ -160,13 +165,13 @@ class OrderService {
     }
 
     if (status) {
-      whereClause[Op.or].push(
+      whereClause[Op.and].push(
         sequelize.where(sequelize.col("status"), {
           [Op.eq]: status,
         })
       );
     }
-    whereClause = whereClause[Op.or].length ? whereClause : {};
+    whereClause = whereClause[Op.and].length ? whereClause : {};
     const orders = await Order.findAndCountAll({
       include: [
         {

@@ -29,6 +29,14 @@ class productsController {
       return next(new AppError(error.message, 500));
     }
   }
+  static async createProduct(req, res, next) {
+    try {
+      const result = await productsService.createProduct(req.body);
+      res.status(result.statusCode).json(result);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
 }
 
 module.exports = productsController;

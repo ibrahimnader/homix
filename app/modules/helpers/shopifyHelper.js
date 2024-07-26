@@ -35,5 +35,43 @@ class ShopifyHelper {
 
     return data;
   }
+  static async createWebhooks() {
+    const webhooks = await shopifyClient.get({
+      path: "webhooks",
+    });
+
+    for (const webhook of webhooks.body.webhooks) {
+      await shopifyClient.delete({
+        path: `webhooks/${webhook.id}`,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+    }
+    await Promise.all([
+      shopifyClient.post({
+        path: "webhooks",
+        data: {
+          webhook: {
+            topic: "orders/create",
+            address:`${process.env.APP_URL}/`,
+            format: "json",
+          },
+        },
+        type: "application/json",
+      }),
+      shopifyClient.post({
+        path: "webhooks",
+        data: {
+          webhook: {
+            topic: "orders/create",
+            address: `${process.env.APP_URL}/`,
+            format: "json",
+          },
+        },
+        type: "application/json",
+      }),
+    ]);
+  }
 }
 module.exports = ShopifyHelper;

@@ -167,5 +167,30 @@ class ProductsService {
     }
     return result;
   }
+  static async createProduct(productData) {
+    let vendor = await VendorsService.getVendorByNameAndSaveIfNotExist(
+      productData.vendor
+    );
+    const product = await Product.create({
+      title: product.title,
+      vendorId: vendor.id,
+      image: product.image ? product.image.src : null,
+      shopifyId: String(product.id),
+      variants: product.variants.map((variant) => {
+        return {
+          title: variant.title,
+          price: variant.price,
+          sku: variant.sku,
+          shopifyId: String(variant.id),
+        };
+      }),
+    });
+    return {
+      status: true,
+      message: "Product created successfully",
+      data: product,
+      statusCode: 200,
+    };
+  }
 }
 module.exports = ProductsService;

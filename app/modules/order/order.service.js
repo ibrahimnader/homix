@@ -237,5 +237,58 @@ class OrderService {
       data: order,
     };
   }
+  static async createOrder(orderData) {
+    const lines = [];
+    const productsIdsMap = await ProductsService.getProductsMappedByShopifyIds([
+      ...orderData.orderLines.map((line) => line.productId),
+    ]);
+    const customersIdsMap =
+      await CustomerService.getCustomersMappedByShopifyIds([
+        orderData.customer,
+      ]);
+    order.line_items.forEach((line) => {
+      const discount_allocations = line.discount_allocations || [];
+      const lineDiscount = discount_allocations.reduce(
+        (acc, item) => acc + Number(item.amount),
+        0
+      );
+      line.discount = lineDiscount;
+    });
+    lines.push(order.line_items);
+
+    const order = await Order.create({
+      shopifyId: String(order.id),
+      name: order.name,
+      number: order.number,
+      orderNumber: order.order_number,
+      subTotalPrice: order.subtotal_price,
+      totalPrice: order.total_price,
+      totalDiscounts: order.total_discounts,
+      orderDate: order.created_at,
+      customerId: customersIdsMap[order.customer.id.toString()],
+    });
+    const orderLines = [];
+
+    for (const line of lines) {
+      orderLines.push({
+        orderId: order.id,
+        productId: productsIdsMap[line.product_id],
+        shopifyId: String(line.id),
+        title: line.title,
+        name: line.name,
+        price: line.price,
+        quantity: line.quantity,
+        sku: line.sku,
+        variant_id: line.variant_id,
+        discount: line.discount,
+      });
+    }
+    await OrderLine.bulkCreate(orderLines);
+    return {
+      status: true,
+      statusCode: 201,
+      data: order,
+    };
+  }
 }
 module.exports = OrderService;

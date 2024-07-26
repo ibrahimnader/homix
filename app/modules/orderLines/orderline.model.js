@@ -62,6 +62,4 @@ const OrderLine = sequelize.define(
 
 OrderLine.hasOne(Product, { as: "product", foreignKey: "id" });
 Product.hasMany(OrderLine, { as: "orderLines", foreignKey: "productId" });
-
-OrderLine.sync({ alter: true });
 module.exports = OrderLine;

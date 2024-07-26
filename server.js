@@ -12,6 +12,7 @@ global.express = express;
 const app = express();
 
 const fileUpload = require("express-fileupload");
+const ShopifyHelper = require("./app/modules/helpers/shopifyHelper");
 
 const GB4 = 4 * 1024 * 1024;
 
@@ -46,11 +47,7 @@ app.use((error, req, res, next) => {
   return next();
 });
 
-//event emiter
 
-const EventEmitter = require("events");
-
-global.bus = new EventEmitter();
 
 app.disable("etag");
 //set the port
@@ -71,8 +68,9 @@ app.all("*", (req, res, next) => {
 app.use(globalErrorHandler);
 
 
-app.listen(port, () => {
+app.listen(port, async() => {
   console.log(`running at port ${port}`);
+  await ShopifyHelper.createWebhooks();
 });
 
 module.exports = app;

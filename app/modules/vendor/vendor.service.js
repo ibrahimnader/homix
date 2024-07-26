@@ -73,7 +73,7 @@ class VendorsService {
     await UserService.updateVendorUser(id, data);
 
     return {
-      status: true, 
+      status: true,
       data: updatedVendor,
       message: "Vendor updated successfully",
       statusCode: 200,
@@ -88,6 +88,19 @@ class VendorsService {
     });
 
     return vendors;
+  }
+  static async getVendorByNameAndSaveIfNotExist(name) {
+    let vendor = await Vendor.findOne({
+      where: {
+        name,
+      },
+    });
+    if (!vendor) {
+      vendor = await Vendor.create({
+        name,
+      });
+    }
+    return vendor.toJSON();
   }
   static async saveVendors(names) {
     // save new vendors to the database

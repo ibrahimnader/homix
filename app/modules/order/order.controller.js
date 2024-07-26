@@ -2,6 +2,14 @@ const { AppError } = require("../../middlewares/errors");
 const OrderService = require("./order.service");
 
 class OrderController {
+  static async createOrder(req, res, next) {
+    try {
+      const result = await OrderService.createOrder(req.body);
+      res.status(result.statusCode).json(result);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
   static async importOrders(req, res, next) {
     try {
       const result = await OrderService.importOrders();

@@ -32,8 +32,8 @@ class CustomerService {
           shopifyId: String(customer.id),
           firstName: customer.default_address.first_name,
           lastName: customer.default_address.last_name,
-          email: customer.email,
-          phoneNumber: customer.phone,
+          email: customer.email || customer.default_address.email,
+          phoneNumber: customer.phone || customer.default_address.phone,
           address: customer.default_address.address1,
           address2: customer.default_address.address2,
         };
@@ -80,8 +80,8 @@ class CustomerService {
         shopifyId: String(customer.id),
         firstName: customer.default_address.first_name,
         lastName: customer.default_address.last_name,
-        email: customer.email,
-        phoneNumber: customer.phone,
+        email: customer.email || customer.default_address.email,
+        phoneNumber: customer.phone || customer.default_address.phone,
         address: customer.default_address.address1,
         address2: customer.default_address.address2,
       };

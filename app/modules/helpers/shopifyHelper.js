@@ -54,7 +54,7 @@ class ShopifyHelper {
         data: {
           webhook: {
             topic: "orders/create",
-            address:`${process.env.APP_URL}/`,
+            address:`${process.env.APP_URL}/orders`,
             format: "json",
           },
         },
@@ -65,7 +65,7 @@ class ShopifyHelper {
         data: {
           webhook: {
             topic: "orders/create",
-            address: `${process.env.APP_URL}/`,
+            address: `${process.env.APP_URL}/products`,
             format: "json",
           },
         },

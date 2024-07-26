@@ -238,15 +238,14 @@ class OrderService {
     };
   }
   static async createOrder(orderData) {
-    const lines = [];
-    const productsIdsMap = await ProductsService.getProductsMappedByShopifyIds([
-      ...orderData.orderLines.map((line) => line.productId),
-    ]);
+    const productsIdsMap = await ProductsService.getProductsMappedByShopifyIds(
+      orderData.line_items.map((line) => line.product_id.toString())
+    );
     const customersIdsMap =
       await CustomerService.getCustomersMappedByShopifyIds([
         orderData.customer,
       ]);
-    order.line_items.forEach((line) => {
+    orderData.line_items.forEach((line) => {
       const discount_allocations = line.discount_allocations || [];
       const lineDiscount = discount_allocations.reduce(
         (acc, item) => acc + Number(item.amount),
@@ -254,22 +253,21 @@ class OrderService {
       );
       line.discount = lineDiscount;
     });
-    lines.push(order.line_items);
 
     const order = await Order.create({
-      shopifyId: String(order.id),
-      name: order.name,
-      number: order.number,
-      orderNumber: order.order_number,
-      subTotalPrice: order.subtotal_price,
-      totalPrice: order.total_price,
-      totalDiscounts: order.total_discounts,
-      orderDate: order.created_at,
-      customerId: customersIdsMap[order.customer.id.toString()],
+      shopifyId: String(orderData.id),
+      name: orderData.name,
+      number: orderData.number,
+      orderNumber: orderData.order_number,
+      subTotalPrice: orderData.subtotal_price,
+      totalPrice: orderData.total_price,
+      totalDiscounts: orderData.total_discounts,
+      orderDate: orderData.created_at,
+      customerId: customersIdsMap[orderData.customer.id.toString()],
     });
     const orderLines = [];
 
-    for (const line of lines) {
+    for (const line of orderData.line_items) {
       orderLines.push({
         orderId: order.id,
         productId: productsIdsMap[line.product_id],

@@ -32,11 +32,10 @@ class productsController {
   static async createProduct(req, res, next) {
     try {
       const result = await productsService.createProduct(req.body);
-      console.log(result);
       res.status(result.statusCode).json(result);
     } catch (error) {
-      return next(new AppError(error.message, 500));
       console.log(error);
+      return next(new AppError(error.message, 500));
     }
   }
 }

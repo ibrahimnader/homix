@@ -64,7 +64,7 @@ class ShopifyHelper {
         path: "webhooks",
         data: {
           webhook: {
-            topic: "orders/create",
+            topic: "products/create",
             address: `${process.env.APP_URL}/products`,
             format: "json",
           },

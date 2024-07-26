@@ -168,11 +168,9 @@ class ProductsService {
     return result;
   }
   static async createProduct(productData) {
-    console.log(productData);
     let vendor = await VendorsService.getVendorByNameAndSaveIfNotExist(
       productData.vendor
     );
-    console.log(vendor);
     const product = await Product.create({
       title: productData.title,
       vendorId: vendor.id,
@@ -187,7 +185,6 @@ class ProductsService {
         };
       }),
     });
-    console.log(product);
     return {
       status: true,
       message: "Product created successfully",

@@ -64,7 +64,7 @@ class CustomerService {
       existingShopifyIds.add(customer.shopifyId.toString());
     }
     const nonExistingCustomers = customers.filter(
-      customer => !existingShopifyIds.has(customer.id.toString())
+      (customer) => !existingShopifyIds.has(customer.id.toString())
     );
     if (nonExistingCustomers.length > 0) {
       const res = await CustomerService.saveCustomers(nonExistingCustomers);
@@ -78,12 +78,16 @@ class CustomerService {
     customers = customers.map((customer) => {
       return {
         shopifyId: String(customer.id),
-        firstName: customer.default_address.first_name,
-        lastName: customer.default_address.last_name,
+        firstName: customer.first_name || default_address.first_name,
+        lastName: customer.last_name || default_address.last_name,
         email: customer.email || customer.default_address.email,
         phoneNumber: customer.phone || customer.default_address.phone,
-        address: customer.default_address.address1,
-        address2: customer.default_address.address2,
+        address: customer.default_address
+          ? customer.default_address.address1
+          : "",
+        address2: customer.default_address
+          ? customer.default_address.address2
+          : "",
       };
     });
     const result = await Customer.bulkCreate(customers);

@@ -33,7 +33,7 @@ class CustomerService {
           firstName: customer.default_address.first_name,
           lastName: customer.default_address.last_name,
           email: customer.email,
-          phone: customer.phone,
+          phoneNumber: customer.phone,
           address: customer.default_address.address1,
           address2: customer.default_address.address2,
         };
@@ -49,8 +49,9 @@ class CustomerService {
       statusCode: 200,
     };
   }
-  static async getCustomersMappedByShopifyIds(customersIds) {
-    const customers = await Customer.findAll({
+  static async getCustomersMappedByShopifyIds(customers) {
+    const customersIds = customers.map((customer) => customer.id.toString());
+    const customersFromDB = await Customer.findAll({
       where: {
         shopifyId: customersIds,
       },
@@ -58,22 +59,35 @@ class CustomerService {
     });
     const result = {};
     const existingShopifyIds = new Set();
-    for (const customer of customers) {
+    for (const customer of customersFromDB) {
       result[customer.shopifyId] = customer.id;
       existingShopifyIds.add(customer.shopifyId.toString());
     }
-    const nonExistingCustomersIds = customersIds.filter(
-      (id) => !existingShopifyIds.has(id.toString())
+    const nonExistingCustomers = customers.filter(
+      customer => !existingShopifyIds.has(customer.id.toString())
     );
-    if (nonExistingCustomersIds.length > 0) {
-      const res = await CustomerService.importCustomers({
-        ids: nonExistingCustomersIds.join(","),
-      });
-      for (const customer of res.data) {
+    if (nonExistingCustomers.length > 0) {
+      const res = await CustomerService.saveCustomers(nonExistingCustomers);
+      for (const customer of res) {
         result[customer.shopifyId.toString()] = customer.id;
       }
     }
     return result;
+  }
+  static async saveCustomers(customers) {
+    customers = customers.map((customer) => {
+      return {
+        shopifyId: String(customer.id),
+        firstName: customer.default_address.first_name,
+        lastName: customer.default_address.last_name,
+        email: customer.email,
+        phoneNumber: customer.phone,
+        address: customer.default_address.address1,
+        address2: customer.default_address.address2,
+      };
+    });
+    const result = await Customer.bulkCreate(customers);
+    return result.map((customer) => customer.toJSON());
   }
 }
 module.exports = CustomerService;

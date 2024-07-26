@@ -36,5 +36,14 @@ class OrderController {
       return next(new AppError(error.message, 500));
     }
   }
+  static async getOneOrder(req, res, next) {
+    try {
+      const { orderId } = req.params;
+      const result = await OrderService.getOneOrder(orderId);
+      res.status(result.statusCode).json(result);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
 }
 module.exports = OrderController;

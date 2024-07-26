@@ -29,7 +29,7 @@ class OrderService {
     ]);
     const customersIdsMap =
       await CustomerService.getCustomersMappedByShopifyIds(
-        orders.map((order) => order.customer.id.toString())
+        orders.map((order) => order.customer)
       );
     const existingOrders = await Order.findAll({
       where: {
@@ -113,22 +113,19 @@ class OrderService {
     };
 
     if (orderNumber) {
-      
-      whereClause[Op.and].push(
-        {
-          [Op.or]: [
-            sequelize.where(sequelize.fn("lower", sequelize.col("Order.name")), {
-              [Op.like]: `%${orderNumber.toLowerCase()}%`,
-            }),
-            sequelize.where(sequelize.fn("lower", sequelize.col("number")), {
-              [Op.like]: `%${orderNumber.toLowerCase()}%`,
-            }),
-            sequelize.where(sequelize.fn("lower", sequelize.col("orderNumber")), {
-              [Op.like]: `%${orderNumber.toLowerCase()}%`,
-            }),
-          ],
-        }
-      );
+      whereClause[Op.and].push({
+        [Op.or]: [
+          sequelize.where(sequelize.fn("lower", sequelize.col("Order.name")), {
+            [Op.like]: `%${orderNumber.toLowerCase()}%`,
+          }),
+          sequelize.where(sequelize.fn("lower", sequelize.col("number")), {
+            [Op.like]: `%${orderNumber.toLowerCase()}%`,
+          }),
+          sequelize.where(sequelize.fn("lower", sequelize.col("orderNumber")), {
+            [Op.like]: `%${orderNumber.toLowerCase()}%`,
+          }),
+        ],
+      });
     }
 
     if (financialStatus) {
@@ -207,6 +204,37 @@ class OrderService {
         orders: orders.rows,
         totalPages: Math.ceil(orders.count / Number(size)),
       },
+    };
+  }
+  static async getOneOrder(orderId) {
+    const order = await Order.findByPk(orderId, {
+      include: [
+        {
+          model: OrderLine,
+          required: true,
+          as: "orderLines",
+          include: {
+            model: Product,
+            as: "product",
+            required: true,
+            include: {
+              model: Vendor,
+              as: "vendor",
+              required: true,
+            },
+          },
+        },
+        {
+          model: Customer,
+          as: "customer",
+          required: true,
+        },
+      ],
+    });
+    return {
+      status: true,
+      statusCode: 200,
+      data: order,
     };
   }
 }

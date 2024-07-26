@@ -12,8 +12,8 @@ const mainRouter = express.Router({ mergeParams: true });
 
 mainRouter.use("/users", UserRouter);
 mainRouter.use("/factories", verifyToken, isAdmin, FactoryRouter);
-mainRouter.use("/orders", verifyToken, OrderRouter);
-mainRouter.use("/products", verifyToken, ProductsRouter);
+mainRouter.use("/orders", OrderRouter);
+mainRouter.use("/products", ProductsRouter);
 mainRouter.use("/vendors", verifyToken, VendorRouter);
 mainRouter.use("/employees", verifyToken, isAdmin, EmployeeRouter);
 mainRouter.use("/customers", verifyToken, isAdmin, CustomerRouter);

@@ -72,6 +72,7 @@ class ShopifyHelper {
         type: "application/json",
       }),
     ]);
+    console.log("Webhooks created successfully");
   }
 }
 module.exports = ShopifyHelper;

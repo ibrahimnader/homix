@@ -174,11 +174,11 @@ class ProductsService {
     );
     console.log(vendor);
     const product = await Product.create({
-      title: product.title,
+      title: productData.title,
       vendorId: vendor.id,
-      image: product.image ? product.image.src : null,
-      shopifyId: String(product.id),
-      variants: product.variants.map((variant) => {
+      image: productData.image ? productData.image.src : null,
+      shopifyId: String(productData.id),
+      variants: productData.variants.map((variant) => {
         return {
           title: variant.title,
           price: variant.price,

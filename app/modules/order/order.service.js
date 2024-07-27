@@ -173,23 +173,23 @@ class OrderService {
       include: [
         {
           model: OrderLine,
-          required: true,
+          // required: true,
           as: "orderLines",
           include: {
             model: Product,
             as: "product",
-            required: true,
+            // required: true,
             include: {
               model: Vendor,
               as: "vendor",
-              required: true,
+              // required: true,
             },
           },
         },
         {
           model: Customer,
           as: "customer",
-          required: true,
+          // required: true,
         },
       ],
       where: whereClause,

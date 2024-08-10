@@ -60,6 +60,6 @@ const OrderLine = sequelize.define(
   }
 );
 
-OrderLine.hasOne(Product, { as: "product", foreignKey: "id" });
+OrderLine.belongsTo(Product, { as: "product", foreignKey: "productId" });
 Product.hasMany(OrderLine, { as: "orderLines", foreignKey: "productId" });
 module.exports = OrderLine;

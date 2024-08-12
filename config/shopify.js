@@ -10,6 +10,7 @@ const shopify = shopifyApi({
     "read_orders",
     "read_customers",
     "read_all_orders ",
+  "read_inventory"
   ],
   hostName: "ngrok-tunnel-address",
   isCustomStoreApp: true,

@@ -1,4 +1,4 @@
-const { Op, where } = require("sequelize");
+const { Op, where, or } = require("sequelize");
 const CustomerService = require("../customer/customer.service");
 const ShopifyHelper = require("../helpers/shopifyHelper");
 const OrderLine = require("../orderLines/orderline.model");
@@ -24,13 +24,17 @@ class OrderService {
         productsIds.add(String(product.product_id));
       }
     }
-    const productsIdsMap = await ProductsService.getProductsMappedByShopifyIds([
+    const productsMap = await ProductsService.getProductsMappedByShopifyIds([
       ...productsIds,
     ]);
+    const customers = [];
+    for (const order of orders) {
+      if (order.customer) {
+        customers.push(order.customer);
+      }
+    }
     const customersIdsMap =
-      await CustomerService.getCustomersMappedByShopifyIds(
-        orders.map((order) => order.customer)
-      );
+      await CustomerService.getCustomersMappedByShopifyIds(customers);
     const existingOrders = await Order.findAll({
       where: {
         shopifyId: orders.map((order) => String(order.id)),
@@ -43,8 +47,11 @@ class OrderService {
     }
     const lines = [];
     orders = orders
-      .filter((order) => !existingShopifyIds.has(String(order.id)))
+      .filter(
+        (order) => !existingShopifyIds.has(String(order.id)) && order.customer
+      )
       .map((order) => {
+        let totalCost = 0;
         order.line_items.forEach((line) => {
           const discount_allocations = line.discount_allocations || [];
           const lineDiscount = discount_allocations.reduce(
@@ -52,6 +59,15 @@ class OrderService {
             0
           );
           line.discount = lineDiscount;
+          const product = productsMap[line.product_id];
+          const cost = product.variants
+            ? product.variants.find(
+                (variant) =>
+                  variant.shopifyId.toString() === line.variant_id.toString()
+              ).cost || 0
+            : 0;
+          line.cost = cost * line.quantity;
+          totalCost += line.cost;
         });
         lines.push({
           order_id: order.id,
@@ -67,6 +83,7 @@ class OrderService {
           totalDiscounts: order.total_discounts,
           orderDate: order.created_at,
           customerId: customersIdsMap[order.customer.id.toString()],
+          totalCost,
         };
       });
 
@@ -80,7 +97,7 @@ class OrderService {
       for (const line of line_items) {
         orderLines.push({
           orderId: order.id,
-          productId: productsIdsMap[line.product_id],
+          productId: productsMap[line.product_id].id,
           shopifyId: String(line.id),
           title: line.title,
           name: line.name,
@@ -238,7 +255,7 @@ class OrderService {
     };
   }
   static async createOrder(orderData) {
-    const productsIdsMap = await ProductsService.getProductsMappedByShopifyIds(
+    const productsMap = await ProductsService.getProductsMappedByShopifyIds(
       orderData.line_items.map((line) => line.product_id.toString())
     );
     const customersIdsMap =
@@ -270,7 +287,7 @@ class OrderService {
     for (const line of orderData.line_items) {
       orderLines.push({
         orderId: order.id,
-        productId: productsIdsMap[line.product_id],
+        productId: productsMap[line.product_id].id,
         shopifyId: String(line.id),
         title: line.title,
         name: line.name,

@@ -15,11 +15,26 @@ class ProductsService {
       fields,
       parameters
     );
+    const itemsIds = products
+      .map((product) =>
+        product.variants.map((variant) => variant.inventory_item_id)
+      )
+      .flat();
+    const inventory = await ShopifyHelper.importData(
+      "inventory_items",
+      ["cost", "id"],
+      { ids: itemsIds.join(",") } 
+    );
+    const inventoryMap = {}
+    for (const item of inventory) {
+      inventoryMap[item.id.toString()] = item.cost;
+    }
 
-    const result = await ProductsService.saveImportedProducts(products);
+    const result = await ProductsService.saveImportedProducts(products,inventoryMap);
+
     return result;
   }
-  static async saveImportedProducts(products) {
+  static async saveImportedProducts(products,inventoryMap) {
     const vendorsSet = new Set();
     const nonExistingVendors = [];
     for (const product of products) {
@@ -71,6 +86,7 @@ class ProductsService {
               price: variant.price,
               sku: variant.sku,
               shopifyId: String(variant.id),
+              cost: inventoryMap[variant.inventory_item_id.toString()] || 0,
             };
           }),
         };
@@ -146,12 +162,12 @@ class ProductsService {
       where: {
         shopifyId: productsIds,
       },
-      attributes: ["shopifyId", "id"],
+      attributes: ["shopifyId", "id","variants"],
     });
     const result = {};
     const existingShopifyIds = new Set();
     for (const product of products) {
-      result[product.shopifyId] = product.id;
+      result[product.shopifyId] = product;
       existingShopifyIds.add(product.shopifyId.toString());
     }
     const nonExistingProductsIds = productsIds.filter(
@@ -162,7 +178,7 @@ class ProductsService {
         ids: nonExistingProductsIds.join(","),
       });
       for (const product of res.data) {
-        result[product.shopifyId] = product.id;
+        result[product.shopifyId] = product;
       }
     }
     return result;

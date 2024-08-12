@@ -66,6 +66,7 @@ class OrderService {
                   variant.shopifyId.toString() === line.variant_id.toString()
               ).cost || 0
             : 0;
+          line.unitCost = cost;
           line.cost = cost * line.quantity;
           totalCost += line.cost;
         });
@@ -107,6 +108,7 @@ class OrderService {
           variant_id: line.variant_id,
           discount: line.discount,
           cost: line.cost,
+          unitCost: line.unitCost,
         });
       }
     }
@@ -278,6 +280,7 @@ class OrderService {
               variant.shopifyId.toString() === line.variant_id.toString()
           ).cost || 0
         : 0;
+      line.unitCost = cost;
       line.cost = cost * line.quantity;
       totalCost += line.cost;
     });
@@ -309,6 +312,7 @@ class OrderService {
         variant_id: line.variant_id,
         discount: line.discount,
         cost: line.cost,
+        unitCost: line.unitCost,
       });
     }
     await OrderLine.bulkCreate(orderLines);

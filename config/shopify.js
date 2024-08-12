@@ -20,7 +20,7 @@ const shopify = shopifyApi({
 const shopifyClient = new shopify.clients.Rest({
   session: {
     shop: `${process.env.SHOPIFY_STORE}.com`,
-    accessToken: process.env.SHOPIFY_STORE,
+    accessToken: process.env.SHOPIFY_STORE, 
   },
 });
 

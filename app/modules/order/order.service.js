@@ -106,6 +106,7 @@ class OrderService {
           sku: line.sku,
           variant_id: line.variant_id,
           discount: line.discount,
+          cost: line.cost,
         });
       }
     }
@@ -262,6 +263,7 @@ class OrderService {
       await CustomerService.getCustomersMappedByShopifyIds([
         orderData.customer,
       ]);
+    let totalCost = 0;
     orderData.line_items.forEach((line) => {
       const discount_allocations = line.discount_allocations || [];
       const lineDiscount = discount_allocations.reduce(
@@ -269,6 +271,15 @@ class OrderService {
         0
       );
       line.discount = lineDiscount;
+      const product = productsMap[line.product_id];
+      const cost = product.variants
+        ? product.variants.find(
+            (variant) =>
+              variant.shopifyId.toString() === line.variant_id.toString()
+          ).cost || 0
+        : 0;
+      line.cost = cost * line.quantity;
+      totalCost += line.cost;
     });
 
     const order = await Order.create({
@@ -281,6 +292,7 @@ class OrderService {
       totalDiscounts: orderData.total_discounts,
       orderDate: orderData.created_at,
       customerId: customersIdsMap[orderData.customer.id.toString()],
+      totalCost,
     });
     const orderLines = [];
 
@@ -296,6 +308,7 @@ class OrderService {
         sku: line.sku,
         variant_id: line.variant_id,
         discount: line.discount,
+        cost: line.cost,
       });
     }
     await OrderLine.bulkCreate(orderLines);

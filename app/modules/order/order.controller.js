@@ -56,8 +56,13 @@ class OrderController {
   static async updateOrder(req, res, next) {
     try {
       const { orderId } = req.params;
-      
-      const result = await OrderService.updateOrder(orderId, req.body);
+      const { receivedAmount, paymentStatus, commission } = req.body;
+
+      const result = await OrderService.updateOrder(orderId, {
+        receivedAmount,
+        paymentStatus,
+        commission,
+      });
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));

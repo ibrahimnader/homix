@@ -257,6 +257,22 @@ class OrderService {
       data: order,
     };
   }
+  static async updateOrder(orderId, orderData) {
+    const order = await Order.findByPk(orderId);
+    if (!order) {
+      return {
+        status: false,
+        statusCode: 404,
+        message: "Order not found",
+      };
+    }
+    await order.update(orderData);
+    return {
+      status: true,
+      statusCode: 200,
+      data: order,
+    };
+  }
   static async createOrder(orderData) {
     const productsMap = await ProductsService.getProductsMappedByShopifyIds(
       orderData.line_items.map((line) => line.product_id.toString())

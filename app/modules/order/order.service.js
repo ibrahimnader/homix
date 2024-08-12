@@ -226,6 +226,73 @@ class OrderService {
       },
     };
   }
+  static async financialReport(vendorId, startDate, endDate) {
+    const startOfstartDate = new Date(startDate);
+    const endOfEndDate = new Date(endDate);
+    startOfstartDate.setHours(0, 0, 0, 0);
+    endOfEndDate.setHours(23, 59, 59, 999);
+
+    let whereClause = {
+      [Op.and]: [
+        sequelize.where(sequelize.col("orderDate"), {
+          [Op.gte]: startOfstartDate,
+        }),
+        sequelize.where(sequelize.col("orderDate"), {
+          [Op.lte]: endOfEndDate,
+        }),
+      ],
+    };
+
+    if (vendorId) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
+          [Op.eq]: vendorId,
+        })
+      );
+    }
+    const orders = await Order.findAll({
+      include: [
+        {
+          model: OrderLine,
+          required: true,
+          as: "orderLines",
+          include: {
+            model: Product,
+            as: "product",
+            required: true,
+            include: {
+              model: Vendor,
+              as: "vendor",
+              required: true,
+            },
+          },
+        },
+      ],
+      where: whereClause,
+    });
+    let totalCost = 0;
+    let totalRevenue = 0;
+    let totalDiscount = 0;
+    let totalProfit = 0;
+    let totalCommission = 0;
+    for (const order of orders) {
+      totalCost += +order.totalCost;
+      totalRevenue += +order.totalPrice;
+      totalDiscount += +order.totalDiscounts;
+      totalCommission += +order.commission;
+    }
+    totalProfit = totalRevenue - totalCost - totalDiscount - totalCommission;
+    return {
+      status: true,
+      statusCode: 200,
+      data: {
+        totalCost,
+        totalRevenue,
+        totalDiscount,
+        totalProfit,
+      },
+    };
+  }
   static async getOneOrder(orderId) {
     const order = await Order.findByPk(orderId, {
       include: [

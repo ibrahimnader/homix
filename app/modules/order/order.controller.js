@@ -44,6 +44,17 @@ class OrderController {
       return next(new AppError(error.message, 500));
     }
   }
+  static async financialReport(req, res, next) {
+    try {
+      const { vendorId ,startDate,endDate} = req.query;
+
+      const vendor_Id = req.vendorId || vendorId;
+      const result = await OrderService.financialReport(vendor_Id,startDate,endDate);
+      res.status(result.statusCode).json(result);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
   static async getOneOrder(req, res, next) {
     try {
       const { orderId } = req.params;

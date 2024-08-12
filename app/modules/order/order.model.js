@@ -73,6 +73,11 @@ const Order = sequelize.define(
       allowNull: false,
       defaultValue: 0,
     },
+    totalTax: {
+      type: DataTypes.DECIMAL,
+      allowNull: false,
+      defaultValue: 0,
+    },
   },
   {
     tableName: "orders",

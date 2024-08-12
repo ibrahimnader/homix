@@ -275,21 +275,25 @@ class OrderService {
     let totalDiscount = 0;
     let totalProfit = 0;
     let totalCommission = 0;
+    let totalTax = 0;
     for (const order of orders) {
       totalCost += +order.totalCost;
       totalRevenue += +order.totalPrice;
       totalDiscount += +order.totalDiscounts;
       totalCommission += +order.commission;
+      totalTax += +order.totalTax;
     }
-    totalProfit = totalRevenue - totalCost - totalDiscount - totalCommission;
+    totalProfit = totalRevenue - totalCost - totalDiscount - totalCommission- totalTax;
     return {
       status: true,
       statusCode: 200,
       data: {
+        totalTax,
         totalCost,
         totalRevenue,
         totalDiscount,
         totalProfit,
+        totalCommission
       },
     };
   }

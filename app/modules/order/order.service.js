@@ -193,16 +193,16 @@ class OrderService {
       include: [
         {
           model: OrderLine,
-          // required: true,
+          required: true,
           as: "orderLines",
           include: {
             model: Product,
             as: "product",
-            // required: true,
+            required: true,
             include: {
               model: Vendor,
               as: "vendor",
-              // required: true,
+              required: true,
             },
           },
         },
@@ -283,7 +283,8 @@ class OrderService {
       totalCommission += +order.commission;
       totalTax += +order.totalTax;
     }
-    totalProfit = totalRevenue - totalCost - totalDiscount - totalCommission- totalTax;
+    totalProfit =
+      totalRevenue - totalCost - totalDiscount - totalCommission - totalTax;
     return {
       status: true,
       statusCode: 200,
@@ -293,12 +294,28 @@ class OrderService {
         totalRevenue,
         totalDiscount,
         totalProfit,
-        totalCommission
+        totalCommission,
       },
     };
   }
-  static async getOneOrder(orderId) {
-    const order = await Order.findByPk(orderId, {
+  static async getOneOrder(orderId, vendor_Id) {
+    const whereClause = {
+      [Op.and]: [
+        sequelize.where(sequelize.col("Order.id"), {
+          [Op.eq]: orderId,
+        }),
+      ],
+    };
+    if (vendor_Id) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
+          [Op.eq]: vendor_Id,
+        })
+      );
+    }
+    const order = await Order.findOne({
+      where: whereClause,
+      subQuery: false,
       include: [
         {
           model: OrderLine,

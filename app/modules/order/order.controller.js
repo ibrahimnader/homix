@@ -58,7 +58,9 @@ class OrderController {
   static async getOneOrder(req, res, next) {
     try {
       const { orderId } = req.params;
-      const result = await OrderService.getOneOrder(orderId);
+      const vendor_Id = req.vendorId;
+
+      const result = await OrderService.getOneOrder(orderId,vendor_Id);
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));

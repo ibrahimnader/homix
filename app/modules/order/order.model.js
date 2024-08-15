@@ -78,6 +78,10 @@ const Order = sequelize.define(
       allowNull: false,
       defaultValue: 0,
     },
+    PoDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     tableName: "orders",
@@ -90,9 +94,9 @@ Order.hasMany(OrderLine, { as: "orderLines", foreignKey: "orderId" });
 OrderLine.belongsTo(Order, { as: "order", foreignKey: "orderId" });
 Order.hasOne(Customer, { as: "customer", foreignKey: "id" });
 Customer.hasMany(Order, { as: "order", foreignKey: "customerId" });
-Order.sync({ alter: true }).then((result) => {
-  console.log(result);
-}).catch((err) => {
-  
-});
+Order.sync({ alter: true })
+  .then((result) => {
+    console.log(result);
+  })
+  .catch((err) => {});
 module.exports = Order;

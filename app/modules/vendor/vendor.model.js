@@ -1,5 +1,6 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
+const User = require("../user/user.model");
 const Vendor = sequelize.define(
   "Vendor",
   {
@@ -15,5 +16,9 @@ const Vendor = sequelize.define(
     paranoid: true,
   }
 );
+Vendor.hasOne(User, {
+  foreignKey: "vendorId",
+  as: "user",
+});
 
 module.exports = Vendor;

@@ -1,3 +1,4 @@
+const User = require("../user/user.model");
 const UserService = require("../user/user.service");
 const Vendor = require("./vendor.model");
 
@@ -111,7 +112,12 @@ class VendorsService {
     return vendors;
   }
   static async getAllVendors() {
-    const vendors = await Vendor.findAll();
+    const vendors = await Vendor.findAll({
+      include: {
+        model: User,
+        as: "user",
+      },
+    });
     return {
       status: true,
       data: vendors,

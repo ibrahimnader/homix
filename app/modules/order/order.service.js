@@ -312,13 +312,12 @@ class OrderService {
   }
   static async getOneOrder(orderId, vendor_Id) {
     const whereClause = {
-      [Op.and]: [
-        sequelize.where(sequelize.col("Order.id"), { [Op.eq]: String(orderId) }),
-        ...(vendor_Id ? [sequelize.where(sequelize.col("orderLines.product.vendor.id"), { [Op.eq]: vendor_Id })] : [])
-      ],
+      id: String(orderId) ,
     };
-    console.log("whereClause:", JSON.stringify(whereClause, null, 2));
-
+    
+    if (vendor_Id) {
+      whereClause['$orderLines.product.vendor.id$'] =  vendor_Id ;
+    }
     const order = await Order.findOne({
       where: whereClause,
       subQuery: false,
@@ -360,49 +359,7 @@ class OrderService {
         },
       ],
     });
-    // const order2 = await Order.findOne({
-    //   where: {
-    //     id: "561",
-    //   },
-    //   subQuery: false,
-    //   include: [
-    //     {
-    //       model: OrderLine,
-    //       required: true,
-    //       as: "orderLines",
-    //       include: [
-    //         {
-    //           model: Product,
-    //           as: "product",
-    //           required: true,
-    //           include: {
-    //             model: Vendor,
-    //             as: "vendor",
-    //             required: true,
-    //           },
-    //         },
-    //         {
-    //           model: Note,
-    //           as: "notesList",
-    //           required: false,
-    //           include: [
-    //             {
-    //               model: User,
-    //               as: "user",
-    //               required: false,
-    //               attributes: ["firstName", "lastName"],
-    //             },
-    //           ],
-    //         },
-    //       ],
-    //     },
-    //     {
-    //       model: Customer,
-    //       as: "customer",
-    //       required: true,
-    //     },
-    //   ],
-    // });
+   
     return {
       status: true,
       statusCode: 200,

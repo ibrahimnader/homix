@@ -8,6 +8,8 @@ const Order = require("./order.model");
 const { sequelize } = require("../../../config/db.config");
 const Vendor = require("../vendor/vendor.model");
 const Customer = require("../customer/customer.model");
+const Note = require("../notes/notes.model");
+const User = require("../user/user.model");
 
 class OrderService {
   static async importOrders() {
@@ -321,16 +323,31 @@ class OrderService {
           model: OrderLine,
           required: true,
           as: "orderLines",
-          include: {
-            model: Product,
-            as: "product",
-            required: true,
-            include: {
-              model: Vendor,
-              as: "vendor",
+          include: [
+            {
+              model: Product,
+              as: "product",
               required: true,
+              include: {
+                model: Vendor,
+                as: "vendor",
+                required: true,
+              },
             },
-          },
+            {
+              model: Note,
+              as: "notesList",
+              required: false,
+              include: [
+                {
+                  model: User,
+                  as: "user",
+                  required: true,
+                  attributes: ["firstName", "lastName"],
+                },
+              ],
+            },
+          ],
         },
         {
           model: Customer,

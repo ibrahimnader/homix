@@ -69,12 +69,14 @@ class OrderController {
   static async updateOrder(req, res, next) {
     try {
       const { orderId } = req.params;
-      const { receivedAmount, paymentStatus, commission,PoDate } = req.body;
+      const { receivedAmount, paymentStatus, commission,PoDate, notes } = req.body;
 
       const result = await OrderService.updateOrder(orderId, {
         receivedAmount,
         paymentStatus,
         commission,
+        PoDate,
+        notes
       });
       res.status(result.statusCode).json(result);
     } catch (error) {

@@ -1,6 +1,8 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
 const Product = require("../product/product.model");
+const Note = require("../notes/notes.model");
+const { ORDER_STATUS } = require("../../../config/constants");
 
 const OrderLine = sequelize.define(
   "OrderLine",
@@ -57,6 +59,15 @@ const OrderLine = sequelize.define(
       allowNull: true,
       defaultValue: 0,
     },
+    status: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: ORDER_STATUS.PENDING,
+    },
+    notes: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
   },
   {
     tableName: "orderLines",
@@ -67,4 +78,9 @@ const OrderLine = sequelize.define(
 
 OrderLine.belongsTo(Product, { as: "product", foreignKey: "productId" });
 Product.hasMany(OrderLine, { as: "orderLines", foreignKey: "productId" });
+OrderLine.hasMany(Note, {
+  as: "notesList",
+  foreignKey: "entityId",
+});
+OrderLine.sync({ alter: true });
 module.exports = OrderLine;

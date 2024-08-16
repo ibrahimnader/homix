@@ -6,11 +6,12 @@ class OrderLineController {
   static async updateOrderLine(req, res, next) {
     try {
       const { orderLineId } = req.params;
-      const { notes, status } = req.body;
+      const { notes, status, cost } = req.body;
 
       const result = await OrderLineService.updateOrderLine(orderLineId, {
         notes,
         status,
+        cost
       });
       res.status(result.statusCode).json(result);
     } catch (error) {

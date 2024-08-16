@@ -12,6 +12,14 @@ class OrderLineService {
         message: "Order Line not found",
       };
     }
+    if (orderData.cost) {
+      orderData.cost = Number(orderData.cost);
+      orderData.totalCost = orderData.cost * orderLine.quantity;
+      const order = await OrderLine.findByPk(orderLine.orderId);
+      order.totalCost =
+        order.totalCost - orderLine.totalCost + orderData.totalCost;
+      await order.save();
+    }
 
     await OrderLine.update(orderData, { where: { id: orderLineId } });
     return {

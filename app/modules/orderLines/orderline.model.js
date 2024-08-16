@@ -30,11 +30,11 @@ const OrderLine = sequelize.define(
     },
     sku: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     variant_id: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     discount: {
       type: DataTypes.DECIMAL,
@@ -43,11 +43,11 @@ const OrderLine = sequelize.define(
     },
     title: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     name: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     cost: {
       type: DataTypes.DECIMAL,
@@ -78,9 +78,7 @@ const OrderLine = sequelize.define(
 
 OrderLine.belongsTo(Product, { as: "product", foreignKey: "productId" });
 Product.hasMany(OrderLine, { as: "orderLines", foreignKey: "productId" });
-OrderLine.hasMany(Note, {
-  as: "notesList",
-  foreignKey: "entityId",
-});
+OrderLine.hasMany(Note, { as: 'notesList', foreignKey: 'entityId' });
+Note.belongsTo(OrderLine, { foreignKey: 'entityId' });
 OrderLine.sync({ alter: true });
 module.exports = OrderLine;

@@ -48,6 +48,7 @@ class OrderService {
       existingShopifyIds.add(order.shopifyId);
     }
     const lines = [];
+    const customProducts = [];
     orders = orders
       .filter(
         (order) => !existingShopifyIds.has(String(order.id)) && order.customer
@@ -61,13 +62,20 @@ class OrderService {
             0
           );
           line.discount = lineDiscount;
-          const product = productsMap[line.product_id];
-          const cost = product.variants
+          const product = line.product_id
+            ? productsMap[line.product_id]
+            : productsMap["custom"];
+          if (!product) {
+            console.log("product not found", line.product_id);
+          }
+
+          const variant = product.variants
             ? product.variants.find(
                 (variant) =>
                   variant.shopifyId.toString() === line.variant_id.toString()
-              ).cost || 0
-            : 0;
+              )
+            : null;
+          const cost = variant ? Number(variant.cost) || 0 : 0;
           line.unitCost = cost;
           line.cost = cost * line.quantity;
           totalCost += line.cost;
@@ -100,7 +108,9 @@ class OrderService {
       for (const line of line_items) {
         orderLines.push({
           orderId: order.id,
-          productId: productsMap[line.product_id].id,
+          productId: line.product_id
+            ? productsMap[line.product_id].id
+            : productsMap["custom"].id,
           shopifyId: String(line.id),
           title: line.title,
           name: line.name,
@@ -211,7 +221,7 @@ class OrderService {
         {
           model: Customer,
           as: "customer",
-          // required: true,
+          required: true,
         },
       ],
       where: whereClause,
@@ -303,18 +313,12 @@ class OrderService {
   static async getOneOrder(orderId, vendor_Id) {
     const whereClause = {
       [Op.and]: [
-        sequelize.where(sequelize.col("Order.id"), {
-          [Op.eq]: orderId,
-        }),
+        sequelize.where(sequelize.col("Order.id"), { [Op.eq]: String(orderId) }),
+        ...(vendor_Id ? [sequelize.where(sequelize.col("orderLines.product.vendor.id"), { [Op.eq]: vendor_Id })] : [])
       ],
     };
-    if (vendor_Id) {
-      whereClause[Op.and].push(
-        sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
-          [Op.eq]: vendor_Id,
-        })
-      );
-    }
+    console.log("whereClause:", JSON.stringify(whereClause, null, 2));
+
     const order = await Order.findOne({
       where: whereClause,
       subQuery: false,
@@ -342,7 +346,7 @@ class OrderService {
                 {
                   model: User,
                   as: "user",
-                  required: true,
+                  required: false,
                   attributes: ["firstName", "lastName"],
                 },
               ],
@@ -356,6 +360,49 @@ class OrderService {
         },
       ],
     });
+    // const order2 = await Order.findOne({
+    //   where: {
+    //     id: "561",
+    //   },
+    //   subQuery: false,
+    //   include: [
+    //     {
+    //       model: OrderLine,
+    //       required: true,
+    //       as: "orderLines",
+    //       include: [
+    //         {
+    //           model: Product,
+    //           as: "product",
+    //           required: true,
+    //           include: {
+    //             model: Vendor,
+    //             as: "vendor",
+    //             required: true,
+    //           },
+    //         },
+    //         {
+    //           model: Note,
+    //           as: "notesList",
+    //           required: false,
+    //           include: [
+    //             {
+    //               model: User,
+    //               as: "user",
+    //               required: false,
+    //               attributes: ["firstName", "lastName"],
+    //             },
+    //           ],
+    //         },
+    //       ],
+    //     },
+    //     {
+    //       model: Customer,
+    //       as: "customer",
+    //       required: true,
+    //     },
+    //   ],
+    // });
     return {
       status: true,
       statusCode: 200,
@@ -395,12 +442,13 @@ class OrderService {
       );
       line.discount = lineDiscount;
       const product = productsMap[line.product_id];
-      const cost = product.variants
+      const variant = product.variants
         ? product.variants.find(
             (variant) =>
               variant.shopifyId.toString() === line.variant_id.toString()
-          ).cost || 0
-        : 0;
+          )
+        : null;
+      const cost = variant ? variant.cost || 0 : 0;
       line.unitCost = cost;
       line.cost = cost * line.quantity;
       totalCost += line.cost;
@@ -423,7 +471,9 @@ class OrderService {
     for (const line of orderData.line_items) {
       orderLines.push({
         orderId: order.id,
-        productId: productsMap[line.product_id].id,
+        productId: line.product_id
+          ? productsMap[line.product_id].id
+          : productsMap["custom"].id,
         shopifyId: String(line.id),
         title: line.title,
         name: line.name,

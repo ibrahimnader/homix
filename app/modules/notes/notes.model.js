@@ -29,5 +29,6 @@ const Note = sequelize.define(
   }
 );
 
-Note.belongsTo(User, { as: "user", foreignKey: "userId" });
+Note.belongsTo(User, { as: 'user', foreignKey: 'userId' });
+User.hasMany(Note, { foreignKey: 'userId' });
 module.exports = Note;

@@ -20,23 +20,39 @@ class ProductsService {
         product.variants.map((variant) => variant.inventory_item_id)
       )
       .flat();
-    const inventory = await ShopifyHelper.importData(
-      "inventory_items",
-      ["cost", "id"],
-      { ids: itemsIds.join(",") } 
-    );
-    const inventoryMap = {}
-    for (const item of inventory) {
-      inventoryMap[item.id.toString()] = item.cost;
+
+    const inventoryMap = {};
+    const itemsIdsChunks = ShopifyHelper.splitArrayToChunks(itemsIds, 250);
+    for (const itemsIdsChunk of itemsIdsChunks) {
+      const inventory = await ShopifyHelper.importData(
+        "inventory_items",
+        ["id", "cost"],
+        {
+          ids: itemsIdsChunk.join(","),
+        }
+      );
+      for (const item of inventory) {
+        inventoryMap[item.id.toString()] = item.cost;
+      }
     }
 
-    const result = await ProductsService.saveImportedProducts(products,inventoryMap);
+    const result = await ProductsService.saveImportedProducts(
+      products,
+      inventoryMap
+    );
 
     return result;
   }
-  static async saveImportedProducts(products,inventoryMap) {
+  static async saveImportedProducts(products, inventoryMap) {
     const vendorsSet = new Set();
     const nonExistingVendors = [];
+    products.push({
+      title: "Custom Product",
+      vendor: "Custom",
+      image: null,
+      variants: [],
+      id: "custom",
+    });
     for (const product of products) {
       vendorsSet.add(product.vendor);
     }
@@ -86,7 +102,9 @@ class ProductsService {
               price: variant.price,
               sku: variant.sku,
               shopifyId: String(variant.id),
-              cost: inventoryMap[variant.inventory_item_id.toString()] || 0,
+              cost: inventoryMap[variant.inventory_item_id.toString()]
+                ? Number(inventoryMap[variant.inventory_item_id.toString()])
+                : 0,
             };
           }),
         };
@@ -160,9 +178,9 @@ class ProductsService {
   static async getProductsMappedByShopifyIds(productsIds) {
     const products = await Product.findAll({
       where: {
-        shopifyId: productsIds,
+        shopifyId: [...productsIds, "custom"],
       },
-      attributes: ["shopifyId", "id","variants"],
+      attributes: ["shopifyId", "id", "variants"],
     });
     const result = {};
     const existingShopifyIds = new Set();

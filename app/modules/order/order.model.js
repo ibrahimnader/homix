@@ -94,10 +94,12 @@ const Order = sequelize.define(
   }
 );
 
-Order.hasMany(OrderLine, { as: "orderLines", foreignKey: "orderId" });
-OrderLine.belongsTo(Order, { as: "order", foreignKey: "orderId" });
-Order.hasOne(Customer, { as: "customer", foreignKey: "id" });
-Customer.hasMany(Order, { as: "order", foreignKey: "customerId" });
+Order.hasMany(OrderLine, { as: 'orderLines', foreignKey: 'orderId' });
+OrderLine.belongsTo(Order, { foreignKey: 'orderId' });
+
+Order.belongsTo(Customer, { as: 'customer', foreignKey: 'customerId' });
+Customer.hasMany(Order, { foreignKey: 'customerId' });
+
 Order.sync({ alter: true })
   .then((result) => {
     console.log(result);

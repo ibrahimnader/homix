@@ -15,6 +15,7 @@ class OrderController {
       const result = await OrderService.importOrders();
       res.status(result.statusCode).json(result);
     } catch (error) {
+      console.log(error);
       return next(new AppError(error.message, 500));
     }
   }
@@ -46,10 +47,14 @@ class OrderController {
   }
   static async financialReport(req, res, next) {
     try {
-      const { vendorId ,startDate,endDate} = req.query;
+      const { vendorId, startDate, endDate } = req.query;
 
       const vendor_Id = req.vendorId || vendorId;
-      const result = await OrderService.financialReport(vendor_Id,startDate,endDate);
+      const result = await OrderService.financialReport(
+        vendor_Id,
+        startDate,
+        endDate
+      );
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));
@@ -60,7 +65,7 @@ class OrderController {
       const { orderId } = req.params;
       const vendor_Id = req.vendorId;
 
-      const result = await OrderService.getOneOrder(orderId,vendor_Id);
+      const result = await OrderService.getOneOrder(orderId, vendor_Id);
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));
@@ -69,14 +74,15 @@ class OrderController {
   static async updateOrder(req, res, next) {
     try {
       const { orderId } = req.params;
-      const { receivedAmount, paymentStatus, commission,PoDate, notes } = req.body;
+      const { receivedAmount, paymentStatus, commission, PoDate, notes } =
+        req.body;
 
       const result = await OrderService.updateOrder(orderId, {
         receivedAmount,
         paymentStatus,
         commission,
         PoDate,
-        notes
+        notes,
       });
       res.status(result.statusCode).json(result);
     } catch (error) {

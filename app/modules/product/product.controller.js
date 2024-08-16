@@ -4,17 +4,27 @@ const productsService = require("./product.service");
 class productsController {
   static async importProducts(req, res, next) {
     try {
-      const result = await productsService.importProducts();
-      res.status(result.statusCode).json(result);
+      await productsService.importProducts();
+      res.status(200).json({
+        status: true,
+        message: "Products imported successfully",
+        statusCode: 200,
+      });
     } catch (error) {
+      console.log(error);
       return next(new AppError(error.message, 500));
     }
   }
   static async getProducts(req, res, next) {
     try {
-      const { page, size,searchQuery } = req.query;
+      const { page, size, searchQuery } = req.query;
       const { vendorId } = req;
-      const result = await productsService.getProducts(page, size,searchQuery,vendorId);
+      const result = await productsService.getProducts(
+        page,
+        size,
+        searchQuery,
+        vendorId
+      );
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));

@@ -4,6 +4,14 @@ const OrderLine = require("./orderline.model");
 
 class OrderLineService {
   static async updateOrderLine(orderLineId, orderData) {
+    //check if the orderData is empty
+    if (Object.keys(orderData).length === 0) {
+      return {
+        status: false,
+        statusCode: 400,
+        message: "Please provide the data to update",
+      };
+    }
     const orderLine = await OrderLine.findByPk(orderLineId);
     if (!orderLine) {
       return {
@@ -12,12 +20,25 @@ class OrderLineService {
         message: "Order Line not found",
       };
     }
+    //filter out the undefined values
+    Object.keys(orderData).forEach(
+      (key) =>
+        orderData[key] === undefined ||
+        (orderData[key] === null && delete orderData[key])
+    );
     if (orderData.cost) {
-      orderData.cost = Number(orderData.cost);
-      orderData.totalCost = orderData.cost * orderLine.quantity;
+      orderData.unitCost = Number(orderData.cost);
+      orderData.cost = Number(orderData.cost) * orderLine.quantity;
       const order = await OrderLine.findByPk(orderLine.orderId);
+      if (!order) {
+        return {
+          status: false,
+          statusCode: 404,
+          message: "The order for this order line not found",
+        };
+      }
       order.totalCost =
-        order.totalCost - orderLine.totalCost + orderData.totalCost;
+        order.totalCost - orderLine.cost + orderData.cost;
       await order.save();
     }
 

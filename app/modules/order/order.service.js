@@ -48,11 +48,9 @@ class OrderService {
       existingShopifyIds.add(order.shopifyId);
     }
     const lines = [];
-    const customProducts = [];
+
     orders = orders
-      .filter(
-        (order) => !existingShopifyIds.has(String(order.id)) && order.customer
-      )
+      .filter((order) => order.customer)
       .map((order) => {
         let totalCost = 0;
         order.line_items.forEach((line) => {
@@ -89,16 +87,28 @@ class OrderService {
           name: order.name,
           number: order.number,
           orderNumber: order.order_number,
-          subTotalPrice: order.subtotal_price,
-          totalPrice: order.total_price,
+          subTotalPrice: order.total_line_items_price,
           totalDiscounts: order.total_discounts,
+          totalTax: order.total_tax,
+          shippingFees: order.shipping_lines
+            ? order.shipping_lines.reduce(
+                (acc, item) => acc + Number(item.price),
+                0
+              )
+            : 0,
+          totalPrice: order.total_price,
           orderDate: order.created_at,
           customerId: customersIdsMap[order.customer.id.toString()],
           totalCost,
         };
       });
-
-    const result = await Order.bulkCreate(orders);
+    const result = [];
+    for (const order of orders) {
+      const [savedOrder] = await Order.upsert(order, {
+        conflictFields: ["shopifyId"],
+      });
+      result.push(savedOrder);
+    }
     const savedOrders = result.map((order) => order.toJSON());
     const orderLines = [];
     for (const { order_id, line_items } of lines) {
@@ -124,7 +134,11 @@ class OrderService {
         });
       }
     }
-    await OrderLine.bulkCreate(orderLines);
+    for (const line of orderLines) {
+      await OrderLine.upsert(line, {
+        conflictFields: ["shopifyId"],
+      });
+    }
     return {
       status: true,
       statusCode: 200,
@@ -312,11 +326,11 @@ class OrderService {
   }
   static async getOneOrder(orderId, vendor_Id) {
     const whereClause = {
-      id: String(orderId) ,
+      id: String(orderId),
     };
-    
+
     if (vendor_Id) {
-      whereClause['$orderLines.product.vendor.id$'] =  vendor_Id ;
+      whereClause["$orderLines.product.vendor.id$"] = vendor_Id;
     }
     const order = await Order.findOne({
       where: whereClause,
@@ -359,7 +373,7 @@ class OrderService {
         },
       ],
     });
-   
+
     return {
       status: true,
       statusCode: 200,

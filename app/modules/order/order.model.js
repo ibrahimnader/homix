@@ -14,6 +14,7 @@ const Order = sequelize.define(
     shopifyId: {
       type: DataTypes.STRING,
       allowNull: false,
+      unique: true,
     },
     number: {
       type: DataTypes.STRING,
@@ -78,6 +79,11 @@ const Order = sequelize.define(
       allowNull: false,
       defaultValue: 0,
     },
+    shippingFees: {
+      type: DataTypes.DECIMAL,
+      allowNull: false,
+      defaultValue: 0,
+    },
     PoDate: {
       type: DataTypes.DATE,
       allowNull: true,
@@ -94,11 +100,11 @@ const Order = sequelize.define(
   }
 );
 
-Order.hasMany(OrderLine, { as: 'orderLines', foreignKey: 'orderId' });
-OrderLine.belongsTo(Order, { foreignKey: 'orderId' });
+Order.hasMany(OrderLine, { as: "orderLines", foreignKey: "orderId" });
+OrderLine.belongsTo(Order, { foreignKey: "orderId" });
 
-Order.belongsTo(Customer, { as: 'customer', foreignKey: 'customerId' });
-Customer.hasMany(Order, { foreignKey: 'customerId' });
+Order.belongsTo(Customer, { as: "customer", foreignKey: "customerId" });
+Customer.hasMany(Order, { foreignKey: "customerId" });
 
 Order.sync({ alter: true })
   .then((result) => {

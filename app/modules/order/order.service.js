@@ -381,6 +381,12 @@ class OrderService {
     };
   }
   static async updateOrder(orderId, orderData) {
+    //filter out the order Data
+    Object.keys(orderData).forEach(
+      (key) =>
+        orderData[key] === undefined ||
+        (orderData[key] === null && delete orderData[key])
+    );
     const order = await Order.findByPk(orderId);
     if (!order) {
       return {

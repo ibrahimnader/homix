@@ -221,16 +221,31 @@ class OrderService {
           model: OrderLine,
           required: true,
           as: "orderLines",
-          include: {
-            model: Product,
-            as: "product",
-            required: true,
-            include: {
-              model: Vendor,
-              as: "vendor",
+          include: [
+            {
+              model: Product,
+              as: "product",
               required: true,
+              include: {
+                model: Vendor,
+                as: "vendor",
+                required: true,
+              },
             },
-          },
+            {
+              model: Note,
+              as: "notesList",
+              required: false,
+              include: [
+                {
+                  model: User,
+                  as: "user",
+                  required: false,
+                  attributes: ["firstName", "lastName"],
+                },
+              ],
+            },
+          ],
         },
         {
           model: Customer,

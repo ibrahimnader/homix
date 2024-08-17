@@ -169,8 +169,10 @@ class UserService {
   static async saveUsersForVendors(vendors) {
     const password = await bcrypt.hash(process.env.DEFAULT_PASSWORD, 10);
     const promises = vendors.map((vendor) => {
+      // delete white spaces and special characters
+      vendor.name = vendor.name.replace(/[^a-zA-Z0-9]/g, "");
       return User.create({
-        email: `${vendor.name}@${process.env.SHOPIFY_STORE}.com`,
+        email: `${vendor.name.toLowerCase()}@${process.env.SHOPIFY_STORE}.com`,
         password,
         firstName: vendor.name,
         userType: USER_TYPES.VENDOR,

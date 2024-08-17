@@ -95,6 +95,6 @@ class OrderController {
     } catch (error) {
       return next(new AppError(error.message, 500));
     }
-  }
+  } 
 }
 module.exports = OrderController;

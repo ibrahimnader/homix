@@ -302,7 +302,9 @@ class OrderService {
     let totalProfit = 0;
     let totalCommission = 0;
     let totalTax = 0;
+    let count = 0;
     for (const order of orders) {
+      count++;
       totalCost += +order.totalCost;
       totalRevenue += +order.totalPrice;
       totalDiscount += +order.totalDiscounts;
@@ -315,6 +317,7 @@ class OrderService {
       status: true,
       statusCode: 200,
       data: {
+        ordersCount: count,
         totalTax,
         totalCost,
         totalRevenue,

@@ -1,5 +1,6 @@
 const { USER_TYPES } = require("../../../config/constants");
 const Note = require("../notes/notes.model");
+const Order = require("../order/order.model");
 const OrderLine = require("./orderline.model");
 
 class OrderLineService {
@@ -29,7 +30,7 @@ class OrderLineService {
     if (orderData.cost) {
       orderData.unitCost = Number(orderData.cost);
       orderData.cost = Number(orderData.cost) * orderLine.quantity;
-      const order = await OrderLine.findByPk(orderLine.orderId);
+      const order = await Order.findByPk(orderLine.orderId);
       if (!order) {
         return {
           status: false,

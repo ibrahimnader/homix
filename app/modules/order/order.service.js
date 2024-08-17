@@ -209,7 +209,7 @@ class OrderService {
 
     if (status) {
       whereClause[Op.and].push(
-        sequelize.where(sequelize.col("status"), {
+        sequelize.where(sequelize.col("Order.status"), {
           [Op.eq]: status,
         })
       );

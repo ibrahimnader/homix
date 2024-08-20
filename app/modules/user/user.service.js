@@ -30,7 +30,7 @@ class UserService {
       }
 
       // Check if password matches
-      const isMatch = await bcrypt.compare(password, user.password);
+      const isMatch = await bcrypt.compare(String(password), user.password);
       if (!isMatch) {
         return {
           status: false,
@@ -79,7 +79,7 @@ class UserService {
     }
 
     // Hash the password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(String(password), 10);
 
     // Create new user
     const userObj = {

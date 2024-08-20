@@ -81,5 +81,4 @@ OrderLine.belongsTo(Product, { as: "product", foreignKey: "productId" });
 Product.hasMany(OrderLine, { as: "orderLines", foreignKey: "productId" });
 OrderLine.hasMany(Note, { as: "notesList", foreignKey: "entityId" });
 Note.belongsTo(OrderLine, { foreignKey: "entityId" });
-OrderLine.sync({ alter: true });
 module.exports = OrderLine;

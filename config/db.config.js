@@ -19,7 +19,7 @@ const sequelize = new Sequelize(
 
 async function testConnection() {
   try {
-    await sequelize.sync({ alter: true }).then(() => {
+    await sequelize.sync().then(() => {
       console.log("Database & tables created!");
     });
     await sequelize.authenticate();

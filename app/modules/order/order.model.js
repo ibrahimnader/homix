@@ -106,9 +106,9 @@ OrderLine.belongsTo(Order, { foreignKey: "orderId" });
 Order.belongsTo(Customer, { as: "customer", foreignKey: "customerId" });
 Customer.hasMany(Order, { foreignKey: "customerId" });
 
-Order.sync({ alter: true })
-  .then((result) => {
-    console.log(result);
-  })
-  .catch((err) => {});
+// Order.sync({ alter: true })
+//   .then((result) => {
+//     console.log(result);
+//   })
+//   .catch((err) => {});
 module.exports = Order;

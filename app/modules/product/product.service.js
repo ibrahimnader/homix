@@ -52,6 +52,8 @@ class ProductsService {
       image: null,
       variants: [],
       id: "custom",
+      shopifyId : "custom"
+      
     });
     for (const product of products) {
       vendorsSet.add(product.vendor);

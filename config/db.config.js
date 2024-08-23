@@ -17,7 +17,7 @@ const sequelize = new Sequelize(
   }
 );
 
-async function testConnection() {
+async function connectToDb() {
   try {
     await sequelize.sync().then(() => {
       console.log("Database & tables created!");
@@ -30,9 +30,9 @@ async function testConnection() {
     console.error("Unable to connect to the database:", error);
   }
 }
-testConnection();
 
 module.exports = {
   sequelize,
   Sequelize,
+  connectToDb
 };

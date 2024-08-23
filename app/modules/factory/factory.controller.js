@@ -1,6 +1,22 @@
+const { AppError } = require("../../middlewares/errors");
 const FactoryService = require("./factory.service");
 
 class FactoryController {
+  static async uploadFile(req, res, next) {
+    try {
+      const factoryId = req.params.id;
+      const { filePath, fileName, description } = req;
+      let factory = await FactoryService.uploadFile(
+        factoryId,
+        filePath,
+        fileName,
+        description
+      );
+      res.status(200).json(factory);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
   static async create(req, res, next) {
     try {
       let factory = await FactoryService.create(req.body);
@@ -20,8 +36,12 @@ class FactoryController {
   }
   static async getAll(req, res, next) {
     try {
-      let factory = await FactoryService.getAll(req.params.id);
-      res.status(200).json(factory);
+      let factories = await FactoryService.getAll();
+      res.status(200).json({
+        status: true,
+        statusCode: 200,
+        data: factories,
+      });
     } catch (error) {
       return next(new AppError(error.message, 500));
     }

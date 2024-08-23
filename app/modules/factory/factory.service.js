@@ -33,7 +33,14 @@ class FactoryService {
     });
   }
   static async getOne(id) {
-    return await Factory.findByPk(id);
+    return await Factory.findByPk(id, {
+      include: [
+        {
+          model: Attachment,
+          as: "attachments",
+        },
+      ],
+    });
   }
   static async update(id, data) {
     const factory = await Factory.findByPk(id);

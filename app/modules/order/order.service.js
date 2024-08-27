@@ -10,6 +10,7 @@ const Vendor = require("../vendor/vendor.model");
 const Customer = require("../customer/customer.model");
 const Note = require("../notes/notes.model");
 const User = require("../user/user.model");
+const { ORDER_STATUS } = require("../../../config/constants");
 
 class OrderService {
   static async importOrders() {
@@ -284,7 +285,7 @@ class OrderService {
       ],
     };
 
-    if (vendorId) {
+    if (vendorId && vendorId !== "0") {
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
           [Op.eq]: vendorId,
@@ -318,16 +319,45 @@ class OrderService {
     let totalCommission = 0;
     let totalTax = 0;
     let count = 0;
+    let totalPaid = 0;
+    let subTotal = 0;
+    const DeliveredOrders = {
+      ordersCount: 0,
+      totalTax: 0,
+      totalCost: 0,
+      totalRevenue: 0,
+      totalDiscount: 0,
+      totalProfit: 0,
+      totalCommission: 0,
+      totalPaid: 0,
+      subTotal: 0,
+    };
     for (const order of orders) {
+      if (order.status === ORDER_STATUS.DELIVERED) {
+        DeliveredOrders.ordersCount++;
+        DeliveredOrders.totalTax += +order.totalTax;
+        DeliveredOrders.totalCost += +order.totalCost;
+        DeliveredOrders.totalRevenue += +order.totalPrice;
+        DeliveredOrders.totalDiscount += +order.totalDiscounts;
+        DeliveredOrders.totalProfit +=
+          +order.totalPrice -
+          +order.totalCost -
+          +order.commission -
+          +order.totalTax;
+        DeliveredOrders.totalCommission += +order.commission;
+        DeliveredOrders.totalPaid += +order.totalPrice;
+        DeliveredOrders.subTotal += +order.subTotal;
+      }
       count++;
       totalCost += +order.totalCost;
       totalRevenue += +order.totalPrice;
       totalDiscount += +order.totalDiscounts;
       totalCommission += +order.commission;
       totalTax += +order.totalTax;
+      totalPaid += +order.totalPrice;
+      subTotal += +order.subTotal;
     }
-    totalProfit =
-      totalRevenue - totalCost - totalDiscount - totalCommission - totalTax;
+    totalProfit = totalRevenue - totalCost - totalCommission - totalTax;
     return {
       status: true,
       statusCode: 200,
@@ -339,6 +369,9 @@ class OrderService {
         totalDiscount,
         totalProfit,
         totalCommission,
+        totalPaid,
+        subTotal,
+        DeliveredOrders,
       },
     };
   }

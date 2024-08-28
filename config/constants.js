@@ -16,9 +16,13 @@ const PAYMENT_STATUS = {
   COD: 1,
   PAID: 2,
 };
-
+const FACTORY_STATUS = {
+  ONLINE: 1,
+  OFFLINE: 2,
+};
 module.exports = {
   USER_TYPES,
   ORDER_STATUS,
   PAYMENT_STATUS,
+  FACTORY_STATUS
 };

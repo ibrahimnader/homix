@@ -1,5 +1,6 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
+const { FACTORY_STATUS } = require("../../../config/constants");
 
 const Factory = sequelize.define(
   "Factory",
@@ -47,6 +48,27 @@ const Factory = sequelize.define(
     description: {
       type: DataTypes.STRING,
       allowNull: true,
+    },
+    factoryCategory: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    contactPersonName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    contactPersonPhoneNumber: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    contactPersonEmail: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    status: {
+      type: DataTypes.NUMBER,
+      allowNull: true,
+      defaultValue: FACTORY_STATUS.ONLINE,
     },
   },
   {

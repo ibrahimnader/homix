@@ -42,7 +42,10 @@ function fileUploadMiddleware(folderName) {
             const file = files[i];
 
             // Define the path for the new file
-            const filePath = path.join(uploadDir, file.originalname);
+            const filePath = path.join(
+              uploadDir,
+              String(file.originalname).trim().replace(/\s+/g, "")
+            );
 
             // Write the file to the specified path
             await fs.writeFile(filePath, file.buffer);
@@ -50,9 +53,15 @@ function fileUploadMiddleware(folderName) {
 
           // Attach the file paths and descriptions to the request object
           req.filePaths = files.map((file) =>
-            path.join("uploads", folderName, file.originalname)
+            path.join(
+              "uploads",
+              folderName,
+              String(file.originalname).trim().replace(/\s+/g, "")
+            )
           );
-          req.fileNames = files.map((file) => file.originalname);
+          req.fileNames = files.map((file) =>
+            String(file.originalname).trim().replace(/\s+/g, "")
+          );
           req.descriptions = req.body.descriptions || [];
 
           next();

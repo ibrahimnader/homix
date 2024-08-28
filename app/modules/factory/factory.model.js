@@ -66,9 +66,16 @@ const Factory = sequelize.define(
       allowNull: true,
     },
     status: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.STRING,
       allowNull: true,
-      defaultValue: FACTORY_STATUS.ONLINE,
+    },
+    cairoGizaShipping: {
+      type: DataTypes.DECIMAL,
+      allowNull: true,
+    },
+    otherCitiesShipping: {
+      type: DataTypes.DECIMAL,
+      allowNull: true,
     },
   },
   {

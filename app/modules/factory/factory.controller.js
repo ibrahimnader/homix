@@ -2,15 +2,26 @@ const { AppError } = require("../../middlewares/errors");
 const FactoryService = require("./factory.service");
 
 class FactoryController {
-  static async uploadFile(req, res, next) {
+  static async deleteAttachment(req, res, next) {
+    try {
+      let factory = await FactoryService.deleteAttachment(
+        req.params.factoryId,
+        req.params.attachmentId
+      );
+      res.status(200).json(factory);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
+  static async uploadFiles(req, res, next) {
     try {
       const factoryId = req.params.id;
-      const { filePath, fileName, description } = req;
-      let factory = await FactoryService.uploadFile(
+      const { filePaths, fileNames, descriptions } = req;
+      let factory = await FactoryService.uploadFiles(
         factoryId,
-        filePath,
-        fileName,
-        description
+        filePaths,
+        fileNames,
+        descriptions
       );
       res.status(200).json(factory);
     } catch (error) {

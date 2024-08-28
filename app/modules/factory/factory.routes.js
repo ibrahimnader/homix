@@ -11,7 +11,8 @@ FactoryRouter.get("/:id", FactoryController.getOne);
 FactoryRouter.post("/", FactoryController.create);
 FactoryRouter.put("/:id", FactoryController.update);
 FactoryRouter.delete("/:id", FactoryController.delete);
-FactoryRouter.post("/:id/upload",fileUploadMiddleware("factory"), FactoryController.uploadFile);
+FactoryRouter.post("/:id/upload",fileUploadMiddleware("factory"), FactoryController.uploadFiles);
+FactoryRouter.delete("/:factoryId/attachments/:attachmentId", FactoryController.deleteAttachment);
 
 
 module.exports = FactoryRouter;

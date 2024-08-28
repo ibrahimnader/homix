@@ -66,7 +66,7 @@ const Factory = sequelize.define(
       allowNull: true,
     },
     status: {
-      type: DataTypes.NUMBER,
+      type: DataTypes.INTEGER,
       allowNull: true,
       defaultValue: FACTORY_STATUS.ONLINE,
     },

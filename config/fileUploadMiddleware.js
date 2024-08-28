@@ -24,36 +24,41 @@ const upload = multer({
 
 function fileUploadMiddleware(folderName) {
   return (req, res, next) => {
-
-    upload.single("file")(req, res, async (err) => {
+    upload.array("files")(req, res, async (err) => {
       if (err) {
-        return res.status(500).send("Error uploading file.");
+        return res.status(500).send("Error uploading files.");
       }
-      const file = req.file || (req.files && req.files.file);
+      const files = req.files;
 
-      if (file) {
+      if (files && files.length > 0) {
         try {
-          // Define the upload directory and file path
-          //get the root directory
+          // Define the upload directory
           const uploadDir = path.join(__dirname, "../uploads", folderName);
           // Ensure the upload directory exists
           await fs.ensureDir(uploadDir);
 
-          // Define the path for the new file
-          const filePath = path.join(uploadDir, file.originalname);
+          // Process each file
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
 
-          // Write the file to the specified path
-          await fs.writeFile(filePath, file.buffer);
+            // Define the path for the new file
+            const filePath = path.join(uploadDir, file.originalname);
 
-          // Attach the file path and description to the request object
-          req.filePath = path.join("uploads", folderName, file.originalname);
-          req.fileName = file.originalname;
-          req.description = req.body.description;
+            // Write the file to the specified path
+            await fs.writeFile(filePath, file.buffer);
+          }
+
+          // Attach the file paths and descriptions to the request object
+          req.filePaths = files.map((file) =>
+            path.join("uploads", folderName, file.originalname)
+          );
+          req.fileNames = files.map((file) => file.originalname);
+          req.descriptions = req.body.descriptions || [];
 
           next();
         } catch (error) {
-          console.error("Error saving file:", error);
-          res.status(500).send("Error saving file.");
+          console.error("Error saving files:", error);
+          res.status(500).send("Error saving files.");
         }
       } else {
         next();

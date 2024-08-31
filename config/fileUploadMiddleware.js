@@ -22,10 +22,13 @@ const upload = multer({
   },
 });
 function sanitizeFileName(fileName) {
-  return fileName
+  const name = fileName
     .trim()
     .replace(/\s+/g, "_") // Replace spaces with underscores
     .replace(/[^\w.-]/g, ""); // Remove special characters except for word characters, dots, and hyphens
+  //make sure name is correctly encooded
+  //handle arabic names
+  return encodeURI(name);
 }
 
 function fileUploadMiddleware(folderName) {
@@ -50,7 +53,7 @@ function fileUploadMiddleware(folderName) {
             // Define the path for the new file
             const filePath = path.join(
               uploadDir,
-              String(file.originalname).trim().replace(/\s+/g, "")
+              sanitizeFileName(file.originalname)
             );
 
             // Write the file to the specified path

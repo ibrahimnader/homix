@@ -10,18 +10,20 @@ const shopify = shopifyApi({
     "read_orders",
     "read_customers",
     "read_all_orders ",
-  "read_inventory"
+    "read_inventory",
   ],
   hostName: "ngrok-tunnel-address",
   isCustomStoreApp: true,
   adminApiAccessToken: process.env.SHOPIFY_TOKEN,
-  customerAddressDefaultFix : true
+  customerAddressDefaultFix: true,
+  //specify the api version
+  apiVersion: "2024-07",
 });
 
 const shopifyClient = new shopify.clients.Rest({
   session: {
     shop: `${process.env.SHOPIFY_STORE}.com`,
-    accessToken: process.env.SHOPIFY_STORE, 
+    accessToken: process.env.SHOPIFY_STORE,
   },
 });
 

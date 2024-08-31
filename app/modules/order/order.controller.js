@@ -7,7 +7,7 @@ class OrderController {
       const result = await OrderService.createOrder(req.body);
       res.status(result.statusCode).json(result);
     } catch (error) {
-      return next(new AppError(error.message, 500));
+      res.status(200).json({ status: "failed", message: error.message });
     }
   }
   static async importOrders(req, res, next) {
@@ -95,6 +95,6 @@ class OrderController {
     } catch (error) {
       return next(new AppError(error.message, 500));
     }
-  } 
+  }
 }
 module.exports = OrderController;

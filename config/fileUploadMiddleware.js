@@ -21,6 +21,12 @@ const upload = multer({
     }
   },
 });
+function sanitizeFileName(fileName) {
+  return fileName
+    .trim()
+    .replace(/\s+/g, "_") // Replace spaces with underscores
+    .replace(/[^\w.-]/g, ""); // Remove special characters except for word characters, dots, and hyphens
+}
 
 function fileUploadMiddleware(folderName) {
   return (req, res, next) => {
@@ -56,11 +62,11 @@ function fileUploadMiddleware(folderName) {
             path.join(
               "uploads",
               folderName,
-              String(file.originalname).trim().replace(/\s+/g, "")
+              sanitizeFileName(file.originalname)
             )
           );
           req.fileNames = files.map((file) =>
-            String(file.originalname).trim().replace(/\s+/g, "")
+            sanitizeFileName(file.originalname)
           );
           req.descriptions = req.body.descriptions || [];
 

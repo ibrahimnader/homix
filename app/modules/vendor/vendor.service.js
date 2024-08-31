@@ -11,10 +11,19 @@ class VendorsService {
         name: data.name,
       });
       vendor = vendor.toJSON();
+      vendor.name = vendor.name.replace(/[^a-zA-Z0-9]/g, "");
+      const password = await bcrypt.hash(
+        data.password
+          ? data.password
+          : `${capitalizeFirstLetter(vendor.name)}#${
+              process.env.DEFAULT_PASSWORD
+            }`,
+        10
+      );
       const user = await UserService.register({
         firstName: vendor.name,
         email: data.email || `${vendor.name}@${process.env.SHOPIFY_STORE}.com`,
-        password: data.password || process.env.DEFAULT_PASSWORD,
+        password,
         vendorId: vendor.id,
       });
       if (!user.status) {
@@ -68,14 +77,12 @@ class VendorsService {
         statusCode: 404,
       };
     }
-    const updatedVendor = await vendor.update({
-      name: data.name,
-    });
+
     await UserService.updateVendorUser(id, data);
 
     return {
       status: true,
-      data: updatedVendor,
+      data: vendor,
       message: "Vendor updated successfully",
       statusCode: 200,
     };

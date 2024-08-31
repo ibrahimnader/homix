@@ -166,19 +166,30 @@ class UserService {
       console.error(error);
     }
   }
+  static capitalizeFirstLetter(string) {
+    return string.charAt(0).toUpperCase() + string.slice(1);
+  }
   static async saveUsersForVendors(vendors) {
-    const password = await bcrypt.hash(process.env.DEFAULT_PASSWORD, 10);
-    const promises = vendors.map((vendor) => {
-      // delete white spaces and special characters
+    const promises = [];
+    for (const vendor of vendors) {
       vendor.name = vendor.name.replace(/[^a-zA-Z0-9]/g, "");
-      return User.create({
-        email: `${vendor.name.toLowerCase()}@${process.env.SHOPIFY_STORE}.com`,
-        password,
-        firstName: vendor.name,
-        userType: USER_TYPES.VENDOR,
-        vendorId: vendor.id,
-      });
-    });
+      vendor.password = await bcrypt.hash(
+        `${capitalizeFirstLetter(vendor.name)}#${process.env.DEFAULT_PASSWORD}`,
+        10
+      );
+      promises.push(
+        User.create({
+          email: `${vendor.name.toLowerCase()}@${
+            process.env.SHOPIFY_STORE
+          }.com`,
+          password,
+          firstName: vendor.name,
+          userType: USER_TYPES.VENDOR,
+          vendorId: vendor.id,
+        })
+      );
+    }
+
     let vendorsUsers = await Promise.all(promises);
     return vendorsUsers;
   }
@@ -248,6 +259,5 @@ class UserService {
     }
   }
 }
-   
 
 module.exports = UserService;

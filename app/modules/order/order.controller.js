@@ -5,9 +5,9 @@ class OrderController {
   static async createOrder(req, res, next) {
     try {
       const result = await OrderService.createOrder(req.body);
-      res.status(result.statusCode).json(result);
+      res.status(200).send("Webhook received");
     } catch (error) {
-      res.status(200).json({ status: "failed", message: error.message });
+      res.status(200).send("Webhook received");
     }
   }
   static async importOrders(req, res, next) {

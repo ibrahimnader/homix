@@ -7,6 +7,7 @@ class OrderController {
       const result = await OrderService.createOrder(req.body);
       res.status(200).send("Webhook received");
     } catch (error) {
+      console.log(" ", error);
       res.status(200).send("Webhook received");
     }
   }

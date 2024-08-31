@@ -42,10 +42,10 @@ class productsController {
   static async createProduct(req, res, next) {
     try {
       const result = await productsService.createProduct(req.body);
-      res.status(result.statusCode).json(result);
+      res.status(200).send("Webhook received");
     } catch (error) {
       console.log(error);
-      return next(new AppError(error.message, 500));
+      res.status(200).send("Webhook received");
     }
   }
 }

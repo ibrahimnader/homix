@@ -174,7 +174,7 @@ class UserService {
     for (const vendor of vendors) {
       vendor.name = vendor.name.replace(/[^a-zA-Z0-9]/g, "");
       vendor.password = await bcrypt.hash(
-        `${capitalizeFirstLetter(vendor.name)}#${process.env.DEFAULT_PASSWORD}`,
+        `${UserService.capitalizeFirstLetter(vendor.name)}#${process.env.DEFAULT_PASSWORD}`,
         10
       );
       promises.push(

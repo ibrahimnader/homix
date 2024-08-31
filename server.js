@@ -17,6 +17,7 @@ const createDefaultUser = require("./app/modules/user/user.seeder");
 
 const startServer = async () => {
   try {
+    await ShopifyHelper.createWebhooks();
     await connectToDb();
     app.use(bodyParser.json({ limit: "1mb" }));
     app.use(bodyParser.urlencoded({ limit: "16mb", extended: true }));
@@ -60,7 +61,6 @@ const startServer = async () => {
 
     app.listen(port, async () => {
       console.log(`running at port ${port}`);
-      await ShopifyHelper.createWebhooks();
       console.log("Webhooks created successfully");
       await createDefaultUser();
       console.log("Default user created successfully");

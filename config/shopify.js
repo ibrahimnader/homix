@@ -15,6 +15,7 @@ const shopify = shopifyApi({
   hostName: "ngrok-tunnel-address",
   isCustomStoreApp: true,
   adminApiAccessToken: process.env.SHOPIFY_TOKEN,
+  customerAddressDefaultFix : true
 });
 
 const shopifyClient = new shopify.clients.Rest({

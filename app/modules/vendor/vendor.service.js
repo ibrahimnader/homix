@@ -15,7 +15,7 @@ class VendorsService {
       const password = await bcrypt.hash(
         data.password
           ? data.password
-          : `${capitalizeFirstLetter(vendor.name)}#${
+          : `${UserService.capitalizeFirstLetter(vendor.name)}#${
               process.env.DEFAULT_PASSWORD
             }`,
         10

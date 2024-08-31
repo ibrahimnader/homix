@@ -22,12 +22,14 @@ const upload = multer({
   },
 });
 function sanitizeFileName(fileName) {
+  console.log("fileName", fileName);
   const name = fileName
     .trim()
     .replace(/\s+/g, "_") // Replace spaces with underscores
     .replace(/[^\w.-]/g, ""); // Remove special characters except for word characters, dots, and hyphens
   //make sure name is correctly encooded
   //handle arabic names
+  console.log("name", name);
   return encodeURI(name);
 }
 

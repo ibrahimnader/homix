@@ -5,10 +5,16 @@ class OrderController {
   static async createOrder(req, res, next) {
     try {
       const result = await OrderService.createOrder(req.body);
-      res.status(200).send("order Webhook received successfully");
+      return res.status(200).json({
+        status: true,
+        message: "Order created successfully",
+      });
     } catch (error) {
       console.log(" ", error);
-      res.status(200).send("order Webhook received With Error", error.message);
+      return res.status(200).json({
+        status: false,
+        message: `order Webhook received With Error",${error.message}`,
+      });
     }
   }
   static async importOrders(req, res, next) {

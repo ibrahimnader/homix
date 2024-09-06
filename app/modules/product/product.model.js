@@ -14,11 +14,11 @@ const Product = sequelize.define(
       allowNull: true,
     },
     image: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: true,
     },
     shopifyId: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: true,
       unique: true,
     },

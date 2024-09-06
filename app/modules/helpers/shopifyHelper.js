@@ -56,7 +56,7 @@ class ShopifyHelper {
             topic: "orders/create",
             address: `${process.env.APP_URL}/orders`,
             format: "json",
-          },
+          }, 
         },
         type: "application/json",
       }),
@@ -72,7 +72,7 @@ class ShopifyHelper {
         type: "application/json",
       }),
     ]);
-    console.log("Webhooks created successfully");
+    console.log("Webhooks created successfully"); 
   }
   static splitArrayToChunks(array, chunkSize) {
     const chunks = [];

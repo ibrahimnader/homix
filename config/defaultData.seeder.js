@@ -17,6 +17,13 @@ const createDefaultData = async () => {
     firstName: "test",
     lastName: "user",
   });
+  await User.create({
+    email: "admin@homix.com",
+    password: bcrypt.hashSync(process.env.DEFAULT_PASSWORD, 10),
+    userType: 1,
+    firstName: "test",
+    lastName: "user",
+  });
   const customVendor = await Vendor.create({
     name: "Custom",
     shopifyId: "custom",

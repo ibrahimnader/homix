@@ -40,15 +40,15 @@ class ShopifyHelper {
       path: "webhooks",
     });
 
-    for (const webhook of webhooks.body.webhooks) {
-      await shopifyClient.delete({
-        path: `webhooks/${webhook.id}`,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-    }
-    await Promise.all([
+    // for (const webhook of webhooks.body.webhooks) {
+    //   await shopifyClient.delete({
+    //     path: `webhooks/${webhook.id}`,
+    //     headers: {
+    //       "Content-Type": "application/json",
+    //     },
+    //   });
+    // }
+    const res = await Promise.all([
       shopifyClient.post({
         path: "webhooks",
         data: {

@@ -174,7 +174,9 @@ class UserService {
     for (const vendor of vendors) {
       vendor.name = vendor.name.replace(/[^a-zA-Z0-9]/g, "");
       const password = await bcrypt.hash(
-        `${UserService.capitalizeFirstLetter(vendor.name)}#${process.env.DEFAULT_PASSWORD}`,
+        `${UserService.capitalizeFirstLetter(vendor.name)}#${
+          process.env.DEFAULT_PASSWORD
+        }`,
         10
       );
       promises.push(
@@ -212,17 +214,18 @@ class UserService {
     if (email) {
       obj.email = email;
     }
-    const user = await User.findOne({
+    let user = await User.findOne({
       where: { vendorId },
     });
     if (user && Object.keys(obj).length) {
-      await user.update(obj);
+      user = await user.update(obj);
     }
     if (!user && active) {
-      await User.restore({
+      user = await User.restore({
         where: { vendorId },
       });
     }
+    return user;
   }
   static async changeActiveStatus(vendorId) {
     const transaction = await Vendor.sequelize.transaction();

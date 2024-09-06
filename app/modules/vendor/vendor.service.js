@@ -63,7 +63,10 @@ class VendorsService {
     }
     return {
       status: true,
-      data: vendor,
+      data: {
+        ...vendor,
+        user,
+      },
       statusCode: 200,
     };
   }
@@ -78,24 +81,33 @@ class VendorsService {
       };
     }
 
-    await UserService.updateVendorUser(id, data);
+    const user = await UserService.updateVendorUser(id, data);
 
     return {
       status: true,
-      data: vendor,
+      data: {
+        ...vendor,
+        active: user ? true : false,
+        user,
+      },
       message: "Vendor updated successfully",
       statusCode: 200,
     };
   }
-  static async getExistingVendorsNames(names) {
-    // get distinct vendor names from the database
-    const vendors = await Vendor.findAll({
-      where: {
-        name: names,
-      },
+  static async getExistingVendorsMap(names) {
+    const result = {};
+    const uniqueNames = [...new Set(names)];
+    const vendorsData = uniqueNames.map((name) => ({
+      name,
+    }));
+    const savedVendors = await Vendor.bulkCreate(vendorsData, {
+      updateOnDuplicate: ["name"],
     });
 
-    return vendors;
+    savedVendors.forEach((saved) => {
+      result[saved.name] = saved.id;
+    });
+    return result;
   }
   static async getVendorByNameAndSaveIfNotExist(name) {
     let vendor = await Vendor.findOne({
@@ -124,6 +136,13 @@ class VendorsService {
         model: User,
         as: "user",
       },
+    });
+    vendors.forEach((vendor) => {
+      if (vendor.user) {
+        vendor.active = true;
+      } else {
+        vendor.active = false;
+      }
     });
     return {
       status: true,

@@ -13,7 +13,7 @@ global.express = express;
 const app = express();
 const MB16 = 16 * 1024;
 const { connectToDb } = require("./config/db.config");
-const createDefaultUser = require("./app/modules/user/user.seeder");
+const createDefaultData = require("./config/defaultData.seeder");
 
 const startServer = async () => {
   try {
@@ -62,7 +62,7 @@ const startServer = async () => {
     app.listen(port, async () => {
       console.log(`running at port ${port}`);
       console.log("Webhooks created successfully");
-      await createDefaultUser();
+      await createDefaultData();
       console.log("Default user created successfully");
     });
   } catch (error) {

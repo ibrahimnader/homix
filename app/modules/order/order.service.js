@@ -21,33 +21,22 @@ class OrderService {
   }
   static async saveImportedOrders(orders) {
     const productsIds = new Set();
-    for (const order of orders) {
-      const products = order.line_items;
-      for (const product of products) {
-        productsIds.add(String(product.product_id));
-      }
-    }
-    const productsMap = await ProductsService.getProductsMappedByShopifyIds([
-      ...productsIds,
-    ]);
     const customers = [];
     for (const order of orders) {
+      for (const line of order.line_items) {
+        if (line.product_id) {
+          productsIds.add(String(line.product_id));
+        }
+      }
       if (order.customer) {
         customers.push(order.customer);
       }
     }
-    const customersIdsMap =
-      await CustomerService.getCustomersMappedByShopifyIds(customers);
-    const existingOrders = await Order.findAll({
-      where: {
-        shopifyId: orders.map((order) => String(order.id)),
-      },
-      attributes: ["shopifyId"],
-    });
-    const existingShopifyIds = new Set();
-    for (const order of existingOrders) {
-      existingShopifyIds.add(order.shopifyId);
-    }
+    const [productsMap, customersIdsMap] = await Promise.all([
+      ProductsService.getProductsMappedByShopifyIds([...productsIds]),
+      CustomerService.getCustomersMappedByShopifyIds(customers),
+    ]);
+
     const lines = [];
 
     orders = orders
@@ -103,13 +92,10 @@ class OrderService {
           totalCost,
         };
       });
-    const result = [];
-    for (const order of orders) {
-      const [savedOrder] = await Order.upsert(order, {
-        conflictFields: ["shopifyId"],
-      });
-      result.push(savedOrder);
-    }
+
+    const result = await Order.bulkCreate(orders, {
+      updateOnDuplicate: ["shopifyId"],
+    });
     const savedOrders = result.map((order) => order.toJSON());
     const orderLines = [];
     for (const { order_id, line_items } of lines) {
@@ -135,11 +121,9 @@ class OrderService {
         });
       }
     }
-    for (const line of orderLines) {
-      await OrderLine.upsert(line, {
-        conflictFields: ["shopifyId"],
-      });
-    }
+    await OrderLine.bulkCreate(orderLines, {
+      updateOnDuplicate: ["shopifyId"],
+    });
     return {
       status: true,
       statusCode: 200,
@@ -450,74 +434,6 @@ class OrderService {
     return {
       status: true,
       statusCode: 200,
-      data: order,
-    };
-  }
-  static async createOrder(orderData) {
-    const productsMap = await ProductsService.getProductsMappedByShopifyIds(
-      orderData.line_items.map((line) => line.product_id.toString())
-    );
-    const customersIdsMap =
-      await CustomerService.getCustomersMappedByShopifyIds([
-        orderData.customer,
-      ]);
-    let totalCost = 0;
-    orderData.line_items.forEach((line) => {
-      const discount_allocations = line.discount_allocations || [];
-      const lineDiscount = discount_allocations.reduce(
-        (acc, item) => acc + Number(item.amount),
-        0
-      );
-      line.discount = lineDiscount;
-      const product = productsMap[line.product_id];
-      const variant = product.variants
-        ? product.variants.find(
-            (variant) =>
-              variant.shopifyId.toString() === line.variant_id.toString()
-          )
-        : null;
-      const cost = variant ? variant.cost || 0 : 0;
-      line.unitCost = cost;
-      line.cost = cost * line.quantity;
-      totalCost += line.cost;
-    });
-
-    const order = await Order.create({
-      shopifyId: String(orderData.id),
-      name: orderData.name,
-      number: orderData.number,
-      orderNumber: orderData.order_number,
-      subTotalPrice: orderData.subtotal_price,
-      totalPrice: orderData.total_price,
-      totalDiscounts: orderData.total_discounts,
-      orderDate: orderData.created_at,
-      customerId: customersIdsMap[orderData.customer.id.toString()],
-      totalCost,
-    });
-    const orderLines = [];
-
-    for (const line of orderData.line_items) {
-      orderLines.push({
-        orderId: order.id,
-        productId: line.product_id
-          ? productsMap[line.product_id].id
-          : productsMap["custom"].id,
-        shopifyId: String(line.id),
-        title: line.title,
-        name: line.name,
-        price: line.price,
-        quantity: line.quantity,
-        sku: line.sku,
-        variant_id: line.variant_id,
-        discount: line.discount,
-        cost: line.cost,
-        unitCost: line.unitCost,
-      });
-    }
-    await OrderLine.bulkCreate(orderLines);
-    return {
-      status: true,
-      statusCode: 201,
       data: order,
     };
   }

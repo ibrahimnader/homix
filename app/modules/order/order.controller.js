@@ -2,15 +2,14 @@ const { AppError } = require("../../middlewares/errors");
 const OrderService = require("./order.service");
 
 class OrderController {
-  static async createOrder(req, res, next) {
+  static async createOrder(req, res) {
     try {
-      const result = await OrderService.createOrder(req.body);
+      const result = await OrderService.saveImportedOrders([req.body]);
       return res.status(200).json({
         status: true,
         message: "Order created successfully",
       });
     } catch (error) {
-      console.log(" ", error);
       return res.status(200).json({
         status: false,
         message: `order Webhook received With Error",${error.message}`,

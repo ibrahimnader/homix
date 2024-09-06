@@ -8,120 +8,6 @@ const { Op } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
 
 class ProductsService {
-  static async importProducts(parameters) {
-    const fields = ["id", "title", "vendor", "variants", "image"];
-    const products = await ShopifyHelper.importData(
-      "products",
-      fields,
-      parameters
-    );
-    const itemsIds = products
-      .map((product) =>
-        product.variants.map((variant) => variant.inventory_item_id)
-      )
-      .flat();
-
-    const inventoryMap = {};
-    const itemsIdsChunks = ShopifyHelper.splitArrayToChunks(itemsIds, 250);
-    for (const itemsIdsChunk of itemsIdsChunks) {
-      const inventory = await ShopifyHelper.importData(
-        "inventory_items",
-        ["id", "cost"],
-        {
-          ids: itemsIdsChunk.join(","),
-        }
-      );
-      for (const item of inventory) {
-        inventoryMap[item.id.toString()] = item.cost;
-      }
-    }
-
-    const result = await ProductsService.saveImportedProducts(
-      products,
-      inventoryMap
-    );
-
-    return result;
-  }
-  static async saveImportedProducts(products, inventoryMap) {
-    const vendorsSet = new Set();
-    const nonExistingVendors = [];
-    products.push({
-      title: "Custom Product",
-      vendor: "Custom",
-      image: null,
-      variants: [],
-      id: "custom",
-      shopifyId : "custom"
-      
-    });
-    for (const product of products) {
-      vendorsSet.add(product.vendor);
-    }
-    const vendors = [...vendorsSet];
-    const existingVendors = await VendorsService.getExistingVendorsNames(
-      vendors
-    );
-    const existingVendorsSet = new Set();
-    const vendorsMap = new Map();
-    for (const vendor of existingVendors) {
-      existingVendorsSet.add(vendor.name);
-      vendorsMap.set(vendor.name, vendor.id);
-    }
-    for (const vendor of vendors) {
-      if (!existingVendorsSet.has(vendor)) {
-        nonExistingVendors.push(vendor);
-      }
-    }
-    if (nonExistingVendors.length > 0) {
-      const newVendors = await VendorsService.saveVendors(nonExistingVendors);
-      for (const vendor of newVendors) {
-        vendorsMap.set(vendor.name, vendor.id);
-      }
-    }
-    const existingProducts = await Product.findAll({
-      where: {
-        shopifyId: products.map((product) => String(product.id)),
-      },
-      attributes: ["shopifyId"],
-    });
-    const existingShopifyIds = new Set();
-    for (const product of existingProducts) {
-      existingShopifyIds.add(product.shopifyId);
-    }
-
-    products = products
-      .filter((product) => !existingShopifyIds.has(String(product.id)))
-      .map((product) => {
-        return {
-          title: product.title,
-          vendorId: vendorsMap.get(product.vendor),
-          image: product.image ? product.image.src : null,
-          shopifyId: String(product.id),
-          variants: product.variants.map((variant) => {
-            return {
-              title: variant.title,
-              price: variant.price,
-              sku: variant.sku,
-              shopifyId: String(variant.id),
-              cost: inventoryMap[variant.inventory_item_id.toString()]
-                ? Number(inventoryMap[variant.inventory_item_id.toString()])
-                : 0,
-            };
-          }),
-        };
-      });
-
-    const importData = await Product.bulkCreate(products, {
-      updateOnDuplicate: ["shopifyId"],
-    });
-    return {
-      status: true,
-      message: "Products imported successfully",
-      data: importData,
-      statusCode: 200,
-    };
-  }
   static async getProducts(page = 1, size = 50, searchQuery = "", vendorId) {
     // search if product title contains search query or product vendor contains search query or product variant title contains search query
     const products = await Product.findAndCountAll({
@@ -203,30 +89,96 @@ class ProductsService {
     }
     return result;
   }
+  static async importProducts(parameters) {
+    const fields = ["id", "title", "vendor", "variants", "image"];
+    const products = await ShopifyHelper.importData(
+      "products",
+      fields,
+      parameters
+    );
+
+    const result = await ProductsService.saveImportedProducts(products);
+
+    return result;
+  }
+  static async getInventoryMap(itemsIds) {
+    const inventoryMap = {};
+    const itemsIdsChunks = ShopifyHelper.splitArrayToChunks(itemsIds, 250);
+    for (const itemsIdsChunk of itemsIdsChunks) {
+      const inventory = await ShopifyHelper.importData(
+        "inventory_items",
+        ["id", "cost"],
+        {
+          ids: itemsIdsChunk.join(","),
+        }
+      );
+      for (const item of inventory) {
+        inventoryMap[item.id.toString()] = item.cost;
+      }
+    }
+    return inventoryMap;
+  }
+
+  static async saveImportedProducts(products) {
+    const vendorsNames = products.map((product) => product.vendor);
+    const vendorsMap = await VendorsService.getExistingVendorsMap(vendorsNames);
+
+    const result = await ProductsService.saveProductToDB(products, vendorsMap);
+    return {
+      status: true,
+      message: "Products imported successfully",
+      data: result,
+      statusCode: 200,
+    };
+  }
+
   static async createProduct(productData) {
     let vendor = await VendorsService.getVendorByNameAndSaveIfNotExist(
       productData.vendor
     );
-    const product = await Product.create({
-      title: productData.title,
-      vendorId: vendor.id,
-      image: productData.image ? productData.image.src : null,
-      shopifyId: String(productData.id),
-      variants: productData.variants.map((variant) => {
-        return {
-          title: variant.title,
-          price: variant.price,
-          sku: variant.sku,
-          shopifyId: String(variant.id),
-        };
-      }),
+    const result = await ProductsService.saveProductToDB([productData], {
+      [productData.vendor]: vendor.id,
     });
     return {
       status: true,
       message: "Product created successfully",
-      data: product,
+      data: result[0],
       statusCode: 200,
     };
+  }
+
+  static async saveProductToDB(productsData, vendorsMap) {
+    const itemsIds = productsData
+      .map((product) =>
+        product.variants.map((variant) => variant.inventory_item_id)
+      )
+      .flat();
+    const inventoryMap = await ProductsService.getInventoryMap(itemsIds);
+    productsData = productsData.map((product) => {
+      return {
+        title: product.title,
+        vendorId: vendorsMap[product.vendor],
+        image: product.image ? product.image.src : null,
+        shopifyId: String(product.id),
+        variants: product.variants.map((variant) => {
+          return {
+            title: variant.title,
+            price: variant.price,
+            sku: variant.sku,
+            shopifyId: String(variant.id),
+            cost: inventoryMap[variant.inventory_item_id.toString()]
+              ? Number(inventoryMap[variant.inventory_item_id.toString()])
+              : 0,
+          };
+        }),
+      };
+    });
+
+    const savedProducts = await Product.bulkCreate(productsData, {
+      updateOnDuplicate: ["shopifyId"],
+    });
+
+    return savedProducts;
   }
 }
 module.exports = ProductsService;

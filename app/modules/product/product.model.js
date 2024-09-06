@@ -6,12 +6,12 @@ const Product = sequelize.define(
   "Product",
   {
     title: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: false,
     },
     vendorId: {
       type: DataTypes.INTEGER,
-      allowNull: false,
+      allowNull: true,
     },
     image: {
       type: DataTypes.STRING,
@@ -20,6 +20,7 @@ const Product = sequelize.define(
     shopifyId: {
       type: DataTypes.STRING,
       allowNull: true,
+      unique: true,
     },
     variants: {
       type: DataTypes.JSON,

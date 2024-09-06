@@ -15,7 +15,9 @@ const { ORDER_STATUS } = require("../../../config/constants");
 class OrderService {
   static async importOrders() {
     const fields = [];
-    const orders = await ShopifyHelper.importData("orders", fields);
+    const orders = await ShopifyHelper.importData("orders", fields,{
+      status: "any",
+    });
     const result = await OrderService.saveImportedOrders(orders);
     return result;
   }

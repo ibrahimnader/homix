@@ -4,12 +4,14 @@ class ShopifyHelper {
     const query = {
       limit: 250,
       fields: fields.join(","),
-      ...parameters,
     };
     const data = [];
     let response = await shopifyClient.get({
       path,
-      query,
+      query: {
+        ...query,
+        ...parameters,
+      },
     });
     let { body, pageInfo } = response;
     data.push(...body[path]);
@@ -56,7 +58,7 @@ class ShopifyHelper {
             topic: "orders/create",
             address: `${process.env.APP_URL}/orders`,
             format: "json",
-          }, 
+          },
         },
         type: "application/json",
       }),
@@ -72,7 +74,7 @@ class ShopifyHelper {
         type: "application/json",
       }),
     ]);
-    console.log("Webhooks created successfully"); 
+    console.log("Webhooks created successfully");
   }
   static splitArrayToChunks(array, chunkSize) {
     const chunks = [];

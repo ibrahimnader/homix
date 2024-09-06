@@ -39,10 +39,14 @@ class productsController {
       return next(new AppError(error.message, 500));
     }
   }
-  static async createProduct(req, res, next) {
+  static async createProduct(req, res) {
     try {
-      const result = await productsService.createProduct(req.body);
-      res.status(200).json("Product created successfully");
+      const result = await productsService.saveImportedProducts([req.body]);
+      res.status(200).json({
+        status: true,
+        statusCode: 200,
+        message: "Product created successfully",
+      });
     } catch (error) {
       console.log(error);
       res.status(200).json({

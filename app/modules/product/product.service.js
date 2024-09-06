@@ -150,10 +150,15 @@ class ProductsService {
   static async saveProductToDB(productsData, vendorsMap) {
     const itemsIds = productsData
       .map((product) =>
-        product.variants.map((variant) => variant.inventory_item_id)
+        product.variants
+          .filter((variant) => variant.inventory_item_id)
+          .map((variant) => variant.inventory_item_id)
       )
       .flat();
-    const inventoryMap = await ProductsService.getInventoryMap(itemsIds);
+    let inventoryMap = {};
+    if (itemsIds.length > 0) {
+      inventoryMap = await ProductsService.getInventoryMap(itemsIds);
+    }
     productsData = productsData.map((product) => {
       return {
         title: product.title,
@@ -166,9 +171,11 @@ class ProductsService {
             price: variant.price,
             sku: variant.sku,
             shopifyId: String(variant.id),
-            cost: inventoryMap[variant.inventory_item_id.toString()]
-              ? Number(inventoryMap[variant.inventory_item_id.toString()])
-              : 0,
+            cost:
+              variant.inventory_item_id &&
+              inventoryMap[variant.inventory_item_id.toString()]
+                ? Number(inventoryMap[variant.inventory_item_id.toString()])
+                : 0,
           };
         }),
       };

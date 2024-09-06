@@ -18,7 +18,7 @@ class UserService {
     try {
       // Find user by email
       const user = await User.scope("withPassword").findOne({
-        where: { email },
+        where: { email: String(email).toLowerCase() },
       });
 
       if (!user) {
@@ -69,7 +69,9 @@ class UserService {
         message: "Email and password are required",
       };
     }
-    const user = await User.findOne({ where: { email } });
+    const user = await User.findOne({
+      where: { email: String(email).toLowerCase() },
+    });
     if (user) {
       return {
         status: false,
@@ -84,6 +86,7 @@ class UserService {
     // Create new user
     const userObj = {
       ...body,
+      email: String(email).toLowerCase(),
       password: hashedPassword,
       userType: USER_TYPES.ADMIN,
     };

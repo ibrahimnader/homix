@@ -169,6 +169,17 @@ class UserService {
   static capitalizeFirstLetter(string) {
     return string.charAt(0).toUpperCase() + string.slice(1);
   }
+  static async saveUsersForVendorsWithNoUsers(createdVendors) {
+    const users = await User.findAll({
+      where: { vendorId: createdVendors.map((vendor) => vendor.id) },
+      paranoid: false,
+    });
+    const vendors = createdVendors.filter(
+      (vendor) => !users.find((user) => user.vendorId === vendor.id)
+    );
+    await UserService.saveUsersForVendors(vendors);
+  }
+
   static async saveUsersForVendors(vendors) {
     const promises = [];
     for (const vendor of vendors) {
@@ -215,17 +226,18 @@ class UserService {
       obj.email = email;
     }
     let user = await User.findOne({
-      where: { vendorId },
+      where: { vendorId: Number(vendorId) },
+      paranoid: false,
     });
     if (user && Object.keys(obj).length) {
       user = await user.update(obj);
     }
-    if (!user && active) {
-      user = await User.restore({
-        where: { vendorId },
+    if (user && user.deletedAt && active) {
+      await User.restore({
+        where: { vendorId: Number(vendorId) },
       });
     }
-    return user;
+    return user ? user.toJSON() : null;
   }
   static async changeActiveStatus(vendorId) {
     const transaction = await Vendor.sequelize.transaction();

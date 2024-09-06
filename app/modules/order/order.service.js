@@ -239,6 +239,9 @@ class OrderService {
         },
       ],
       where: whereClause,
+      sort: {
+        orderDate: "ASC",
+      },
       limit: Number(size),
       offset: (page - 1) * Number(size),
       subQuery: false,

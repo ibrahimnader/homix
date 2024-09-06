@@ -46,7 +46,7 @@ class VendorsService {
     }
   }
   static async getOne(id) {
-    const vendor = await Vendor.findByPk(id);
+    let vendor = await Vendor.findByPk(id);
     if (!vendor) {
       return {
         status: false,
@@ -54,6 +54,7 @@ class VendorsService {
         statusCode: 404,
       };
     }
+    vendor = vendor.toJSON();
     const user = await UserService.getUserByVendorId(id);
     if (user) {
       vendor.active = true;
@@ -86,7 +87,7 @@ class VendorsService {
     return {
       status: true,
       data: {
-        ...vendor,
+        ...vendor.toJSON(),
         active: user ? true : false,
         user,
       },
@@ -100,11 +101,18 @@ class VendorsService {
     const vendorsData = uniqueNames.map((name) => ({
       name,
     }));
-    const savedVendors = await Vendor.bulkCreate(vendorsData, {
+    const createdVendors = await Vendor.bulkCreate(vendorsData, {
       updateOnDuplicate: ["name"],
     });
 
-    savedVendors.forEach((saved) => {
+    await UserService.saveUsersForVendorsWithNoUsers(createdVendors);
+    const vendors = await Vendor.findAll({
+      where: {
+        name: uniqueNames,
+      },
+    });
+
+    vendors.forEach((saved) => {
       result[saved.name] = saved.id;
     });
     return result;
@@ -137,16 +145,17 @@ class VendorsService {
         as: "user",
       },
     });
-    vendors.forEach((vendor) => {
-      if (vendor.user) {
-        vendor.active = true;
-      } else {
-        vendor.active = false;
-      }
+    const result = vendors.map((vendor) => {
+      vendor = vendor.toJSON();
+      return {
+        ...vendor,
+        active: vendor.user ? true : false,
+      };
     });
+
     return {
       status: true,
-      data: vendors,
+      data: result,
       statusCode: 200,
     };
   }

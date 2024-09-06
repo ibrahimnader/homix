@@ -256,10 +256,12 @@ class UserService {
         where: { vendorId },
         paranoid: false,
       });
-      if (user.deletedAt) {
-        await user.restore();
-      } else {
-        await user.destroy();
+      if (user) {
+        if (user.deletedAt) {
+          await user.restore();
+        } else {
+          await user.destroy();
+        }
       }
 
       await transaction.commit();

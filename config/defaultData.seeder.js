@@ -19,7 +19,7 @@ const createDefaultData = async () => {
       email: "admin@homix.com",
       password: bcrypt.hashSync(process.env.DEFAULT_PASSWORD, 10),
       userType: 1,
-      firstName: "test",
+      firstName: "admin",
       lastName: "user",
     });
   }

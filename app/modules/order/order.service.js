@@ -241,7 +241,7 @@ class OrderService {
         },
       ],
       where: whereClause,
-      order: [["orderDate", "ASC"]],
+      order: [["orderDate", "DESC"]],
       limit: Number(size),
       offset: (page - 1) * Number(size),
       subQuery: false,

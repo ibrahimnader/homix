@@ -184,7 +184,13 @@ class ProductsService {
     });
 
     const savedProducts = await Product.bulkCreate(productsData, {
-      updateOnDuplicate: ["shopifyId"],
+      updateOnDuplicate: [
+        "shopifyId",
+        "title",
+        "vendorId",
+        "image",
+        "variants",
+      ],
     });
 
     return savedProducts;

@@ -96,7 +96,17 @@ class OrderService {
       });
 
     const result = await Order.bulkCreate(orders, {
-      updateOnDuplicate: ["shopifyId"],
+      updateOnDuplicate: [
+        "shopifyId",
+        "subTotalPrice",
+        "totalDiscounts",
+        "totalTax",
+        "shippingFees",
+        "totalPrice",
+        "orderDate",
+        "customerId",
+        "totalCost",
+      ],
     });
     const savedOrders = result.map((order) => order.toJSON());
     const orderLines = [];
@@ -124,7 +134,20 @@ class OrderService {
       }
     }
     await OrderLine.bulkCreate(orderLines, {
-      updateOnDuplicate: ["shopifyId"],
+      updateOnDuplicate: [
+        "shopifyId",
+        "orderId",
+        "productId",
+        "title",
+        "name",
+        "price",
+        "quantity",
+        "sku",
+        "variant_id",
+        "discount",
+        "cost",
+        "unitCost",
+      ],
     });
     return {
       status: true,
@@ -353,7 +376,6 @@ class OrderService {
         DeliveredOrders.subTotal += +order.subTotal;
         DeliveredOrders.totalDownPayment += +order.downPayment;
         DeliveredOrders.totalToBeCollected += +order.toBeCollected;
-
       }
       if (order.status === ORDER_STATUS.HALF_COMPLETED) {
         halfCompletedOrders.ordersCount++;

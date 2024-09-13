@@ -28,18 +28,28 @@ class CustomerService {
     customers = customers
       .filter((customer) => !existingShopifyIds.has(String(customer.id)))
       .map((customer) => {
+        const address = customer.default_address
+          ? `${customer.default_address.address1} ${customer.default_address.address2}-${customer.default_address.city}-${customer.default_address.province}-${customer.default_address.country}`
+          : "";
         return {
           shopifyId: String(customer.id),
           firstName: customer.default_address.first_name,
           lastName: customer.default_address.last_name,
           email: customer.email || customer.default_address.email,
           phoneNumber: customer.phone || customer.default_address.phone,
-          address: `${customer.default_address.address1} ${customer.default_address.address2}`,
+          address,
         };
       });
 
     const importData = await Customer.bulkCreate(customers, {
-      updateOnDuplicate: ["shopifyId"],
+      updateOnDuplicate: [
+        "shopifyId",
+        "firstName",
+        "lastName",
+        "email",
+        "phoneNumber",
+        "address",
+      ],
     });
     return {
       status: true,
@@ -90,7 +100,16 @@ class CustomerService {
         address,
       };
     });
-    const result = await Customer.bulkCreate(customers);
+    const result = await Customer.bulkCreate(customers, {
+      updateOnDuplicate: [
+        "shopifyId",
+        "firstName",
+        "lastName",
+        "email",
+        "phoneNumber",
+        "address",
+      ],
+    });
     return result.map((customer) => customer.toJSON());
   }
 }

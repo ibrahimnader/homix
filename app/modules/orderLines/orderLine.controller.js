@@ -6,7 +6,7 @@ class OrderLineController {
   static async updateOrderLine(req, res, next) {
     try {
       const { orderLineId } = req.params;
-      const { notes, status, cost, color, size, material } = req.body;
+      const { notes, status, cost, color, size, material,itemStatus } = req.body;
 
       const result = await OrderLineService.updateOrderLine(orderLineId, {
         notes,
@@ -15,6 +15,7 @@ class OrderLineController {
         color,
         size,
         material,
+        itemStatus
       });
       res.status(result.statusCode).json(result);
     } catch (error) {

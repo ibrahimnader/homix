@@ -34,8 +34,7 @@ class CustomerService {
           lastName: customer.default_address.last_name,
           email: customer.email || customer.default_address.email,
           phoneNumber: customer.phone || customer.default_address.phone,
-          address: customer.default_address.address1,
-          address2: customer.default_address.address2,
+          address: `${customer.default_address.address1} ${customer.default_address.address2}`,
         };
       });
 
@@ -76,6 +75,9 @@ class CustomerService {
   }
   static async saveCustomers(customers) {
     customers = customers.map((customer) => {
+      const address = customer.default_address
+        ? `${customer.default_address.address1} ${customer.default_address.address2}`
+        : "";
       return {
         shopifyId: String(customer.id),
         firstName:
@@ -85,12 +87,7 @@ class CustomerService {
         lastName: customer.last_name || customer.default_address.last_name,
         email: customer.email || customer.default_address.email,
         phoneNumber: customer.phone || customer.default_address.phone,
-        address: customer.default_address
-          ? customer.default_address.address1
-          : "",
-        address2: customer.default_address
-          ? customer.default_address.address2
-          : "",
+        address,
       };
     });
     const result = await Customer.bulkCreate(customers);

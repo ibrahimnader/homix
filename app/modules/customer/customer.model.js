@@ -21,7 +21,7 @@ const Customer = sequelize.define(
       allowNull: true,
     },
     address: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: true,
     },
     address2: {

@@ -163,7 +163,9 @@ class ProductsService {
       return {
         title: product.title,
         vendorId: vendorsMap[product.vendor],
-        image: product.image ? product.image.src : null,
+        image: product.image
+          ? product.image.src
+          : `${process.env.APP_URL}/uploads/default-product.png`,
         shopifyId: String(product.id),
         variants: product.variants.map((variant) => {
           return {

@@ -33,7 +33,7 @@ const createDefaultData = async () => {
     });
     await Product.create({
       title: "Custom Product",
-      image: null,
+      image: `${process.env.APP_URL}/uploads/default-product.png`,
       variants: [],
       shopifyId: "custom",
       vendorId: customVendor.id,

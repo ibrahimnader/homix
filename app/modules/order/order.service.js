@@ -237,7 +237,7 @@ class OrderService {
         {
           model: Customer,
           as: "customer",
-          required: true,
+          required: false,
         },
       ],
       where: whereClause,

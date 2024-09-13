@@ -76,7 +76,7 @@ class CustomerService {
   static async saveCustomers(customers) {
     customers = customers.map((customer) => {
       const address = customer.default_address
-        ? `${customer.default_address.address1} ${customer.default_address.address2}`
+        ? `${customer.default_address.address1} ${customer.default_address.address2}-${customer.default_address.city}-${customer.default_address.province}-${customer.default_address.country}`
         : "";
       return {
         shopifyId: String(customer.id),

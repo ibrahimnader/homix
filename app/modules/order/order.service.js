@@ -15,7 +15,7 @@ const { ORDER_STATUS } = require("../../../config/constants");
 class OrderService {
   static async importOrders() {
     const fields = [];
-    const orders = await ShopifyHelper.importData("orders", fields,{
+    const orders = await ShopifyHelper.importData("orders", fields, {
       status: "any",
     });
     const result = await OrderService.saveImportedOrders(orders);
@@ -308,6 +308,8 @@ class OrderService {
     let count = 0;
     let totalPaid = 0;
     let subTotal = 0;
+    let totalDownPayment = 0;
+    let totalToBeCollected = 0;
     const DeliveredOrders = {
       ordersCount: 0,
       totalTax: 0,
@@ -318,6 +320,21 @@ class OrderService {
       totalCommission: 0,
       totalPaid: 0,
       subTotal: 0,
+      totalDownPayment: 0,
+      totalToBeCollected: 0,
+    };
+    const halfCompletedOrders = {
+      ordersCount: 0,
+      totalTax: 0,
+      totalCost: 0,
+      totalRevenue: 0,
+      totalDiscount: 0,
+      totalProfit: 0,
+      totalCommission: 0,
+      totalPaid: 0,
+      subTotal: 0,
+      totalDownPayment: 0,
+      totalToBeCollected: 0,
     };
     for (const order of orders) {
       if (order.status === ORDER_STATUS.DELIVERED) {
@@ -334,6 +351,26 @@ class OrderService {
         DeliveredOrders.totalCommission += +order.commission;
         DeliveredOrders.totalPaid += +order.totalPrice;
         DeliveredOrders.subTotal += +order.subTotal;
+        DeliveredOrders.totalDownPayment += +order.downPayment;
+        DeliveredOrders.totalToBeCollected += +order.toBeCollected;
+
+      }
+      if (order.status === ORDER_STATUS.HALF_COMPLETED) {
+        halfCompletedOrders.ordersCount++;
+        halfCompletedOrders.totalTax += +order.totalTax;
+        halfCompletedOrders.totalCost += +order.totalCost;
+        halfCompletedOrders.totalRevenue += +order.totalPrice;
+        halfCompletedOrders.totalDiscount += +order.totalDiscounts;
+        halfCompletedOrders.totalProfit +=
+          +order.totalPrice -
+          +order.totalCost -
+          +order.commission -
+          +order.totalTax;
+        halfCompletedOrders.totalCommission += +order.commission;
+        halfCompletedOrders.totalPaid += +order.totalPrice;
+        halfCompletedOrders.subTotal += +order.subTotal;
+        halfCompletedOrders.totalDownPayment += +order.downPayment;
+        halfCompletedOrders.totalToBeCollected += +order.toBeCollected;
       }
       count++;
       totalCost += +order.totalCost;
@@ -343,6 +380,8 @@ class OrderService {
       totalTax += +order.totalTax;
       totalPaid += +order.totalPrice;
       subTotal += +order.subTotal;
+      totalDownPayment += +order.downPayment;
+      totalToBeCollected += +order.toBeCollected;
     }
     totalProfit = totalRevenue - totalCost - totalCommission - totalTax;
     return {
@@ -359,6 +398,7 @@ class OrderService {
         totalPaid,
         subTotal,
         DeliveredOrders,
+        halfCompletedOrders,
       },
     };
   }

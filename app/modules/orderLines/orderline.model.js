@@ -2,7 +2,7 @@ const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
 const Product = require("../product/product.model");
 const Note = require("../notes/notes.model");
-const { ORDER_STATUS } = require("../../../config/constants");
+const { ORDER_LINE_STATUS } = require("../../../config/constants");
 
 const OrderLine = sequelize.define(
   "OrderLine",
@@ -63,11 +63,26 @@ const OrderLine = sequelize.define(
     status: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      defaultValue: ORDER_STATUS.PENDING,
+      defaultValue: ORDER_LINE_STATUS.IN_PROGRESS,
     },
     notes: {
       type: DataTypes.TEXT,
       allowNull: true,
+    },
+    color: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      defaultValue: "",
+    },
+    size: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      defaultValue: "",
+    },
+    material: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      defaultValue: "",
     },
   },
   {

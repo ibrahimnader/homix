@@ -18,7 +18,7 @@ class productsController {
   static async getProducts(req, res, next) {
     try {
       const { page, size, searchQuery } = req.query;
-      const { vendorId } = req;
+      const vendorId = req.vendorId || req.query.vendorId;
       const result = await productsService.getProducts(
         page,
         size,

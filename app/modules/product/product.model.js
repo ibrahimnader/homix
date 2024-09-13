@@ -26,6 +26,11 @@ const Product = sequelize.define(
       type: DataTypes.JSON,
       allowNull: true,
     },
+    status: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 0,
+    },
   },
   {
     tableName: "products",
@@ -34,7 +39,7 @@ const Product = sequelize.define(
   }
 );
 
-Product.belongsTo(Vendor, { as: 'vendor', foreignKey: 'vendorId' });
-Vendor.hasMany(Product, { as: 'product', foreignKey: 'vendorId' });
+Product.belongsTo(Vendor, { as: "vendor", foreignKey: "vendorId" });
+Vendor.hasMany(Product, { as: "product", foreignKey: "vendorId" });
 
 module.exports = Product;

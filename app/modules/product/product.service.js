@@ -16,7 +16,7 @@ class ProductsService {
           model: Vendor,
           as: "vendor",
           attributes: ["name"],
-          where: vendorId ? { id: vendorId } : {},
+          where: vendorId ? { id: Number(vendorId) } : {},
           required: true,
         },
       ],

@@ -87,6 +87,8 @@ class OrderController {
         PoDate,
         notes,
         status,
+        downPayment,
+        toBeCollected,
       } = req.body;
 
       const result = await OrderService.updateOrder(orderId, {
@@ -96,6 +98,8 @@ class OrderController {
         commission,
         PoDate,
         notes,
+        downPayment,
+        toBeCollected,
       });
       res.status(result.statusCode).json(result);
     } catch (error) {

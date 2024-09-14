@@ -45,7 +45,7 @@ const Order = sequelize.define(
     status: {
       type: DataTypes.INTEGER,
       allowNull: true,
-      defaultValue: ORDER_STATUS.IN_PROGRESS,
+      defaultValue: ORDER_STATUS.PENDING,
     },
     financialStatus: {
       type: DataTypes.STRING,

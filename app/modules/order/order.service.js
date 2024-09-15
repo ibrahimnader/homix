@@ -419,6 +419,8 @@ class OrderService {
         totalCommission,
         totalPaid,
         subTotal,
+        totalDownPayment,
+        totalToBeCollected,
         DeliveredOrders,
         halfCompletedOrders,
       },

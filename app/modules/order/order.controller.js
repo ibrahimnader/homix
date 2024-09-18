@@ -34,9 +34,10 @@ class OrderController {
         financialStatus = "",
         status,
         vendorName = "",
+        vendorId,
       } = req.query;
 
-      const vendor_Id = req.vendorId;
+      const vendor_Id = req.vendorId || vendorId;
       const result = await OrderService.getOrders({
         page,
         size,

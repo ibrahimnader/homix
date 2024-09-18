@@ -209,7 +209,7 @@ class OrderService {
         )
       );
     }
-    if (vendorId) {
+    if (vendorId && vendorId !== "0") {
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
           [Op.eq]: vendorId,

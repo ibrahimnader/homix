@@ -11,7 +11,7 @@ const Customer = require("../customer/customer.model");
 const Note = require("../notes/notes.model");
 const User = require("../user/user.model");
 const { ORDER_STATUS } = require("../../../config/constants");
-
+const moment = require("moment");
 class OrderService {
   static async importOrders() {
     const fields = [];
@@ -279,10 +279,8 @@ class OrderService {
     };
   }
   static async financialReport(vendorId, startDate, endDate) {
-    const startOfstartDate = new Date(startDate);
-    const endOfEndDate = new Date(endDate);
-    startOfstartDate.setUTCHours(startOfstartDate.getUTCHours(), 0, 0, 0);
-    endOfEndDate.setUTCHours(endOfEndDate.getUTCHours(), 23, 59, 59, 999);
+    const startOfstartDate = moment(new Date(startDate)).utc().startOf("day");
+    const endOfEndDate = moment(new Date(endDate)).utc().endOf("day");
 
     let whereClause = {
       [Op.and]: [

@@ -11,7 +11,7 @@ const Customer = require("../customer/customer.model");
 const Note = require("../notes/notes.model");
 const User = require("../user/user.model");
 const { ORDER_STATUS } = require("../../../config/constants");
-const moment = require("moment");
+const moment = require("moment-timezone");
 class OrderService {
   static async importOrders() {
     const fields = [];
@@ -279,16 +279,22 @@ class OrderService {
     };
   }
   static async financialReport(vendorId, startDate, endDate) {
-    const startOfstartDate = moment(new Date(startDate))
-      .utc()
+    let startStartDate = moment
+      .tz(new Date(startDate), "Africa/Cairo")
       .startOf("day")
+      .utc()
       .toDate();
-    const endOfEndDate = moment(new Date(endDate)).utc().endOf("day").toDate();
+
+    let endOfEndDate = moment
+      .tz(new Date(endDate), "Africa/Cairo")
+      .endOf("day")
+      .utc()
+      .toDate();
 
     let whereClause = {
       [Op.and]: [
         sequelize.where(sequelize.col("orderDate"), {
-          [Op.gte]: startOfstartDate,
+          [Op.gte]: startStartDate,
         }),
         sequelize.where(sequelize.col("orderDate"), {
           [Op.lte]: endOfEndDate,

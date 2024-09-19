@@ -281,8 +281,8 @@ class OrderService {
   static async financialReport(vendorId, startDate, endDate) {
     const startOfstartDate = new Date(startDate);
     const endOfEndDate = new Date(endDate);
-    startOfstartDate.setHours(0, 0, 0, 0);
-    endOfEndDate.setHours(23, 59, 59, 999);
+    startOfstartDate.setUTCHours(startOfstartDate.getUTCHours(), 0, 0, 0);
+    endOfEndDate.setUTCHours(endOfEndDate.getUTCHours(), 23, 59, 59, 999);
 
     let whereClause = {
       [Op.and]: [

@@ -279,8 +279,11 @@ class OrderService {
     };
   }
   static async financialReport(vendorId, startDate, endDate) {
-    const startOfstartDate = moment(new Date(startDate)).utc().startOf("day");
-    const endOfEndDate = moment(new Date(endDate)).utc().endOf("day");
+    const startOfstartDate = moment(new Date(startDate))
+      .utc()
+      .startOf("day")
+      .toDate();
+    const endOfEndDate = moment(new Date(endDate)).utc().endOf("day").toDate();
 
     let whereClause = {
       [Op.and]: [

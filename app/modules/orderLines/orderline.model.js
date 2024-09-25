@@ -86,6 +86,11 @@ const OrderLine = sequelize.define(
       allowNull: true,
       defaultValue: "",
     },
+    itemShipping: {
+      type: DataTypes.DECIMAL,
+      allowNull: true,
+      defaultValue: 0,
+    },
   },
   {
     tableName: "orderLines",

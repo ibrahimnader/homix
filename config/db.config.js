@@ -21,7 +21,7 @@ async function connectToDb() {
   try {
     await sequelize
       .sync({
-        // alter: true,
+        alter: true,
       })
       .then(() => {
         console.log("Database & tables created!");

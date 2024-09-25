@@ -27,9 +27,7 @@ class OrderLineService {
         orderData[key] === undefined ||
         (orderData[key] === null && delete orderData[key])
     );
-    if (orderData.cost) {
-      orderData.unitCost = Number(orderData.cost);
-      orderData.cost = Number(orderData.cost) * orderLine.quantity;
+    if (orderData.cost || orderData.itemShipping) {
       const order = await Order.findByPk(orderLine.orderId);
       if (!order) {
         return {
@@ -38,8 +36,18 @@ class OrderLineService {
           message: "The order for this order line not found",
         };
       }
-      order.totalCost =
-        order.totalCost - orderLine.cost + orderData.cost;
+      if(orderData.cost){
+
+        orderData.unitCost = Number(orderData.cost);
+        orderData.cost = Number(orderData.cost) * orderLine.quantity;
+        order.totalCost =
+          order.totalCost - orderLine.cost + orderData.cost;
+      }
+      if(orderData.itemShipping){
+        const itemShipping = Number(orderData.itemShipping);
+        order.itemShipping =
+          order.itemShipping - orderLine.itemShipping + itemShipping;
+      }
       await order.save();
     }
 

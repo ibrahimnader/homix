@@ -15,6 +15,7 @@ class OrderLineController {
         material,
         itemStatus,
         itemShipping,
+        toBeCollected
       } = req.body;
 
       const result = await OrderLineService.updateOrderLine(orderLineId, {
@@ -26,6 +27,7 @@ class OrderLineController {
         material,
         itemStatus,
         itemShipping,
+        toBeCollected
       });
       res.status(result.statusCode).json(result);
     } catch (error) {

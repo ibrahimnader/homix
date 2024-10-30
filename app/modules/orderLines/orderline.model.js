@@ -91,6 +91,11 @@ const OrderLine = sequelize.define(
       allowNull: true,
       defaultValue: 0,
     },
+    toBeCollected: {
+      type: DataTypes.DECIMAL,
+      allowNull: true,
+      defaultValue: 0,
+    },
   },
   {
     tableName: "orderLines",

@@ -27,7 +27,7 @@ class OrderLineService {
         orderData[key] === undefined ||
         (orderData[key] === null && delete orderData[key])
     );
-    if (orderData.cost || orderData.itemShipping) {
+    if (orderData.cost || orderData.itemShipping || orderData.toBeCollected) {
       const order = await Order.findByPk(orderLine.orderId);
       if (!order) {
         return {
@@ -47,6 +47,11 @@ class OrderLineService {
         const itemShipping = Number(orderData.itemShipping);
         order.itemShipping =
           order.itemShipping - orderLine.itemShipping + itemShipping;
+      }
+      if(orderData.toBeCollected){
+        const toBeCollected = Number(orderData.toBeCollected);
+        order.toBeCollected =
+          order.toBeCollected - orderLine.toBeCollected + toBeCollected;
       }
       await order.save();
     }

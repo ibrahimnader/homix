@@ -5,19 +5,12 @@ const Product = require("../app/modules/product/product.model");
 
 const createDefaultData = async () => {
   const user = await User.findOne({
-    where: { email: "testuser@homix.com" },
+    where: { email: "admin@homix.com" },
   });
   if (!user) {
     await User.create({
-      email: "testuser@homix.com",
-      password: bcrypt.hashSync(process.env.DEFAULT_PASSWORD, 10),
-      userType: 1,
-      firstName: "test",
-      lastName: "user",
-    });
-    await User.create({
       email: "admin@homix.com",
-      password: bcrypt.hashSync(process.env.DEFAULT_PASSWORD, 10),
+      password: bcrypt.hashSync(process.env.DEFAULT_ADMIN_PASSWORD, 10),
       userType: 1,
       firstName: "admin",
       lastName: "user",

@@ -1,7 +1,7 @@
 const express = require("express");
 const OrderController = require("./order.controller");
 const verifyToken = require("../../middlewares/protectApi");
-const IsNotLogistic = require("../../middlewares/IsNotLogistic");
+const IsNotLogistic = require("../../middlewares/isNotLogistic");
 const OrderRouter = express.Router();
 
 OrderRouter.post("/", OrderController.createOrder);

@@ -79,6 +79,13 @@ class UserService {
         message: "User already exists",
       };
     }
+    if (!Object.values(USER_TYPES).includes(body.userType)) {
+      return {
+        status: false,
+        statusCode: 400,
+        message: "Invalid user type",
+      };
+    }
 
     // Hash the password
     const hashedPassword = await bcrypt.hash(String(password), 10);
@@ -88,7 +95,6 @@ class UserService {
       ...body,
       email: String(email).toLowerCase(),
       password: hashedPassword,
-      userType: USER_TYPES.ADMIN,
     };
 
     const newUser = await User.create(userObj);

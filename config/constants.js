@@ -1,6 +1,8 @@
 const USER_TYPES = {
   ADMIN: "1",
   VENDOR: "2",
+  OPERATION : "3",
+  LOGISTIC: "4",
 };
 const ORDER_STATUS = {
   PENDING : 1,

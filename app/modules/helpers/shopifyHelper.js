@@ -38,9 +38,9 @@ class ShopifyHelper {
     return data;
   }
   static async createWebhooks() {
-    const webhooks = await shopifyClient.get({
-      path: "webhooks",
-    });
+    // const webhooks = await shopifyClient.get({
+    //   path: "webhooks",
+    // });
 
     // for (const webhook of webhooks.body.webhooks) {
     //   await shopifyClient.delete({
@@ -50,30 +50,30 @@ class ShopifyHelper {
     //     },
     //   });
     // }
-    const res = await Promise.all([
-      shopifyClient.post({
-        path: "webhooks",
-        data: {
-          webhook: {
-            topic: "orders/create",
-            address: `${process.env.APP_URL}/orders`,
-            format: "json",
-          },
-        },
-        type: "application/json",
-      }),
-      shopifyClient.post({
-        path: "webhooks",
-        data: {
-          webhook: {
-            topic: "products/create",
-            address: `${process.env.APP_URL}/products`,
-            format: "json",
-          },
-        },
-        type: "application/json",
-      }),
-    ]);
+    // const res = await Promise.all([
+    //   shopifyClient.post({
+    //     path: "webhooks",
+    //     data: {
+    //       webhook: {
+    //         topic: "orders/create",
+    //         address: `${process.env.APP_URL}/orders`,
+    //         format: "json",
+    //       },
+    //     },
+    //     type: "application/json",
+    //   }),
+    //   shopifyClient.post({
+    //     path: "webhooks",
+    //     data: {
+    //       webhook: {
+    //         topic: "products/create",
+    //         address: `${process.env.APP_URL}/products`,
+    //         format: "json",
+    //       },
+    //     },
+    //     type: "application/json",
+    //   }),
+    // ]);
     console.log("Webhooks created successfully");
   }
   static splitArrayToChunks(array, chunkSize) {

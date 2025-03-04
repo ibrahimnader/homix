@@ -151,7 +151,7 @@ class UserService {
     try {
       const users = await User.findAll({
         where: {
-          userType: USER_TYPES.ADMIN,
+          userType: { [Op.not]: USER_TYPES.VENDOR },
         },
       });
       return {

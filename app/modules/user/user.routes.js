@@ -128,4 +128,25 @@ UserRouter.post("/login", AuthController.login);
  */
 UserRouter.post("/", verifyToken, isAdmin, AuthController.addUser);
 
+/**
+ * @swagger
+ * /users/{id}:
+ *   delete:
+ *     security:
+ *       - bearerAuth: []
+ *     tags:
+ *       - Users
+ *     summary: Delete user
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User deleted successfully
+ */
+UserRouter.delete("/:id", verifyToken, isAdmin, UserController.deleteUser);
+
 module.exports = UserRouter;

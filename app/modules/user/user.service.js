@@ -284,6 +284,26 @@ class UserService {
       throw error;
     }
   }
+  static async deleteUser(id) {
+    try {
+      const user = await User.findByPk(id);
+      if (!user) {
+        return {
+          status: false,
+          statusCode: 404,
+          message: "User not found",
+        };
+      }
+      await user.destroy();
+      return {
+        status: true,
+        statusCode: 200,
+        message: "User deleted successfully",
+      };
+    } catch (error) {
+      console.error(error);
+    }
+  }
 }
 
 module.exports = UserService;

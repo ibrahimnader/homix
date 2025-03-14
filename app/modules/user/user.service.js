@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const { USER_TYPES } = require("../../../config/constants");
 const Vendor = require("../vendor/vendor.model");
+const { Op } = require("sequelize");
 
 class UserService {
   static async login(email, password) {
@@ -21,17 +22,13 @@ class UserService {
         where: { email: String(email).toLowerCase() },
       });
 
-      if (!user) {
-        return {
-          status: false,
-          statusCode: 401,
-          message: "Invalid email or password",
-        };
-      }
-
+      
       // Check if password matches
-      const isMatch = await bcrypt.compare(String(password), user.password);
-      if (!isMatch) {
+      const isMatch = await bcrypt.compare(
+        String(password),
+        String(user.password) || ""
+      );
+      if (!user || !isMatch) {
         return {
           status: false,
           statusCode: 401,

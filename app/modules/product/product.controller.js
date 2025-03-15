@@ -18,12 +18,21 @@ class productsController {
   static async getProducts(req, res, next) {
     try {
       const { page, size, searchQuery } = req.query;
-      const vendorId = req.vendorId || req.query.vendorId;
+      const vendorFromToken = req.vendorId;
+      let vendors = [];
+      if (vendorFromToken) {
+        vendors = [vendorFromToken];
+      } else {
+        vendors = req.query.vendorsIds ? req.query.vendorsIds.split(",") : [];
+      }
+      const categories = req.query.categories ? req.query.categories.split(",") : [];
+
       const result = await productsService.getProducts(
         page,
         size,
         searchQuery,
-        vendorId
+        vendors,
+        categories
       );
       res.status(result.statusCode).json(result);
     } catch (error) {

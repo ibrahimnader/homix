@@ -6,35 +6,88 @@ const ShopifyHelper = require("../helpers/shopifyHelper");
 const Vendor = require("../vendor/vendor.model");
 const { Op } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
+const { saveProductsCategories } = require("../category/categoty.service");
+const ProductCategory = require("../category/productCategory.model");
+const Category = require("../category/category.model");
 
 class ProductsService {
-  static async getProducts(page = 1, size = 50, searchQuery = "", vendorId) {
+  static async getProducts(
+    page = 1,
+    size = 50,
+    searchQuery = "",
+    vendorsId,
+    categories
+  ) {
     // search if product title contains search query or product vendor contains search query or product variant title contains search query
+
+    const whereClause = {};
+    if (categories?.length) {
+      const validCategories = categories
+        .map((id) => Number(id))
+        .filter(Boolean);
+
+      const productIds = await ProductCategory.findAll({
+        attributes: ["productId"],
+        where: {
+          categoryId: {
+            [Op.in]: validCategories,
+          },
+        },
+        group: ["productId"],
+      });
+
+      whereClause.id = {
+        [Op.in]: productIds.map((p) => p.productId),
+      };
+    }
+
     const products = await Product.findAndCountAll({
       include: [
         {
           model: Vendor,
           as: "vendor",
           attributes: ["name"],
-          where: vendorId && vendorId !== "0" ? { id: Number(vendorId) } : {},
+
+          where:
+            vendorsId && vendorsId.length
+              ? { id: { [Op.in]: vendorsId.map((id) => Number(id)) } }
+              : {},
           required: true,
         },
+        {
+          model: ProductCategory,
+          attributes: ["categoryId"],
+          as: "categories",
+          include: [
+            {
+              model: Category,
+              as: "category",
+              attributes: ["title"],
+            },
+          ],
+          required: false,
+        },
       ],
-      where: searchQuery
-        ? {
-            [Op.or]: [
-              sequelize.where(sequelize.fn("lower", sequelize.col("title")), {
-                [Op.like]: `%${searchQuery.toLowerCase()}%`,
-              }),
-              sequelize.where(
-                sequelize.fn("lower", sequelize.col("vendor.name")),
-                {
+      where: {
+        ...whereClause,
+        // ...(vendorId ? { vendorId } : {}),
+        ...(searchQuery
+          ? {
+              [Op.or]: [
+                sequelize.where(sequelize.fn("lower", sequelize.col("title")), {
                   [Op.like]: `%${searchQuery.toLowerCase()}%`,
-                }
-              ),
-            ],
-          }
-        : {},
+                }),
+                sequelize.where(
+                  sequelize.fn("lower", sequelize.col("vendor.name")),
+                  {
+                    [Op.like]: `%${searchQuery.toLowerCase()}%`,
+                  }
+                ),
+              ],
+            }
+          : {}),
+      },
+      distinct: true,
       limit: Number(size),
       offset: (page - 1) * Number(size),
     });
@@ -54,6 +107,17 @@ class ProductsService {
           model: Vendor,
           as: "vendor",
           attributes: ["name"],
+        },
+        {
+          model: ProductCategory,
+          as: "categories",
+          include: [
+            {
+              model: Category,
+              as: "category",
+              attributes: ["title"],
+            },
+          ],
         },
       ],
     });
@@ -90,7 +154,14 @@ class ProductsService {
     return result;
   }
   static async importProducts(parameters) {
-    const fields = ["id", "title", "vendor", "variants", "image"];
+    const fields = [
+      "id",
+      "title",
+      "vendor",
+      "variants",
+      "image",
+      "collection_id",
+    ];
     const products = await ShopifyHelper.importData(
       "products",
       fields,
@@ -124,6 +195,11 @@ class ProductsService {
     const vendorsMap = await VendorsService.getExistingVendorsMap(vendorsNames);
 
     const result = await ProductsService.saveProductToDB(products, vendorsMap);
+    const productsMap = {};
+    result.forEach((product) => {
+      productsMap[String(product.shopifyId)] = product;
+    });
+    await saveProductsCategories(productsMap);
     return {
       status: true,
       message: "Products imported successfully",
@@ -155,10 +231,12 @@ class ProductsService {
           .map((variant) => variant.inventory_item_id)
       )
       .flat();
+
     let inventoryMap = {};
     if (itemsIds.length > 0) {
       inventoryMap = await ProductsService.getInventoryMap(itemsIds);
     }
+
     productsData = productsData.map((product) => {
       return {
         title: product.title,

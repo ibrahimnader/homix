@@ -74,9 +74,12 @@ class ProductsService {
         ...(searchQuery
           ? {
               [Op.or]: [
-                sequelize.where(sequelize.fn("lower", sequelize.col("title")), {
-                  [Op.like]: `%${searchQuery.toLowerCase()}%`,
-                }),
+                sequelize.where(
+                  sequelize.fn("lower", sequelize.col("Product.title")),
+                  {
+                    [Op.like]: `%${searchQuery.toLowerCase()}%`,
+                  }
+                ),
                 sequelize.where(
                   sequelize.fn("lower", sequelize.col("vendor.name")),
                   {

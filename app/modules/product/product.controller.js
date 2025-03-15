@@ -25,7 +25,7 @@ class productsController {
       } else {
         vendors = req.query.vendorsIds ? req.query.vendorsIds.split(",") : [];
       }
-      const categories = req.query.categories ? req.query.categories.split(",") : [];
+      const categories = req.query.categoriesIds ? req.query.categoriesIds.split(",") : [];
 
       const result = await productsService.getProducts(
         page,

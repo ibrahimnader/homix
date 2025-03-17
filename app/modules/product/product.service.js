@@ -259,19 +259,17 @@ class ProductsService {
               inventoryMap[variant.inventory_item_id.toString()]
                 ? Number(inventoryMap[variant.inventory_item_id.toString()])
                 : 0,
+            color: variant.option1,
+            size: variant.option2,
+            material: variant.option3,
           };
         }),
       };
     });
 
     const savedProducts = await Product.bulkCreate(productsData, {
-      updateOnDuplicate: [
-        "shopifyId",
-        "title",
-        "vendorId",
-        "image",
-        "variants",
-      ],
+      updateOnDuplicate: ["title", "vendorId", "image", "variants"],
+      fields: ["shopifyId", "title", "vendorId", "image", "variants"],
     });
 
     return savedProducts;

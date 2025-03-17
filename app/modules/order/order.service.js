@@ -12,6 +12,8 @@ const Note = require("../notes/notes.model");
 const User = require("../user/user.model");
 const { ORDER_STATUS } = require("../../../config/constants");
 const moment = require("moment-timezone");
+const PREFIX = "H";
+
 class OrderService {
   static async importOrders() {
     const fields = [];
@@ -24,6 +26,20 @@ class OrderService {
   static async saveImportedOrders(orders) {
     const productsIds = new Set();
     const customers = [];
+    const lastOrder = await Order.findOne({
+      order: [["createdAt", "DESC"]],
+      attributes: ["code"],
+    });
+
+    // Get last code number or default to 0
+    const lastCode = lastOrder?.code || `${PREFIX}0`;
+    const codeNumber = parseInt(lastCode.replace(PREFIX, ""), 10);
+
+    if (isNaN(codeNumber)) {
+      throw new Error("Invalid order code format");
+    }
+    const nextNumber = codeNumber + 1;
+
     for (const order of orders) {
       for (const line of order.line_items) {
         if (line.product_id) {
@@ -77,6 +93,7 @@ class OrderService {
         return {
           shopifyId: String(order.id),
           name: order.name,
+          code: `${PREFIX}${++nextNumber}`,
           number: order.number,
           orderNumber: order.order_number,
           subTotalPrice: order.total_line_items_price,

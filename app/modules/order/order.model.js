@@ -11,10 +11,14 @@ const Order = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
     },
+    code: {
+      type: DataTypes.STRING,
+      // allowNull: false,
+      // unique: true,
+    },
     shopifyId: {
       type: DataTypes.STRING,
       allowNull: false,
-      unique: true,
     },
     number: {
       type: DataTypes.STRING,

@@ -1,6 +1,10 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
-const { ORDER_STATUS, PAYMENT_STATUS } = require("../../../config/constants");
+const {
+  ORDER_STATUS,
+  PAYMENT_STATUS,
+  DELIVERY_STATUS,
+} = require("../../../config/constants");
 const OrderLine = require("../orderLines/orderline.model");
 const Customer = require("../customer/customer.model");
 
@@ -111,6 +115,10 @@ const Order = sequelize.define(
       allowNull: true,
       defaultValue: 0,
     },
+    deliveryStatus: {
+      type: DataTypes.ENUM(Object.values(DELIVERY_STATUS)),
+      allowNull: true,
+    },
   },
   {
     tableName: "orders",
@@ -124,10 +132,4 @@ OrderLine.belongsTo(Order, { foreignKey: "orderId" });
 
 Order.belongsTo(Customer, { as: "customer", foreignKey: "customerId" });
 Customer.hasMany(Order, { foreignKey: "customerId" });
-
-// Order.sync({ alter: true })
-//   .then((result) => {
-//     console.log(result);
-//   })
-//   .catch((err) => {});
 module.exports = Order;

@@ -27,25 +27,14 @@ class OrderController {
   }
   static async getOrders(req, res, next) {
     try {
-      const {
-        page = 1,
-        size = 50,
-        orderNumber = "",
-        financialStatus = "",
-        status,
-        vendorName = "",
-        vendorId,
-      } = req.query;
-
-      const vendor_Id = req.vendorId || vendorId;
+      let vendorUser = false;
+      if (req.vendorId) {
+        req.query.vendorId = req.vendorId;
+        vendorUser = true;
+      }
       const result = await OrderService.getOrders({
-        page,
-        size,
-        orderNumber,
-        financialStatus,
-        status,
-        vendorName,
-        vendorId: vendor_Id,
+        ...req.query,
+        vendorUser,
       });
       res.status(result.statusCode).json(result);
     } catch (error) {

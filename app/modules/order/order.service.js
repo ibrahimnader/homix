@@ -173,13 +173,17 @@ class OrderService {
     };
   }
   static async getOrders({
-    page,
-    size,
+    page = 1,
+    size = 50,
     vendorName,
     vendorId,
     orderNumber,
     financialStatus,
     status,
+    deliveryStatus,
+    startDate,
+    endDate,
+    vendorUser,
   }) {
     let whereClause = {
       [Op.and]: [],
@@ -213,6 +217,34 @@ class OrderService {
         )
       );
     }
+    if (deliveryStatus) {
+      whereClause[Op.and].push(
+        sequelize.where(
+          sequelize
+            .fn("lower", sequelize.col("deliveryStatus"))
+            .cast(sequelize.Sequelize.STRING),
+          {
+            [Op.like]: `%${deliveryStatus.toLowerCase()}%`,
+          }
+        )
+      );
+    }
+    if (startDate && endDate) {
+      let startStartDate = moment.startOf("day").utc().toDate();
+
+      let endOfEndDate = moment.endOf("day").utc().toDate();
+
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("createdAt"), {
+          [Op.gte]: startStartDate,
+        })
+      );
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("createdAt"), {
+          [Op.lte]: endOfEndDate,
+        })
+      );
+    }
     if (vendorName) {
       whereClause[Op.and].push(
         sequelize.where(
@@ -234,7 +266,18 @@ class OrderService {
       );
     }
 
-    if (status) {
+    if (vendorUser) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.status"), {
+          [Op.gt]: ORDER_STATUS.IN_PROGRESS,
+        })
+      );
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.status"), {
+          [Op.ne]: ORDER_STATUS.CANCELED,
+        })
+      );
+    } else if (status) {
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("Order.status"), {
           [Op.eq]: status,

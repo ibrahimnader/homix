@@ -121,7 +121,7 @@ const Order = sequelize.define(
       defaultValue: 0,
     },
     deliveryStatus: {
-      type: DataTypes.ENUM(Object.values(DELIVERY_STATUS)),
+      type: DataTypes.INTEGER,
       allowNull: true,
     },
     userId: {
@@ -130,7 +130,7 @@ const Order = sequelize.define(
     },
     shippedFromInventory:{
       type: DataTypes.BOOLEAN,
-      allowNull: true,
+      allowNull: false,
       defaultValue: false,
     }
     

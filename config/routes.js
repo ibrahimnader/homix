@@ -42,6 +42,7 @@ const verifyToken = require("../app/middlewares/protectApi");
 const isAdmin = require("../app/middlewares/isAdmin");
 const OrderLineRouter = require("../app/modules/orderLines/orderLine.routes");
 const isNotVendor = require("../app/middlewares/isNotVendor");
+const CategoriesRouter = require("../app/modules/product/categories.routes");
 
 // Swagger UI route
 mainRouter.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
@@ -120,6 +121,20 @@ mainRouter.use("/factories", verifyToken, isAdmin, FactoryRouter);
  *         description: List of products
  */
 mainRouter.use("/products", ProductsRouter);
+/**
+ * @swagger
+ * /categories:
+ *   get:
+ *     security:
+ *       - bearerAuth: []
+ *     tags:
+ *       - Categories
+ *     summary: Get all categories
+ *     responses:
+ *       200:
+ *         description: List of categories
+ */
+mainRouter.use("/categories", CategoriesRouter);
 
 /**
  * @swagger

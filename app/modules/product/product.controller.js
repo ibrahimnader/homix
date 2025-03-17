@@ -25,7 +25,9 @@ class productsController {
       } else {
         vendors = req.query.vendorsIds ? req.query.vendorsIds.split(",") : [];
       }
-      const categories = req.query.categoriesIds ? req.query.categoriesIds.split(",") : [];
+      const categories = req.query.categoriesIds
+        ? req.query.categoriesIds.split(",")
+        : [];
 
       const result = await productsService.getProducts(
         page,
@@ -34,6 +36,14 @@ class productsController {
         vendors,
         categories
       );
+      res.status(result.statusCode).json(result);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
+  static async getAllCategories(req, res, next) {
+    try {
+      const result = await productsService.getAllCategories();
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));

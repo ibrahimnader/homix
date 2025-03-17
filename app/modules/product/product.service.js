@@ -276,5 +276,16 @@ class ProductsService {
 
     return savedProducts;
   }
+
+  static async getAllCategories() {
+    const categories = await Category.findAll({
+      attributes: ["title", "id"],
+    });
+    return {
+      status: true,
+      statusCode: 200,
+      data: categories,
+    };
+  }
 }
 module.exports = ProductsService;

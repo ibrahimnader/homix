@@ -7,6 +7,7 @@ const {
 } = require("../../../config/constants");
 const OrderLine = require("../orderLines/orderline.model");
 const Customer = require("../customer/customer.model");
+const User = require("../user/user.model");
 
 const Order = sequelize.define(
   "Order",
@@ -47,6 +48,10 @@ const Order = sequelize.define(
       defaultValue: 0,
     },
     orderDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    expectedDate: {
       type: DataTypes.DATE,
       allowNull: true,
     },
@@ -119,6 +124,16 @@ const Order = sequelize.define(
       type: DataTypes.ENUM(Object.values(DELIVERY_STATUS)),
       allowNull: true,
     },
+    userId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    shippedFromInventory:{
+      type: DataTypes.BOOLEAN,
+      allowNull: true,
+      defaultValue: false,
+    }
+    
   },
   {
     tableName: "orders",
@@ -132,4 +147,7 @@ OrderLine.belongsTo(Order, { foreignKey: "orderId" });
 
 Order.belongsTo(Customer, { as: "customer", foreignKey: "customerId" });
 Customer.hasMany(Order, { foreignKey: "customerId" });
+
+Order.belongsTo(User, { as: "user", foreignKey: "userId" });
+User.hasMany(Order, { foreignKey: "userId" });
 module.exports = Order;

@@ -230,9 +230,17 @@ class OrderService {
       );
     }
     if (startDate && endDate) {
-      let startStartDate = moment.startOf("day").utc().toDate();
+      let startStartDate = moment
+        .tz(new Date(startDate), "Africa/Cairo")
+        .startOf("day")
+        .utc()
+        .toDate();
 
-      let endOfEndDate = moment.endOf("day").utc().toDate();
+      let endOfEndDate = moment
+        .tz(new Date(endDate), "Africa/Cairo")
+        .endOf("day")
+        .utc()
+        .toDate();
 
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("createdAt"), {

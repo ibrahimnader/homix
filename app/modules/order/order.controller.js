@@ -79,6 +79,8 @@ class OrderController {
         status,
         downPayment,
         toBeCollected,
+        userId,
+        deliveryStatus,
       } = req.body;
 
       const result = await OrderService.updateOrder(orderId, {
@@ -90,7 +92,19 @@ class OrderController {
         notes,
         downPayment,
         toBeCollected,
+        userId,
+        deliveryStatus,
       });
+      res.status(result.statusCode).json(result);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
+
+  static async deleteOrder(req, res, next) {
+    try {
+      const { orderId } = req.params;
+      const result = await OrderService.deleteOrder(orderId);
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));

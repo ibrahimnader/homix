@@ -579,5 +579,22 @@ class OrderService {
       data: order,
     };
   }
+
+  static async deleteOrder(orderId) {
+    const order = await Order.findByPk(orderId);
+    if (!order) {
+      return {
+        status: false,
+        statusCode: 404,
+        message: "Order not found",
+      };
+    }
+    await order.destroy();
+    return {
+      status: true,
+      statusCode: 200,
+      message: "Order deleted successfully",
+    };
+  }
 }
 module.exports = OrderService;

@@ -2,6 +2,7 @@ const express = require("express");
 const OrderController = require("./order.controller");
 const verifyToken = require("../../middlewares/protectApi");
 const IsNotLogistic = require("../../middlewares/isNotLogistic");
+const isNotVendor = require("../../middlewares/isNotVendor");
 const OrderRouter = express.Router();
 
 /**
@@ -155,5 +156,28 @@ OrderRouter.put("/:orderId", verifyToken, IsNotLogistic, OrderController.updateO
  *         description: Orders imported successfully
  */
 OrderRouter.post("/import", verifyToken, IsNotLogistic, OrderController.importOrders);
+
+
+/**
+ * 
+ * @swagger
+ * /orders/{orderId}:
+ *  delete:
+ *   security:
+ *    - bearerAuth: []
+ *  tags:
+ *   - Orders
+ * summary: Delete order
+ * parameters:
+ * - in: path
+ *  name: orderId
+ * required: true
+ * schema:
+ * type: string
+ * responses:
+ * 200:
+ * description: Order deleted successfully
+ */
+OrderRouter.delete("/:orderId", verifyToken, isNotVendor, OrderController.deleteOrder);
 
 module.exports = OrderRouter;

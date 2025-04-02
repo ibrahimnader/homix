@@ -243,12 +243,12 @@ class OrderService {
         .toDate();
 
       whereClause[Op.and].push(
-        sequelize.where(sequelize.col("createdAt"), {
+        sequelize.where(sequelize.col("Order.createdAt"), {
           [Op.gte]: startStartDate,
         })
       );
       whereClause[Op.and].push(
-        sequelize.where(sequelize.col("createdAt"), {
+        sequelize.where(sequelize.col("Order.createdAt"), {
           [Op.lte]: endOfEndDate,
         })
       );

@@ -110,5 +110,44 @@ class OrderController {
       return next(new AppError(error.message, 500));
     }
   }
+  static async updateNote(req, res, next) {
+    try {
+      const { orderId, noteId } = req.params;
+      const { text } = req.body;
+      const result = await OrderService.updateNote(
+        req.user,
+        orderId,
+        noteId,
+        text
+      );
+      res.status(result.statusCode).json(result);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
+  static async addNote(req, res, next) {
+    try {
+      const { orderId } = req.params;
+      const { text } = req.body;
+
+      const result = await OrderService.addNote(req.user, orderId, text);
+      res.status(result.statusCode).json(result);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
+  static async deleteNote(req, res, next) {
+    try {
+      const { orderId, noteId } = req.params;
+      const result = await OrderService.deleteNote(
+        req.user,
+        orderId,
+        noteId
+      );
+      res.status(result.statusCode).json(result);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
 }
 module.exports = OrderController;

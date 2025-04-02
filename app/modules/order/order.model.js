@@ -8,6 +8,7 @@ const {
 const OrderLine = require("../orderLines/orderline.model");
 const Customer = require("../customer/customer.model");
 const User = require("../user/user.model");
+const Note = require("../notes/notes.model");
 
 const Order = sequelize.define(
   "Order",
@@ -128,12 +129,11 @@ const Order = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
-    shippedFromInventory:{
+    shippedFromInventory: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
-    }
-    
+    },
   },
   {
     tableName: "orders",
@@ -150,4 +150,7 @@ Customer.hasMany(Order, { foreignKey: "customerId" });
 
 Order.belongsTo(User, { as: "user", foreignKey: "userId" });
 User.hasMany(Order, { foreignKey: "userId" });
+
+Order.hasMany(Note, { as: "notesList", foreignKey: "entityId" });
+Note.belongsTo(Order, { foreignKey: "entityId" });
 module.exports = Order;

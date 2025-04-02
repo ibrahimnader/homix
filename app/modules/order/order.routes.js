@@ -55,7 +55,12 @@ OrderRouter.post("/", OrderController.createOrder);
  *       200:
  *         description: Financial report data
  */
-OrderRouter.get("/financialReport", verifyToken, IsNotLogistic, OrderController.financialReport);
+OrderRouter.get(
+  "/financialReport",
+  verifyToken,
+  IsNotLogistic,
+  OrderController.financialReport
+);
 
 /**
  * @swagger
@@ -108,7 +113,12 @@ OrderRouter.get("/", verifyToken, IsNotLogistic, OrderController.getOrders);
  *       200:
  *         description: Order details
  */
-OrderRouter.get("/:orderId", verifyToken, IsNotLogistic, OrderController.getOneOrder);
+OrderRouter.get(
+  "/:orderId",
+  verifyToken,
+  IsNotLogistic,
+  OrderController.getOneOrder
+);
 
 /**
  * @swagger
@@ -140,7 +150,12 @@ OrderRouter.get("/:orderId", verifyToken, IsNotLogistic, OrderController.getOneO
  *       200:
  *         description: Order updated successfully
  */
-OrderRouter.put("/:orderId", verifyToken, IsNotLogistic, OrderController.updateOrder);
+OrderRouter.put(
+  "/:orderId",
+  verifyToken,
+  IsNotLogistic,
+  OrderController.updateOrder
+);
 
 /**
  * @swagger
@@ -155,11 +170,15 @@ OrderRouter.put("/:orderId", verifyToken, IsNotLogistic, OrderController.updateO
  *       200:
  *         description: Orders imported successfully
  */
-OrderRouter.post("/import", verifyToken, IsNotLogistic, OrderController.importOrders);
-
+OrderRouter.post(
+  "/import",
+  verifyToken,
+  IsNotLogistic,
+  OrderController.importOrders
+);
 
 /**
- * 
+ *
  * @swagger
  * /orders/{orderId}:
  *  delete:
@@ -178,6 +197,116 @@ OrderRouter.post("/import", verifyToken, IsNotLogistic, OrderController.importOr
  * 200:
  * description: Order deleted successfully
  */
-OrderRouter.delete("/:orderId", verifyToken, isNotVendor, OrderController.deleteOrder);
+OrderRouter.delete(
+  "/:orderId",
+  verifyToken,
+  isNotVendor,
+  OrderController.deleteOrder
+);
+/**
+ * @swagger
+ * /orders/{orderId}/notes/{noteId}:
+ *   put:
+ *     security:
+ *       - bearerAuth: []
+ *     tags:
+ *       - Order Lines
+ *     summary: Update order line note
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: noteId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               text:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Note updated successfully
+ */
+OrderRouter.put(
+  "/:orderId/notes/:noteId",
+  verifyToken,
+  isNotVendor,
+  OrderController.updateNote
+);
+
+/**
+ * @swagger
+ * /orders/{orderId}/notes:
+ *   post:
+ *     security:
+ *       - bearerAuth: []
+ *     tags:
+ *       - Order Lines
+ *     summary: Add note to order line
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               text:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Note added successfully
+ */
+OrderRouter.post(
+  "/:orderId/notes",
+  verifyToken,
+  isNotVendor,
+  OrderController.addNote
+);
+
+/**
+ * @swagger
+ * /orders/{orderId}/notes/{noteId}:
+ *   delete:
+ *     security:
+ *       - bearerAuth: []
+ *     tags:
+ *       - Order Lines
+ *     summary: Delete order line note
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: noteId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Note deleted successfully
+ */
+OrderRouter.delete(
+  "/:orderId/notes/:noteId",
+  verifyToken,
+  isNotVendor,
+  OrderController.deleteNote
+);
 
 module.exports = OrderRouter;

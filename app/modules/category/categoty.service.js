@@ -38,7 +38,12 @@ class CategoryService {
         shopifyId: String(category.id),
       };
     });
-    const savedCategories = await Category.bulkCreate(categoriesData, {
+    // Remove duplicates based on shopifyId
+    const uniqueCategories = categoriesData.filter(
+      (category, index, self) =>
+        index === self.findIndex((c) => c.shopifyId === category.shopifyId)
+    );
+    const savedCategories = await Category.bulkCreate(uniqueCategories, {
       updateOnDuplicate: ["shopifyId", "title", "image"],
     });
     return savedCategories;

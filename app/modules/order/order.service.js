@@ -38,7 +38,7 @@ class OrderService {
     if (isNaN(codeNumber)) {
       throw new Error("Invalid order code format");
     }
-    const nextNumber = codeNumber + 1;
+    let nextNumber = codeNumber + 1;
 
     for (const order of orders) {
       for (const line of order.line_items) {

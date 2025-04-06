@@ -81,6 +81,7 @@ class OrderController {
         toBeCollected,
         userId,
         deliveryStatus,
+        shippedFromInventory,
       } = req.body;
 
       const result = await OrderService.updateOrder(orderId, {
@@ -94,6 +95,10 @@ class OrderController {
         toBeCollected,
         userId,
         deliveryStatus,
+        shippedFromInventory:
+          shippedFromInventory && shippedFromInventory == "true"
+            ? true
+            : false,
       });
       res.status(result.statusCode).json(result);
     } catch (error) {
@@ -139,11 +144,7 @@ class OrderController {
   static async deleteNote(req, res, next) {
     try {
       const { orderId, noteId } = req.params;
-      const result = await OrderService.deleteNote(
-        req.user,
-        orderId,
-        noteId
-      );
+      const result = await OrderService.deleteNote(req.user, orderId, noteId);
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));

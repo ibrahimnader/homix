@@ -219,14 +219,9 @@ class OrderService {
     }
     if (deliveryStatus) {
       whereClause[Op.and].push(
-        sequelize.where(
-          sequelize
-            .fn("lower", sequelize.col("deliveryStatus"))
-            .cast(sequelize.Sequelize.STRING),
-          {
-            [Op.like]: `%${deliveryStatus.toLowerCase()}%`,
-          }
-        )
+        sequelize.where(sequelize.col("Order.deliveryStatus"), {
+          [Op.eq]: deliveryStatus,
+        })
       );
     }
     if (startDate && endDate) {

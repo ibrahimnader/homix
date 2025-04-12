@@ -106,7 +106,7 @@ class OrderService {
               )
             : 0,
           totalPrice: order.total_price,
-          orderDate: order.created_at|| new Date(),
+          orderDate: order.created_at || new Date(),
           customerId: customersIdsMap[order.customer.id.toString()],
           totalCost,
         };
@@ -342,17 +342,16 @@ class OrderService {
     };
   }
   static async financialReport(vendorId, startDate, endDate) {
-    let startStartDate = moment
-      .tz(new Date(startDate), "Africa/Cairo")
-      .startOf("day")
-      .utc()
-      .toDate();
-
-    let endOfEndDate = moment
-      .tz(new Date(endDate), "Africa/Cairo")
-      .endOf("day")
-      .utc()
-      .toDate();
+    let startStartDate = startDate
+      ? moment
+          .tz(new Date(startDate), "Africa/Cairo")
+          .startOf("day")
+          .utc()
+          .toDate()
+      : moment().tz(new Date(), "Africa/Cairo").startOf("month").utc();
+    let endOfEndDate = endDate
+      ? moment.tz(new Date(endDate), "Africa/Cairo").endOf("day").utc().toDate()
+      : moment().tz(new Date(), "Africa/Cairo").endOf("day").utc().toDate();
 
     let whereClause = {
       [Op.and]: [

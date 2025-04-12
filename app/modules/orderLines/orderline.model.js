@@ -96,6 +96,16 @@ const OrderLine = sequelize.define(
       allowNull: true,
       defaultValue: 0,
     },
+    commission: {
+      type: DataTypes.DECIMAL,
+      allowNull: true,
+      defaultValue: 0,
+    },
+    tax: {
+      type: DataTypes.DECIMAL,
+      allowNull: true,
+      defaultValue: 0,
+    },
   },
   {
     tableName: "orderLines",

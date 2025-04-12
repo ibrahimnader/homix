@@ -17,7 +17,7 @@ const createDefaultData = require("./config/defaultData.seeder");
 
 const startServer = async () => {
   try {
-    await ShopifyHelper.createWebhooks();
+    // await ShopifyHelper.createWebhooks();
     await connectToDb();
     app.use(bodyParser.json({ limit: "1mb" }));
     app.use(bodyParser.urlencoded({ limit: "16mb", extended: true }));

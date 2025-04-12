@@ -106,7 +106,7 @@ class OrderService {
               )
             : 0,
           totalPrice: order.total_price,
-          orderDate: order.created_at,
+          orderDate: order.created_at|| new Date(),
           customerId: customersIdsMap[order.customer.id.toString()],
           totalCost,
         };
@@ -429,6 +429,7 @@ class OrderService {
       totalDownPayment: 0,
       totalToBeCollected: 0,
     };
+    const vendorsMap = {};
     for (const order of orders) {
       if (order.status === ORDER_STATUS.DELIVERED) {
         DeliveredOrders.ordersCount++;
@@ -464,6 +465,19 @@ class OrderService {
         halfCompletedOrders.totalDownPayment += +order.downPayment;
         halfCompletedOrders.totalToBeCollected += +order.toBeCollected;
       }
+      for (const line of order.orderLines) {
+        if (!vendorsMap[line.product.vendor.id]) {
+          vendorsMap[line.product.vendor.id] = {
+            vendorId: line.product.vendor.id,
+            vendorName: line.product.vendor.name,
+            revenue: 0,
+            profit: 0,
+          };
+        }
+        vendorsMap[line.product.vendor.id].revenue += +line.price;
+        vendorsMap[line.product.vendor.id].profit +=
+          +line.price - +line.cost - +line.commission - +line.tax;
+      }
       count++;
       totalCost += +order.totalCost;
       totalRevenue += +order.totalPrice;
@@ -493,6 +507,11 @@ class OrderService {
         totalToBeCollected,
         DeliveredOrders,
         halfCompletedOrders,
+        topTenVendors: Object.values(vendorsMap)
+          .sort((a, b) => {
+            return b.profit - a.profit;
+          })
+          .slice(0, 10),
       },
     };
   }

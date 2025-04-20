@@ -58,7 +58,7 @@ class CustomerService {
       statusCode: 200,
     };
   }
-  static async getCustomersMappedByShopifyIds(customers) {
+  static async getCustomersMappedByNames(customers) {
     const customersIds = customers
       .filter((customer) => customer.id)
       .map((customer) => customer.id.toString());
@@ -83,7 +83,8 @@ class CustomerService {
     if (nonExistingCustomers.length > 0) {
       const res = await CustomerService.saveCustomers(nonExistingCustomers);
       for (const customer of res) {
-        result[customer.shopifyId.toString()] = customer.id;
+        const customerName = `${customer.firstName} ${customer.lastName}`;
+        result[customerName] = customer.id;
       }
     }
     return result;
@@ -92,15 +93,20 @@ class CustomerService {
     customers = customers.map((customer) => {
       const address = customer.default_address
         ? `${customer.default_address.address1} ${customer.default_address.address2}-${customer.default_address.city}-${customer.default_address.province}-${customer.default_address.country}`
-        : `${customer.address1|| ""} ${customer.address2|| ""}-${customer.city|| ""}-${customer.province|| ""}-${customer.country|| ""}`;
+        : `${customer.address1 || ""} ${customer.address2 || ""}-${
+            customer.city || ""
+          }-${customer.province || ""}-${customer.country || ""}`;
       return {
         shopifyId: customer.id ? String(customer.id) : null,
         firstName:
-        customer.firstName||
+          customer.firstName ||
           customer.first_name ||
           customer.default_address.first_name ||
           customer.default_address.name,
-        lastName:customer.lastName|| customer.last_name || customer.default_address.last_name,
+        lastName:
+          customer.lastName ||
+          customer.last_name ||
+          customer.default_address.last_name,
         email: customer.email || customer.default_address.email,
         phoneNumber: customer.phone || customer.default_address.phone,
         address,

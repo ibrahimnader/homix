@@ -52,7 +52,7 @@ class OrderService {
     }
     const [productsMap, customersIdsMap] = await Promise.all([
       ProductsService.getProductsMappedByShopifyIds([...productsIds]),
-      CustomerService.getCustomersMappedByShopifyIds(customers),
+      CustomerService.getCustomersMappedByNames(customers),
     ]);
 
     const lines = [];
@@ -90,6 +90,11 @@ class OrderService {
           order_id: order.id,
           line_items: order.line_items,
         });
+        const customerName = `${
+          order.customer.first_name || order.customer.default_address.first_name
+        } ${
+          order.customer.last_name || order.customer.default_address.last_name
+        }`;
         return {
           shopifyId: String(order.id),
           name: order.name,
@@ -107,7 +112,7 @@ class OrderService {
             : 0,
           totalPrice: order.total_price,
           orderDate: order.created_at || new Date(),
-          customerId: customersIdsMap[order.customer.id.toString()],
+          customerId: customersIdsMap[customerName],
           totalCost,
         };
       });

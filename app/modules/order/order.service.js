@@ -44,7 +44,7 @@ class OrderService {
     const codeNumber = parseInt(lastCode.replace(PREFIX, ""), 10);
 
     // Get last custom code number or default to 0
-    let lastCustomNumber = lastCustomOrder ? lastCustomOrder.number : 1;
+    let lastCustomNumber = lastCustomOrder ? lastCustomOrder.number : 0;
 
     if (isNaN(codeNumber)) {
       throw new Error("Invalid order code format");

@@ -151,6 +151,12 @@ Customer.hasMany(Order, { foreignKey: "customerId" });
 Order.belongsTo(User, { as: "user", foreignKey: "userId" });
 User.hasMany(Order, { foreignKey: "userId" });
 
-Order.hasMany(Note, { as: "notesList", foreignKey: "entityId" });
-Note.belongsTo(Order, { foreignKey: "entityId" });
+Order.hasMany(Note, {
+  as: "notesList",
+  foreignKey: "entityId",
+  constraints: false, 
+  scope: {
+    entityType: "order", // This ensures only notes with entityType='order' are included
+  },
+});
 module.exports = Order;

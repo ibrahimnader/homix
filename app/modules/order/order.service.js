@@ -646,18 +646,20 @@ class OrderService {
     };
   }
   static async addNote(user, OrderId, text) {
-    const order = await Order.findByPk(OrderId);
+    const orderId = Number(OrderId);
+
+    const order = await Order.findByPk(orderId);
     if (!order) {
       return {
         status: false,
         statusCode: 404,
-        message: "Order Line not found",
+        message: "Order not found",
       };
     }
     const newNote = await Note.create({
       text: text,
       userId: user.id,
-      entityId: OrderId,
+      entityId: Number(orderId),
       entityType: "order",
     });
     return {

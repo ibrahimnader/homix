@@ -116,6 +116,15 @@ const OrderLine = sequelize.define(
 
 OrderLine.belongsTo(Product, { as: "product", foreignKey: "productId" });
 Product.hasMany(OrderLine, { as: "orderLines", foreignKey: "productId" });
-OrderLine.hasMany(Note, { as: "notesList", foreignKey: "entityId" });
-Note.belongsTo(OrderLine, { foreignKey: "entityId" });
+
+
+
+OrderLine.hasMany(Note, {
+  as: "notesList",
+  foreignKey: "entityId",
+  constraints: false, 
+  scope: {
+    entityType: "orderLine", // This ensures only notes with entityType='order' are included
+  },
+});
 module.exports = OrderLine;

@@ -128,7 +128,7 @@ class OrderService {
         return {
           shopifyId: String(order.id),
           name,
-          code: `${PREFIX}${++nextNumber}`,
+          code: `${PREFIX}${nextNumber}`,
           number,
           orderNumber,
           subTotalPrice: order.total_line_items_price,

@@ -117,7 +117,7 @@ class OrderService {
           name = order.name;
         } else {
           number = `${lastCustomNumber}`;
-          orderNumber = `1${lastCustomNumber}`;
+          orderNumber = `${lastCustomNumber + 1000}`;
           name = `#${CUSTOM_PREFIX}${lastCustomNumber}`;
         }
         return {

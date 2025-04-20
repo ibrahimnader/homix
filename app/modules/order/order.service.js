@@ -13,6 +13,7 @@ const User = require("../user/user.model");
 const { ORDER_STATUS, USER_TYPES } = require("../../../config/constants");
 const moment = require("moment-timezone");
 const PREFIX = "H";
+const CUSTOM_PREFIX = "CU";
 
 class OrderService {
   static async importOrders() {
@@ -30,10 +31,20 @@ class OrderService {
       order: [["createdAt", "DESC"]],
       attributes: ["code"],
     });
+    const lastCustomOrder = await Order.findOne({
+      where: {
+        custom: true,
+      },
+      order: [["createdAt", "DESC"]],
+      attributes: ["number"],
+    });
 
     // Get last code number or default to 0
     const lastCode = lastOrder?.code || `${PREFIX}0`;
     const codeNumber = parseInt(lastCode.replace(PREFIX, ""), 10);
+
+    // Get last custom code number or default to 0
+    const lastCustomNumber = lastCustomOrder ? lastCustomOrder.number : 1;
 
     if (isNaN(codeNumber)) {
       throw new Error("Invalid order code format");
@@ -91,16 +102,30 @@ class OrderService {
           line_items: order.line_items,
         });
         const customerName = `${
-          order.customer.firstName ||order.customer.first_name || order.customer.default_address.first_name
+          order.customer.firstName ||
+          order.customer.first_name ||
+          order.customer.default_address.first_name
         } ${
-           order.customer.lastName ||order.customer.last_name || order.customer.default_address.last_name
+          order.customer.lastName ||
+          order.customer.last_name ||
+          order.customer.default_address.last_name
         }`;
+        let number, orderNumber, name;
+        if (order.shopifyId) {
+          number = order.number;
+          orderNumber = order.order_number;
+          name = order.name;
+        } else {
+          number = `${lastCustomNumber}`;
+          orderNumber = `1${lastCustomNumber}`;
+          name = `#${CUSTOM_PREFIX}${lastCustomNumber}`;
+        }
         return {
           shopifyId: String(order.id),
-          name: order.name || "",
+          name,
           code: `${PREFIX}${++nextNumber}`,
-          number: order.number || "",
-          orderNumber: order.order_number || order.number || "",
+          number,
+          orderNumber,
           subTotalPrice: order.total_line_items_price,
           totalDiscounts: order.total_discounts,
           totalTax: order.total_tax,

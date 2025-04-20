@@ -134,6 +134,11 @@ const Order = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    custom: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      allowNull: false,
+    },
   },
   {
     tableName: "orders",
@@ -154,7 +159,7 @@ User.hasMany(Order, { foreignKey: "userId" });
 Order.hasMany(Note, {
   as: "notesList",
   foreignKey: "entityId",
-  constraints: false, 
+  constraints: false,
   scope: {
     entityType: "order", // This ensures only notes with entityType='order' are included
   },

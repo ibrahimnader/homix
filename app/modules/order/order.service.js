@@ -546,18 +546,18 @@ class OrderService {
                 required: true,
               },
             },
+          ],
+        },
+        {
+          model: Note,
+          as: "notesList",
+          required: false,
+          include: [
             {
-              model: Note,
-              as: "notesList",
+              model: User,
+              as: "user",
               required: false,
-              include: [
-                {
-                  model: User,
-                  as: "user",
-                  required: false,
-                  attributes: ["firstName", "lastName"],
-                },
-              ],
+              attributes: ["firstName", "lastName"],
             },
           ],
         },

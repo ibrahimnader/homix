@@ -91,9 +91,9 @@ class OrderService {
           line_items: order.line_items,
         });
         const customerName = `${
-          order.customer.first_name || order.customer.default_address.first_name
+          order.customer.firstName ||order.customer.first_name || order.customer.default_address.first_name
         } ${
-          order.customer.last_name || order.customer.default_address.last_name
+           order.customer.lastName ||order.customer.last_name || order.customer.default_address.last_name
         }`;
         return {
           shopifyId: String(order.id),

@@ -116,9 +116,9 @@ class OrderService {
           orderNumber = order.order_number;
           name = order.name;
         } else {
-          number = `${lastCustomNumber}`;
-          orderNumber = `${lastCustomNumber + 1000}`;
-          name = `#${CUSTOM_PREFIX}${lastCustomNumber}`;
+          number = `${++lastCustomNumber}`;
+          orderNumber = `${++lastCustomNumber + 1000}`;
+          name = `#${CUSTOM_PREFIX}${++lastCustomNumber}`;
         }
         return {
           shopifyId: String(order.id),

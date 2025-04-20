@@ -59,7 +59,9 @@ class CustomerService {
     };
   }
   static async getCustomersMappedByShopifyIds(customers) {
-    const customersIds = customers.map((customer) => customer.id.toString());
+    const customersIds = customers
+      .filter((customer) => customer.id)
+      .map((customer) => customer.id.toString());
     const customersFromDB = await Customer.findAll({
       where: {
         shopifyId: customersIds,
@@ -70,10 +72,13 @@ class CustomerService {
     const existingShopifyIds = new Set();
     for (const customer of customersFromDB) {
       result[customer.shopifyId] = customer.id;
-      existingShopifyIds.add(customer.shopifyId.toString());
+      if (customer.shopifyId) {
+        existingShopifyIds.add(customer.shopifyId.toString());
+      }
     }
     const nonExistingCustomers = customers.filter(
-      (customer) => !existingShopifyIds.has(customer.id.toString())
+      (customer) =>
+        !customer.id || !existingShopifyIds.has(customer.id.toString())
     );
     if (nonExistingCustomers.length > 0) {
       const res = await CustomerService.saveCustomers(nonExistingCustomers);
@@ -87,14 +92,15 @@ class CustomerService {
     customers = customers.map((customer) => {
       const address = customer.default_address
         ? `${customer.default_address.address1} ${customer.default_address.address2}-${customer.default_address.city}-${customer.default_address.province}-${customer.default_address.country}`
-        : "";
+        : `${customer.address1|| ""} ${customer.address2|| ""}-${customer.city|| ""}-${customer.province|| ""}-${customer.country|| ""}`;
       return {
-        shopifyId: String(customer.id),
+        shopifyId: customer.id ? String(customer.id) : null,
         firstName:
+        customer.firstName||
           customer.first_name ||
           customer.default_address.first_name ||
           customer.default_address.name,
-        lastName: customer.last_name || customer.default_address.last_name,
+        lastName:customer.lastName|| customer.last_name || customer.default_address.last_name,
         email: customer.email || customer.default_address.email,
         phoneNumber: customer.phone || customer.default_address.phone,
         address,

@@ -110,15 +110,20 @@ class OrderService {
           order.customer.last_name ||
           order.customer.default_address.last_name
         }`;
-        let number, orderNumber, name;
+        let number,
+          orderNumber,
+          name,
+          custom = false;
         if (order.shopifyId) {
           number = order.number;
           orderNumber = order.order_number;
           name = order.name;
         } else {
-          number = `${++lastCustomNumber}`;
-          orderNumber = `${++lastCustomNumber + 1000}`;
-          name = `#${CUSTOM_PREFIX}${++lastCustomNumber}`;
+          const newNumber = parseInt(lastCustomNumber) + 1;
+          number = `${newNumber}`;
+          orderNumber = `${newNumber + 1000}`;
+          name = `#${CUSTOM_PREFIX}${newNumber}`;
+          custom = true;
         }
         return {
           shopifyId: String(order.id),
@@ -139,6 +144,7 @@ class OrderService {
           orderDate: order.created_at || new Date(),
           customerId: customersIdsMap[customerName],
           totalCost,
+          custom,
         };
       });
 

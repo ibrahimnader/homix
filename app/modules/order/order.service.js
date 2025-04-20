@@ -100,7 +100,7 @@ class OrderService {
           name: order.name || "",
           code: `${PREFIX}${++nextNumber}`,
           number: order.number || "",
-          orderNumber: order.order_number || order.number,
+          orderNumber: order.order_number || order.number || "",
           subTotalPrice: order.total_line_items_price,
           totalDiscounts: order.total_discounts,
           totalTax: order.total_tax,

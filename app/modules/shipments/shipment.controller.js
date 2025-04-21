@@ -19,7 +19,7 @@ class ShipmentController {
 
   static async getShipments(req, res, next) {
     try {
-      const result = await ShipmentService.getShipments(...req.query);
+      const result = await ShipmentService.getShipments(req.query);
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));

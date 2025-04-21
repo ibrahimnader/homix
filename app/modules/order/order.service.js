@@ -459,20 +459,21 @@ class OrderService {
       totalDownPayment: 0,
       totalToBeCollected: 0,
     };
-    const halfCompletedOrders = {
-      ordersCount: 0,
-      totalTax: 0,
-      totalCost: 0,
-      totalRevenue: 0,
-      totalDiscount: 0,
-      totalProfit: 0,
-      totalCommission: 0,
-      totalPaid: 0,
-      subTotal: 0,
-      totalDownPayment: 0,
-      totalToBeCollected: 0,
-    };
+    // const halfCompletedOrders = {
+    //   ordersCount: 0,
+    //   totalTax: 0,
+    //   totalCost: 0,
+    //   totalRevenue: 0,
+    //   totalDiscount: 0,
+    //   totalProfit: 0,
+    //   totalCommission: 0,
+    //   totalPaid: 0,
+    //   subTotal: 0,
+    //   totalDownPayment: 0,
+    //   totalToBeCollected: 0,
+    // };
     const vendorsMap = {};
+    const productsMap = {};
     for (const order of orders) {
       if (order.status === ORDER_STATUS.DELIVERED) {
         DeliveredOrders.ordersCount++;
@@ -491,23 +492,23 @@ class OrderService {
         DeliveredOrders.totalDownPayment += +order.downPayment;
         DeliveredOrders.totalToBeCollected += +order.toBeCollected;
       }
-      if (order.status === ORDER_STATUS.HALF_COMPLETED) {
-        halfCompletedOrders.ordersCount++;
-        halfCompletedOrders.totalTax += +order.totalTax;
-        halfCompletedOrders.totalCost += +order.totalCost;
-        halfCompletedOrders.totalRevenue += +order.totalPrice;
-        halfCompletedOrders.totalDiscount += +order.totalDiscounts;
-        halfCompletedOrders.totalProfit +=
-          +order.totalPrice -
-          +order.totalCost -
-          +order.commission -
-          +order.totalTax;
-        halfCompletedOrders.totalCommission += +order.commission;
-        halfCompletedOrders.totalPaid += +order.totalPrice;
-        halfCompletedOrders.subTotal += +order.subTotal;
-        halfCompletedOrders.totalDownPayment += +order.downPayment;
-        halfCompletedOrders.totalToBeCollected += +order.toBeCollected;
-      }
+      // if (order.status === ORDER_STATUS.HALF_COMPLETED) {
+      //   halfCompletedOrders.ordersCount++;
+      //   halfCompletedOrders.totalTax += +order.totalTax;
+      //   halfCompletedOrders.totalCost += +order.totalCost;
+      //   halfCompletedOrders.totalRevenue += +order.totalPrice;
+      //   halfCompletedOrders.totalDiscount += +order.totalDiscounts;
+      //   halfCompletedOrders.totalProfit +=
+      //     +order.totalPrice -
+      //     +order.totalCost -
+      //     +order.commission -
+      //     +order.totalTax;
+      //   halfCompletedOrders.totalCommission += +order.commission;
+      //   halfCompletedOrders.totalPaid += +order.totalPrice;
+      //   halfCompletedOrders.subTotal += +order.subTotal;
+      //   halfCompletedOrders.totalDownPayment += +order.downPayment;
+      //   halfCompletedOrders.totalToBeCollected += +order.toBeCollected;
+      // }
       for (const line of order.orderLines) {
         if (!vendorsMap[line.product.vendor.id]) {
           vendorsMap[line.product.vendor.id] = {
@@ -520,6 +521,18 @@ class OrderService {
         vendorsMap[line.product.vendor.id].revenue += +line.price;
         vendorsMap[line.product.vendor.id].profit +=
           +line.price - +line.cost - +line.commission - +line.tax;
+        if (!productsMap[line.product.id]) {
+          productsMap[line.product.id] = {
+            productId: line.product.id,
+            productName: line.product.name,
+            revenue: 0,
+            profit: 0,
+          };
+        }
+        productsMap[line.product.id].revenue += +line.price;
+        productsMap[line.product.id].profit +=
+          +line.price - +line.cost - +line.commission - +line.tax;
+          
       }
       count++;
       totalCost += +order.totalCost;
@@ -551,6 +564,11 @@ class OrderService {
         DeliveredOrders,
         halfCompletedOrders,
         topTenVendors: Object.values(vendorsMap)
+          .sort((a, b) => {
+            return b.profit - a.profit;
+          })
+          .slice(0, 10),
+        topTenProducts: Object.values(productsMap)
           .sort((a, b) => {
             return b.profit - a.profit;
           })

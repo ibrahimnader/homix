@@ -25,28 +25,28 @@ const Order = sequelize.define(
     },
     shopifyId: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     number: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     orderNumber: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     subTotalPrice: {
       type: DataTypes.DECIMAL,
-      allowNull: false,
+      allowNull: true,
     },
     totalPrice: {
       type: DataTypes.DECIMAL,
-      allowNull: false,
+      allowNull: true,
       defaultValue: 0,
     },
     totalDiscounts: {
       type: DataTypes.DECIMAL,
-      allowNull: false,
+      allowNull: true,
       defaultValue: 0,
     },
     orderDate: {
@@ -86,17 +86,17 @@ const Order = sequelize.define(
     },
     commission: {
       type: DataTypes.DECIMAL,
-      allowNull: false,
+      allowNull: true,
       defaultValue: 0,
     },
     totalTax: {
       type: DataTypes.DECIMAL,
-      allowNull: false,
+      allowNull: true,
       defaultValue: 0,
     },
     shippingFees: {
       type: DataTypes.DECIMAL,
-      allowNull: false,
+      allowNull: true,
       defaultValue: 0,
     },
     PoDate: {

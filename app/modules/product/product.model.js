@@ -22,7 +22,7 @@ const Product = sequelize.define(
     shopifyId: {
       type: DataTypes.TEXT,
       allowNull: false,
-      unique: true,
+      unique: false,
     },
     variants: {
       type: DataTypes.JSON,

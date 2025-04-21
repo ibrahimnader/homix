@@ -43,6 +43,7 @@ const isAdmin = require("../app/middlewares/isAdmin");
 const OrderLineRouter = require("../app/modules/orderLines/orderLine.routes");
 const isNotVendor = require("../app/middlewares/isNotVendor");
 const CategoriesRouter = require("../app/modules/product/categories.routes");
+const ShipmentRouter = require("../app/modules/shipments/shipment.routes");
 
 // Swagger UI route
 mainRouter.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
@@ -180,5 +181,7 @@ mainRouter.use("/employees", verifyToken, isNotVendor, EmployeeRouter);
  *         description: List of customers
  */
 mainRouter.use("/customers", verifyToken, isNotVendor, CustomerRouter);
+
+mainRouter.use("/shipments", verifyToken, isNotVendor, ShipmentRouter);
 
 module.exports = mainRouter;

@@ -4,6 +4,7 @@ const {
   ORDER_STATUS,
   PAYMENT_STATUS,
   DELIVERY_STATUS,
+  SHIPMENTS_STATUS,
 } = require("../../../config/constants");
 const OrderLine = require("../orderLines/orderline.model");
 const Customer = require("../customer/customer.model");
@@ -138,6 +139,35 @@ const Order = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: false,
       allowNull: false,
+    },
+    shippingDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    shippingCompany: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    shippingFees: {
+      type: DataTypes.DECIMAL,
+      allowNull: true,
+      defaultValue: 0,
+    },
+    deliveryDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    governorate: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    shipmentStatus: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    shipmentType: {
+      type: DataTypes.STRING,
+      allowNull: true,
     },
   },
   {

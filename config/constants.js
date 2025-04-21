@@ -41,6 +41,47 @@ const FACTORY_STATUS = {
   ONLINE: 1,
   OFFLINE: 2,
 };
+
+const SHIPMENTS_STATUS = {
+  PENDING: 1,
+  IN_WAREHOUSE: 2,
+  READY_FOR_DELIVERY: 3,
+  DELIVERED: 4,
+};
+const SHIPMENT_TYPE = {
+  COLLECTED_SHIPMENT: 1,
+  GOVERNORATES_SHIPMENT: 2,
+};
+const GOVERNORATES = {
+  1: "القاهرة",
+  2: "الجيزة",
+  3: "الإسكندرية",
+  4: "الشرقية",
+  5: "الدقهلية",
+  6: "البحيرة",
+  7: "الغربية",
+  8: "المنيا",
+  9: "المنوفية",
+  10: "الفيوم",
+  11: "القليوبية",
+  12: "بني سويف",
+  13: "أسيوط",
+  14: "سوهاج",
+  15: "قنا",
+  16: "أسوان",
+  17: "الوادي الجديد",
+  18: "الإسماعيلية",
+  19: "بورسعيد",
+  20: "السويس",
+  21: "شمال سيناء",
+  22: "جنوب سيناء",
+  23: "مطروح",
+  24: "البحر الأحمر",
+  25: "الأقصر",
+  26: "البحيرة",
+  27: "دمياط",
+};
+
 module.exports = {
   USER_TYPES,
   ORDER_STATUS,
@@ -49,4 +90,7 @@ module.exports = {
   ORDER_LINE_STATUS,
   ORDER_LINE__ITEM_STATUS,
   DELIVERY_STATUS,
+  SHIPMENTS_STATUS,
+  SHIPMENT_TYPE,
+  GOVERNORATES,
 };

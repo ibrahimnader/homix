@@ -146,6 +146,13 @@ class OrderService {
           totalCost,
           custom,
           shippedFromInventory: isShipment ? true : false,
+          shippingReceiveDate: order.shippingReceiveDate || null,
+          shippingCompany: order.shippingCompany || null,
+          shippingFees: order.shippingFees || null,
+          deliveryDate: order.deliveryDate || null,
+          governorate: order.governorate || null,
+          shipmentStatus: order.shipmentStatus || null,
+          shipmentType: order.shipmentType || null,
         };
       });
 

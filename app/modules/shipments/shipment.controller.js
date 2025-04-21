@@ -45,7 +45,7 @@ class ShipmentController {
     try {
       const { shipmentId } = req.params;
       const {
-        shippingDate,
+        shippingReceiveDate,
         shippingCompany,
         shippingFees,
         deliveryDate,
@@ -55,7 +55,7 @@ class ShipmentController {
       } = req.body;
 
       const result = await ShipmentService.updateShipment(shipmentId, {
-        shippingDate,
+        shippingReceiveDate,
         shippingCompany,
         shippingFees,
         deliveryDate,

@@ -140,7 +140,7 @@ const Order = sequelize.define(
       defaultValue: false,
       allowNull: false,
     },
-    shippingDate: {
+    shippingReceiveDate: {
       type: DataTypes.DATE,
       allowNull: true,
     },

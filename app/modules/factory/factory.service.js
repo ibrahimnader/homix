@@ -56,8 +56,26 @@ class FactoryService {
   static async create(data) {
     return await Factory.create(data);
   }
-  static async getAll() {
+  static async getAll({ status, factoryCategory }) {
+    let whereClause = {
+      [Op.and]: [],
+    };
+    if (status) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("status"), {
+          [Op.eq]: status,
+        })
+      );
+    }
+    if (factoryCategory) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("factoryCategory"), {
+          [Op.like]: `%${factoryCategory}%`,
+        })
+      );
+    }
     return await Factory.findAll({
+      where: whereClause,
       include: [
         {
           model: Attachment,

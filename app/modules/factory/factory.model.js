@@ -77,6 +77,10 @@ const Factory = sequelize.define(
       type: DataTypes.DECIMAL,
       allowNull: true,
     },
+    userId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
   },
   {
     tableName: "factories",

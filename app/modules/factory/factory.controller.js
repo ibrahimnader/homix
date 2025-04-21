@@ -47,7 +47,7 @@ class FactoryController {
   }
   static async getAll(req, res, next) {
     try {
-      let factories = await FactoryService.getAll();
+      let factories = await FactoryService.getAll(req.query);
       res.status(200).json({
         status: true,
         statusCode: 200,

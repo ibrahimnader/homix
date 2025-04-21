@@ -267,10 +267,24 @@ class ProductsService {
       };
     });
 
-    const savedProducts = await Product.bulkCreate(productsData, {
-      updateOnDuplicate: ["title", "vendorId", "image", "variants"],
-      fields: ["shopifyId", "title", "vendorId", "image", "variants"],
-    });
+    //save new Products and update existing ones
+    const savedProducts = await Promise.all(
+      productsData.map(async (product) => {
+        const [savedProduct] = await Product.upsert(
+          {
+            title: product.title,
+            vendorId: product.vendorId,
+            image: product.image,
+            shopifyId: product.shopifyId,
+            variants: product.variants,
+          },
+          {
+            returning: true,
+          }
+        );
+        return savedProduct;
+      })
+    );
 
     return savedProducts;
   }

@@ -532,7 +532,6 @@ class OrderService {
         productsMap[line.product.id].revenue += +line.price;
         productsMap[line.product.id].profit +=
           +line.price - +line.cost - +line.commission - +line.tax;
-          
       }
       count++;
       totalCost += +order.totalCost;
@@ -634,11 +633,42 @@ class OrderService {
   }
   static async updateOrder(orderId, orderData) {
     //filter out the order Data
+    if (orderData.vendorId) {
+      const orderLines = await OrderLine.findAll({
+        where: {
+          orderId: orderId,
+        },
+        include: [
+          {
+            model: Product,
+            as: "product",
+            required: true,
+          },
+        ],
+      });
+      for (const orderLine of orderLines) {
+        const product = orderLine.product.toJSON();
+        Reflect.deleteProperty(product, "id");
+        Reflect.deleteProperty(product, "shopifyId");
+        Reflect.deleteProperty(product, "createdAt");
+        Reflect.deleteProperty(product, "updatedAt");
+        const newProduct = await Product.create({
+          ...product,
+          vendorId: orderData.vendorId,
+        });
+        await orderLine.update({
+          productId: newProduct.id,
+        });
+      }
+      Reflect.deleteProperty(orderData, "vendorId");
+    }
+
     Object.keys(orderData).forEach(
       (key) =>
         orderData[key] === undefined ||
         (orderData[key] === null && delete orderData[key])
     );
+
     const order = await Order.findByPk(orderId);
     if (!order) {
       return {

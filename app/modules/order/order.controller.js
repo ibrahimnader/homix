@@ -70,33 +70,12 @@ class OrderController {
   static async updateOrder(req, res, next) {
     try {
       const { orderId } = req.params;
-      const {
-        receivedAmount,
-        paymentStatus,
-        commission,
-        PoDate,
-        notes,
-        status,
-        downPayment,
-        toBeCollected,
-        userId,
-        deliveryStatus,
-        shippedFromInventory,
-      } = req.body;
 
       const result = await OrderService.updateOrder(orderId, {
-        status,
-        receivedAmount,
-        paymentStatus,
-        commission,
-        PoDate,
-        notes,
-        downPayment,
-        toBeCollected,
-        userId,
-        deliveryStatus,
+        ...req.body,
         shippedFromInventory:
-          shippedFromInventory && shippedFromInventory == "true"
+          req.body.shippedFromInventory &&
+          req.body.shippedFromInventory == "true"
             ? true
             : false,
       });

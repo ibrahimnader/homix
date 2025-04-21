@@ -2,7 +2,7 @@ const shopifyClient = require("../../../config/shopify");
 class ShopifyHelper {
   static async importData(path, fields =[], parameters = {}) {
     const data = [];
-    if (path === "orders") {
+    if (path === "products") {
       const query = {
         limit: 2,
         fields: fields.join(","),

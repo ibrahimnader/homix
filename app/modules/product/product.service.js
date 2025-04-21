@@ -268,24 +268,45 @@ class ProductsService {
     });
 
     //save new Products and update existing ones
+
     const savedProducts = await Promise.all(
       productsData.map(async (product) => {
-        const [savedProduct] = await Product.upsert(
-          {
-            title: product.title,
-            vendorId: product.vendorId,
-            image: product.image,
-            shopifyId: product.shopifyId,
-            variants: product.variants,
-          },
-          {
-            returning: true,
+        try {
+          // First, check if product exists
+          const existingProduct = await Product.findOne({
+            where: { shopifyId: product.shopifyId }
+          });
+    
+          if (existingProduct) {
+            // Update existing product
+            await existingProduct.update({
+              title: product.title,
+              vendorId: product.vendorId,
+              image: product.image,
+              variants: product.variants,
+              // Add other fields as needed
+            });
+            return existingProduct;
+          } else {
+            // Create new product
+            return await Product.create({
+              title: product.title,
+              vendorId: product.vendorId,
+              image: product.image,
+              shopifyId: product.shopifyId,
+              variants: product.variants,
+              // Add other fields as needed
+            });
           }
-        );
-        return savedProduct;
+        } catch (error) {
+          console.error(`Error processing product ${product.shopifyId}:`, error);
+          return null;
+        }
       })
     );
-
+    
+    // Filter out any null results
+    const filteredProducts = savedProducts.filter(Boolean);
     return savedProducts;
   }
 

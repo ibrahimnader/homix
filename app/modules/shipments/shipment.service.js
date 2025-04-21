@@ -16,191 +16,6 @@ const PREFIX = "H";
 const CUSTOM_PREFIX = "CU";
 
 class ShipmentService {
-  static async saveShipments(shipments) {
-    const productsIds = new Set();
-    const customers = [];
-    const lastShipment = await Shipment.findOne({
-      shipment: [["createdAt", "DESC"]],
-      attributes: ["code"],
-    });
-    const lastCustomShipment = await Shipment.findOne({
-      where: {
-        custom: true,
-      },
-      shipment: [["createdAt", "DESC"]],
-      attributes: ["number"],
-    });
-
-    // Get last code number or default to 0
-    const lastCode = lastShipment?.code || `${PREFIX}0`;
-    const codeNumber = parseInt(lastCode.replace(PREFIX, ""), 10);
-
-    // Get last custom code number or default to 0
-    let lastCustomNumber = lastCustomShipment ? lastCustomShipment.number : 0;
-
-    if (isNaN(codeNumber)) {
-      throw new Error("Invalid shipment code format");
-    }
-    let nextNumber = codeNumber + 1;
-
-    for (const shipment of shipments) {
-      for (const line of shipment.line_items) {
-        if (line.product_id) {
-          productsIds.add(String(line.product_id));
-        }
-      }
-      if (shipment.customer) {
-        customers.push(shipment.customer);
-      }
-    }
-    const [productsMap, customersIdsMap] = await Promise.all([
-      ProductsService.getProductsMappedByShopifyIds([...productsIds]),
-      CustomerService.getCustomersMappedByNames(customers),
-    ]);
-
-    const lines = [];
-
-    shipments = shipments
-      .filter((shipment) => shipment.customer)
-      .map((shipment) => {
-        let totalCost = 0;
-        shipment.line_items.forEach((line) => {
-          const discount_allocations = line.discount_allocations || [];
-          const lineDiscount = discount_allocations.reduce(
-            (acc, item) => acc + Number(item.amount),
-            0
-          );
-          line.discount = lineDiscount;
-          const product = line.product_id
-            ? productsMap[line.product_id]
-            : productsMap["custom"];
-          if (!product) {
-            console.log("product not found", line.product_id);
-          }
-
-          const variant = product.variants
-            ? product.variants.find(
-                (variant) =>
-                  variant.shopifyId.toString() === line.variant_id.toString()
-              )
-            : null;
-          const cost = variant ? Number(variant.cost) || 0 : 0;
-          line.unitCost = cost;
-          line.cost = cost * line.quantity;
-          totalCost += line.cost;
-        });
-        lines.push({
-          shipment_id: shipment.id,
-          line_items: shipment.line_items,
-        });
-        const customerName = `${
-          shipment.customer.firstName ||
-          shipment.customer.first_name ||
-          shipment.customer.default_address.first_name
-        } ${
-          shipment.customer.lastName ||
-          shipment.customer.last_name ||
-          shipment.customer.default_address.last_name
-        }`;
-        let number,
-          shipmentNumber,
-          name,
-          custom = false;
-        if (shipment.shopifyId) {
-          number = shipment.number;
-          shipmentNumber = shipment.shipment_number;
-          name = shipment.name;
-        } else {
-          const newNumber = parseInt(lastCustomNumber) + 1;
-          number = `${newNumber}`;
-          shipmentNumber = `${newNumber + 1000}`;
-          name = `#${CUSTOM_PREFIX}${newNumber}`;
-          custom = true;
-        }
-        return {
-          shopifyId: String(shipment.id),
-          name,
-          code: `${PREFIX}${nextNumber}`,
-          number,
-          shipmentNumber,
-          subTotalPrice: shipment.total_line_items_price,
-          totalDiscounts: shipment.total_discounts,
-          totalTax: shipment.total_tax,
-          shippingFees: shipment.shipping_lines
-            ? shipment.shipping_lines.reduce(
-                (acc, item) => acc + Number(item.price),
-                0
-              )
-            : 0,
-          totalPrice: shipment.total_price,
-          shipmentDate: shipment.created_at || new Date(),
-          customerId: customersIdsMap[customerName],
-          totalCost,
-          custom,
-          shippedFromInventory: true,
-        };
-      });
-
-    const result = await Shipment.bulkCreate(shipments, {
-      updateOnDuplicate: [
-        "shopifyId",
-        "subTotalPrice",
-        "totalDiscounts",
-        "totalTax",
-        "shippingFees",
-        "totalPrice",
-        "shipmentDate",
-        "customerId",
-        "totalCost",
-      ],
-    });
-    const savedShipments = result.map((shipment) => shipment.toJSON());
-    const orderLines = [];
-    for (const { shipment_id, line_items } of lines) {
-      const shipment = savedShipments.find(
-        (shipment) => shipment.shopifyId === String(shipment_id)
-      );
-      for (const line of line_items) {
-        orderLines.push({
-          shipmentId: shipment.id,
-          productId: line.product_id
-            ? productsMap[line.product_id].id
-            : productsMap["custom"].id,
-          shopifyId: String(line.id),
-          title: line.title,
-          name: line.name,
-          price: line.price,
-          quantity: line.quantity,
-          sku: line.sku,
-          variant_id: line.variant_id,
-          discount: line.discount,
-          cost: line.cost,
-          unitCost: line.unitCost,
-        });
-      }
-    }
-    await OrderLine.bulkCreate(orderLines, {
-      updateOnDuplicate: [
-        "shopifyId",
-        "shipmentId",
-        "productId",
-        "title",
-        "name",
-        "price",
-        "quantity",
-        "sku",
-        "variant_id",
-        "discount",
-        "cost",
-        "unitCost",
-      ],
-    });
-    return {
-      status: true,
-      statusCode: 200,
-      message: "Shipments imported successfully",
-    };
-  }
   static async getShipments({
     page = 1,
     size = 50,
@@ -212,16 +27,20 @@ class ShipmentService {
     endDate,
   }) {
     let whereClause = {
-      [Op.and]: [],
+      [Op.and]: [
+        {
+          shippedFromInventory: true,
+        },
+      ],
     };
-    if(shippingCompany){
+    if (shippingCompany) {
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("shippingCompany"), {
           [Op.like]: `%${shippingCompany}%`,
         })
       );
     }
-    if(governorate){
+    if (governorate) {
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("governorate"), {
           [Op.eq]: governorate,
@@ -267,20 +86,7 @@ class ShipmentService {
         })
       );
     }
-    if (vendorName) {
-      whereClause[Op.and].push(
-        sequelize.where(
-          sequelize.fn(
-            "lower",
-            sequelize.col("orderLines.product.vendor.name")
-          ),
-          {
-            [Op.like]: `%${vendorName.toLowerCase()}%`,
-          }
-        )
-      );
-    }
-  
+
     whereClause = whereClause[Op.and].length ? whereClause : {};
     const shipments = await Shipment.findAndCountAll({
       include: [
@@ -298,19 +104,6 @@ class ShipmentService {
                 as: "vendor",
                 required: true,
               },
-            },
-          ],
-        },
-        {
-          model: Note,
-          as: "notesList",
-          required: false,
-          include: [
-            {
-              model: User,
-              as: "user",
-              required: false,
-              attributes: ["firstName", "lastName"],
             },
           ],
         },

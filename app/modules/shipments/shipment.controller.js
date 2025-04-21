@@ -1,10 +1,11 @@
 const { AppError } = require("../../middlewares/errors");
+const { saveImportedOrders } = require("../order/order.service");
 const ShipmentService = require("./shipment.service");
 
 class ShipmentController {
   static async createShipment(req, res) {
     try {
-      const result = await ShipmentService.saveShipments([req.body]);
+      const result = await saveImportedOrders([req.body], true);
       return res.status(200).json({
         status: true,
         message: "Shipment created successfully",

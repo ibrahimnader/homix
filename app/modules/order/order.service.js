@@ -24,7 +24,7 @@ class OrderService {
     const result = await OrderService.saveImportedOrders(orders);
     return result;
   }
-  static async saveImportedOrders(orders) {
+  static async saveImportedOrders(orders, isShipment = false) {
     const productsIds = new Set();
     const customers = [];
     const lastOrder = await Order.findOne({
@@ -145,6 +145,7 @@ class OrderService {
           customerId: customersIdsMap[customerName],
           totalCost,
           custom,
+          shippedFromInventory: isShipment ? true : false,
         };
       });
 

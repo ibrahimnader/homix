@@ -156,7 +156,7 @@ const startServer = async () => {
     io.on("connection", (socket) => {
       console.log("A user connected with ID:", socket.id);
 
-      socket.on("subscribe_notification", async (data) => {
+      socket.on("subscribe", async (data) => {
         console.log("Subscribed to notification with data:", data);
         const userId = data.userId;
         try {

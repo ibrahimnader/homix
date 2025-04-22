@@ -30,6 +30,10 @@ const User = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    socketId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
   },
   {
     tableName: "users",
@@ -51,7 +55,5 @@ User.prototype.toJSON = function () {
   delete values.password;
   return values;
 };
-
-
 
 module.exports = User;

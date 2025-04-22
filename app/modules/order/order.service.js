@@ -24,7 +24,7 @@ class OrderService {
     const result = await OrderService.saveImportedOrders(orders);
     return result;
   }
-  static async saveImportedOrders(orders, isShipment = false) {
+  static async saveImportedOrders(orders, isShipment = false, user) {
     const productsIds = new Set();
     const customers = [];
     const lastOrder = await Order.findOne({
@@ -169,7 +169,19 @@ class OrderService {
         "totalCost",
       ],
     });
-    const savedOrders = result.map((order) => order.toJSON());
+    const savedOrders = result.map(async (order) => {
+      await OrderService.sendNotification(order.id, {
+        orderId: order.id,
+        user: user
+          ? {
+              firstName: user.firstName,
+              lastName: user.lastName,
+            }
+          : null,
+        type: "orderCreate",
+      });
+      return order.toJSON();
+    });
     const orderLines = [];
     for (const { order_id, line_items } of lines) {
       const order = savedOrders.find(
@@ -631,7 +643,15 @@ class OrderService {
       data: order,
     };
   }
-  static async updateOrder(orderId, orderData) {
+  static async updateOrder(orderId, orderData, user) {
+    const order = await Order.findByPk(orderId);
+    if (!order) {
+      return {
+        status: false,
+        statusCode: 404,
+        message: "Order not found",
+      };
+    }
     //filter out the order Data
     if (orderData.vendorId) {
       const orderLines = await OrderLine.findAll({
@@ -668,15 +688,19 @@ class OrderService {
         orderData[key] === undefined ||
         (orderData[key] === null && delete orderData[key])
     );
-
-    const order = await Order.findByPk(orderId);
-    if (!order) {
-      return {
-        status: false,
-        statusCode: 404,
-        message: "Order not found",
-      };
+    if (orderData.status) {
+      await OrderService.sendNotification(orderId, {
+        orderId: orderId,
+        oldStatus: order.status,
+        newStatus: orderData.status,
+        user: {
+          firstName: user.firstName,
+          lastName: user.lastName,
+        },
+        type: "orderUpdate",
+      });
     }
+
     await order.update(orderData);
     return {
       status: true,
@@ -754,6 +778,18 @@ class OrderService {
       entityId: Number(orderId),
       entityType: "order",
     });
+    await OrderService.sendNotification(orderId, {
+      orderId: orderId,
+      note: {
+        text: newNote.text,
+      },
+      user: {
+        firstName: user.firstName,
+        lastName: user.lastName,
+      },
+      type: "note",
+    });
+
     return {
       status: true,
       statusCode: 200,
@@ -793,6 +829,35 @@ class OrderService {
       statusCode: 200,
       message: "Note deleted successfully",
     };
+  }
+  static async sendNotification(orderId, data) {
+    const vendors = OrderLine.findAll({
+      where: {
+        orderId: orderId,
+      },
+      include: [
+        {
+          model: Product,
+          as: "product",
+          required: true,
+        },
+      ],
+    });
+    const vendorsIds = vendors.map((vendor) => vendor.product.vendorId);
+
+    const users = await User.findAll({
+      where: {
+        [Op.or]: [
+          { vendorId: { [Op.in]: vendorsIds } },
+          { userType: { [Op.ne]: USER_TYPES.VENDOR } },
+        ],
+      },
+      attributes: ["socketId"],
+    });
+    const socketsIds = users.map((user) => user.socketId).filter(Boolean);
+    if (socketsIds.length > 0) {
+      global.socketIO.to(socketsIds).emit("notifications", data);
+    }
   }
 }
 module.exports = OrderService;

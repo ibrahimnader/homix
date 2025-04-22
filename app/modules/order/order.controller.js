@@ -4,7 +4,11 @@ const OrderService = require("./order.service");
 class OrderController {
   static async createOrder(req, res) {
     try {
-      const result = await OrderService.saveImportedOrders([req.body]);
+      const result = await OrderService.saveImportedOrders(
+        [req.body],
+        false,
+        req.user
+      );
       return res.status(200).json({
         status: true,
         message: "Order created successfully",
@@ -71,14 +75,18 @@ class OrderController {
     try {
       const { orderId } = req.params;
 
-      const result = await OrderService.updateOrder(orderId, {
-        ...req.body,
-        shippedFromInventory:
-          req.body.shippedFromInventory &&
-          req.body.shippedFromInventory == "true"
-            ? true
-            : false,
-      });
+      const result = await OrderService.updateOrder(
+        orderId,
+        {
+          ...req.body,
+          shippedFromInventory:
+            req.body.shippedFromInventory &&
+            req.body.shippedFromInventory == "true"
+              ? true
+              : false,
+        },
+        req.user
+      );
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));

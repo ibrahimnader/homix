@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-
+const http = require("http"); 
 const mainRouter = require("./config/routes");
 const { NotFoundError } = require("./app/middlewares/errors");
 const globalErrorHandler = require("./app/middlewares/errorhandler");
@@ -11,9 +11,12 @@ require("./config/shopify");
 const ShopifyHelper = require("./app/modules/helpers/shopifyHelper");
 global.express = express;
 const app = express();
+const server = http.createServer(app); 
 const MB16 = 16 * 1024;
 const { connectToDb } = require("./config/db.config");
 const createDefaultData = require("./config/defaultData.seeder");
+const { Server } = require("socket.io");
+const User = require("./app/modules/user/user.model");
 
 const startServer = async () => {
   try {
@@ -22,7 +25,9 @@ const startServer = async () => {
     app.use(bodyParser.json({ limit: "1mb" }));
     app.use(bodyParser.urlencoded({ limit: "16mb", extended: true }));
     app.use(cors());
-    
+
+    global.socketIO = new Server(server);
+
     app.use("/uploads", express.static("uploads"));
     app.use((error, req, res, next) => {
       if (error instanceof SyntaxError) {
@@ -64,6 +69,28 @@ const startServer = async () => {
       console.log("Webhooks created successfully");
       await createDefaultData();
       console.log("Default user created successfully");
+    });
+
+    global.socketIO.on("connection", (socket) => {
+      socket.on("subscribe_notification", async (data) => {
+        const userId = data.userId;
+        const user = await User.findByPk(userId);
+        if (user) {
+          user.socketId = socket.id;
+          await user.save();
+        }
+      });
+
+      socket.on("disconnect", () => {
+        User.update(
+          { socketId: null },
+          {
+            where: {
+              id: socket.handshake.query.userId,
+            },
+          }
+        );
+      });
     });
   } catch (error) {
     console.error("Failed to start server:", error);

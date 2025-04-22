@@ -213,12 +213,6 @@ class OrderService {
     for (const order of savedOrders) {
       await OrderService.sendNotification(order.id, {
         orderId: order.id,
-        user: user
-          ? {
-              firstName: user.firstName,
-              lastName: user.lastName,
-            }
-          : null,
         type: "orderCreate",
       });
     }
@@ -859,7 +853,11 @@ class OrderService {
     });
     const socketsIds = users.map((user) => user.socketId).filter(Boolean);
     if (socketsIds.length > 0) {
-      global.socketIO.to(socketsIds).emit("notifications", data);
+      for (const socketId of socketsIds) {
+        global.socketIO.to(socketId).emit("notification", {
+          ...data,
+        });
+      }
     }
   }
 }

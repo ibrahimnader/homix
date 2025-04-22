@@ -169,19 +169,7 @@ class OrderService {
         "totalCost",
       ],
     });
-    const savedOrders = result.map(async (order) => {
-      await OrderService.sendNotification(order.id, {
-        orderId: order.id,
-        user: user
-          ? {
-              firstName: user.firstName,
-              lastName: user.lastName,
-            }
-          : null,
-        type: "orderCreate",
-      });
-      return order.toJSON();
-    });
+    const savedOrders = result.map((order) => order.toJSON());
     const orderLines = [];
     for (const { order_id, line_items } of lines) {
       const order = savedOrders.find(
@@ -222,6 +210,18 @@ class OrderService {
         "unitCost",
       ],
     });
+    for (const order of savedOrders) {
+      await OrderService.sendNotification(order.id, {
+        orderId: order.id,
+        user: user
+          ? {
+              firstName: user.firstName,
+              lastName: user.lastName,
+            }
+          : null,
+        type: "orderCreate",
+      });
+    }
     return {
       status: true,
       statusCode: 200,
@@ -831,7 +831,7 @@ class OrderService {
     };
   }
   static async sendNotification(orderId, data) {
-    const vendors = OrderLine.findAll({
+    const orderLines = await OrderLine.findAll({
       where: {
         orderId: orderId,
       },
@@ -842,8 +842,10 @@ class OrderService {
           required: true,
         },
       ],
+      toJSON: true,
     });
-    const vendorsIds = vendors.map((vendor) => vendor.product.vendorId);
+
+    const vendorsIds = orderLines.map((line) => line.product.vendorId);
 
     const users = await User.findAll({
       where: {
@@ -853,6 +855,7 @@ class OrderService {
         ],
       },
       attributes: ["socketId"],
+      toJSON: true,
     });
     const socketsIds = users.map((user) => user.socketId).filter(Boolean);
     if (socketsIds.length > 0) {

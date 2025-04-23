@@ -234,6 +234,7 @@ class OrderService {
     startDate,
     endDate,
     vendorUser,
+    
   }) {
     let whereClause = {
       [Op.and]: [],
@@ -265,6 +266,13 @@ class OrderService {
             [Op.like]: `%${financialStatus.toLowerCase()}%`,
           }
         )
+      );
+    }
+    if (paymentStatus) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.paymentStatus"), {
+          [Op.eq]: paymentStatus,
+        })
       );
     }
     if (deliveryStatus) {

@@ -76,12 +76,12 @@ class ShipmentService {
         .toDate();
 
       whereClause[Op.and].push(
-        sequelize.where(sequelize.col("Order.deliveryDate"), {
+        sequelize.where(sequelize.col("Order.shippingReceiveDate"), {
           [Op.gte]: startStartDate,
         })
       );
       whereClause[Op.and].push(
-        sequelize.where(sequelize.col("Order.deliveryDate"), {
+        sequelize.where(sequelize.col("Order.shippingReceiveDate"), {
           [Op.lte]: endOfEndDate,
         })
       );
@@ -114,7 +114,7 @@ class ShipmentService {
         },
       ],
       where: whereClause,
-      order: [["deliveryDate", "DESC"]],
+      order: [["shippingReceiveDate", "DESC"]],
       limit: Number(size),
       offset: (page - 1) * Number(size),
       subQuery: false,

@@ -114,7 +114,7 @@ class ShipmentService {
         },
       ],
       where: whereClause,
-      order: [["shipmentDate", "DESC"]],
+      order: [["deliveryDate", "DESC"]],
       limit: Number(size),
       offset: (page - 1) * Number(size),
       subQuery: false,

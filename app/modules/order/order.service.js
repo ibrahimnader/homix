@@ -234,7 +234,7 @@ class OrderService {
     startDate,
     endDate,
     vendorUser,
-    
+    paymentStatus
   }) {
     let whereClause = {
       [Op.and]: [],
@@ -575,7 +575,7 @@ class OrderService {
         totalDownPayment,
         totalToBeCollected,
         DeliveredOrders,
-        halfCompletedOrders,
+        // halfCompletedOrders,
         topTenVendors: Object.values(vendorsMap)
           .sort((a, b) => {
             return b.profit - a.profit;

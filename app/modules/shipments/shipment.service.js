@@ -50,14 +50,14 @@ class ShipmentService {
 
     if (shipmentStatus) {
       whereClause[Op.and].push(
-        sequelize.where(sequelize.col("Shipment.shipmentStatus"), {
+        sequelize.where(sequelize.col("Order.shipmentStatus"), {
           [Op.eq]: shipmentStatus,
         })
       );
     }
     if (shipmentType) {
       whereClause[Op.and].push(
-        sequelize.where(sequelize.col("Shipment.shipmentType"), {
+        sequelize.where(sequelize.col("Order.shipmentType"), {
           [Op.eq]: shipmentType,
         })
       );
@@ -76,12 +76,12 @@ class ShipmentService {
         .toDate();
 
       whereClause[Op.and].push(
-        sequelize.where(sequelize.col("Shipment.deliveryDate"), {
+        sequelize.where(sequelize.col("Order.deliveryDate"), {
           [Op.gte]: startStartDate,
         })
       );
       whereClause[Op.and].push(
-        sequelize.where(sequelize.col("Shipment.deliveryDate"), {
+        sequelize.where(sequelize.col("Order.deliveryDate"), {
           [Op.lte]: endOfEndDate,
         })
       );

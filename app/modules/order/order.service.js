@@ -114,7 +114,7 @@ class OrderService {
           orderNumber,
           name,
           custom = false;
-        if (order.shopifyId) {
+        if (order.id) {
           number = order.number;
           orderNumber = order.order_number;
           name = order.name;
@@ -154,6 +154,7 @@ class OrderService {
           shipmentStatus: order.shipmentStatus || null,
           shipmentType: order.shipmentType || null,
         };
+        nextNumber++;
       });
 
     const result = await Order.bulkCreate(orders, {
@@ -234,7 +235,7 @@ class OrderService {
     startDate,
     endDate,
     vendorUser,
-    paymentStatus
+    paymentStatus,
   }) {
     let whereClause = {
       [Op.and]: [],

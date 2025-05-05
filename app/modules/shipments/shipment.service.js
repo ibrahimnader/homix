@@ -25,6 +25,8 @@ class ShipmentService {
     shipmentType,
     startDate,
     endDate,
+    shipmentStartDate,
+    shipmentEndDate,
   }) {
     let whereClause = {
       [Op.and]: [
@@ -71,6 +73,30 @@ class ShipmentService {
 
       let endOfEndDate = moment
         .tz(new Date(endDate), "Africa/Cairo")
+        .endOf("day")
+        .utc()
+        .toDate();
+
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.createdAt"), {
+          [Op.gte]: startStartDate,
+        })
+      );
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.createdAt"), {
+          [Op.lte]: endOfEndDate,
+        })
+      );
+    }
+    if (shipmentStartDate && shipmentEndDate) {
+      let startStartDate = moment
+        .tz(new Date(shipmentStartDate), "Africa/Cairo")
+        .startOf("day")
+        .utc()
+        .toDate();
+
+      let endOfEndDate = moment
+        .tz(new Date(shipmentEndDate), "Africa/Cairo")
         .endOf("day")
         .utc()
         .toDate();

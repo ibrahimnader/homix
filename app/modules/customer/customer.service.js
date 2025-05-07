@@ -93,8 +93,8 @@ class CustomerService {
         firstName:
           customer.first_name ||
           customer.default_address.first_name ||
-          customer.default_address.name,
-        lastName: customer.last_name || customer.default_address.last_name,
+          customer.default_address.name||"",
+        lastName: customer.last_name || customer.default_address.last_name ||"",
         email: customer.email || customer.default_address.email,
         phoneNumber: customer.phone || customer.default_address.phone,
         address,

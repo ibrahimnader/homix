@@ -127,7 +127,7 @@ class OrderService {
         }
         const codeNumber = nextNumber;
         nextNumber++;
-        return {
+        let obj = {
           shopifyId: String(order.id),
           name,
           code: `${PREFIX}${codeNumber}`,
@@ -156,10 +156,8 @@ class OrderService {
           shipmentStatus: order.shipmentStatus || null,
           shipmentType: order.shipmentType || null,
           expectedDate: order.expectedDate || null,
-          status: order.status || null,
-          financialStatus: order.financial_status || null,
+
           receivedAmount: order.receivedAmount || 0,
-          paymentStatus: order.payment_status || null,
           commission: order.commission || 0,
           shippingFees: order.shippingFees || 0,
           PoDate: order.PoDate || null,
@@ -169,6 +167,17 @@ class OrderService {
           deliveryStatus: order.deliveryStatus || null,
           userId: order.userId || null,
         };
+        // status: order.status || null,
+        // financialStatus: order.financial_status || null,
+        if (obj.status) {
+          obj.status = order.status;
+        }
+        if (order.financialStatus) {
+          obj.financialStatus = order.financialStatus;
+        }
+        if (order.paymentStatus) {
+          obj.paymentStatus = order.paymentStatus;
+        }
       });
 
     const result = await Order.bulkCreate(orders, {

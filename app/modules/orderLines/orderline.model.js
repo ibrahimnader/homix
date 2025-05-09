@@ -16,8 +16,7 @@ const OrderLine = sequelize.define(
     },
     shopifyId: {
       type: DataTypes.STRING,
-      allowNull: false,
-      unique: true,
+      allowNull: true,
     },
     price: {
       type: DataTypes.DECIMAL,

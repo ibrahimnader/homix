@@ -1,3 +1,4 @@
+const { Op } = require("sequelize");
 const { upload } = require("../../../config/fileUploadMiddleware");
 const Attachment = require("../attachments/attachment.model");
 const Factory = require("./factory.model");

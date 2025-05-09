@@ -125,10 +125,12 @@ class OrderService {
           name = `#${CUSTOM_PREFIX}${newNumber}`;
           custom = true;
         }
+        const codeNumber = nextNumber;
+        nextNumber++;
         return {
           shopifyId: String(order.id),
           name,
-          code: `${PREFIX}${nextNumber}`,
+          code: `${PREFIX}${codeNumber}`,
           number,
           orderNumber,
           subTotalPrice: order.total_line_items_price,
@@ -154,7 +156,6 @@ class OrderService {
           shipmentStatus: order.shipmentStatus || null,
           shipmentType: order.shipmentType || null,
         };
-        nextNumber++;
       });
 
     const result = await Order.bulkCreate(orders, {

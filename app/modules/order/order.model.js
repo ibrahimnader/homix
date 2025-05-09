@@ -77,7 +77,7 @@ const Order = sequelize.define(
     },
     receivedAmount: {
       type: DataTypes.DECIMAL,
-      allowNull: false,
+      allowNull: true,
       defaultValue: 0,
     },
     paymentStatus: {
@@ -132,7 +132,7 @@ const Order = sequelize.define(
     },
     shippedFromInventory: {
       type: DataTypes.BOOLEAN,
-      allowNull: false,
+      allowNull: true,
       defaultValue: false,
     },
     custom: {

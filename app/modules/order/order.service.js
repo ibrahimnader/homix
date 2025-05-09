@@ -155,7 +155,19 @@ class OrderService {
           governorate: order.governorate || null,
           shipmentStatus: order.shipmentStatus || null,
           shipmentType: order.shipmentType || null,
-          
+          expectedDate: order.expectedDate || null,
+          status: order.status || null,
+          financialStatus: order.financial_status || null,
+          receivedAmount: order.receivedAmount || null,
+          paymentStatus: order.payment_status || null,
+          commission: order.commission || null,
+          shippingFees: order.shippingFees || null,
+          PoDate: order.PoDate || null,
+          downPayment: order.downPayment || null,
+          toBeCollected: order.toBeCollected || null,
+          itemShipping: order.itemShipping || null,
+          deliveryStatus: order.deliveryStatus || null,
+          userId: order.userId || null,
         };
       });
 

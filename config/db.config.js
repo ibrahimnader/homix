@@ -48,6 +48,28 @@ async function connectToDb() {
           `ALTER TABLE products DROP CONSTRAINT IF EXISTS "${constraint.constraint_name}"`
         );
       }
+      const [constraints1] = await sequelize.query(
+        `SELECT constraint_name 
+         FROM information_schema.table_constraints 
+         WHERE table_name = 'orders' AND constraint_name LIKE '%shopifyId%'`
+      );
+      
+      for (const constraint of constraints1) {
+        await sequelize.query(
+          `ALTER TABLE orders DROP CONSTRAINT IF EXISTS "${constraint.constraint_name}"`
+        );
+      }
+      const [constraints2] = await sequelize.query(
+        `SELECT constraint_name 
+         FROM information_schema.table_constraints 
+         WHERE table_name = 'orderLines' AND constraint_name LIKE '%shopifyId%'`
+      );
+            
+      for (const constraint of constraints2) {
+        await sequelize.query(
+          `ALTER TABLE "orderLines" DROP CONSTRAINT IF EXISTS "${constraint.constraint_name}"`
+        );
+      }
    
     await sequelize.authenticate();
     console.log("Database connected succefully");

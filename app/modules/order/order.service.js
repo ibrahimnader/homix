@@ -155,6 +155,7 @@ class OrderService {
           governorate: order.governorate || null,
           shipmentStatus: order.shipmentStatus || null,
           shipmentType: order.shipmentType || null,
+          
         };
       });
 

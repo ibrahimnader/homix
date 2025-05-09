@@ -178,6 +178,7 @@ class OrderService {
         if (order.paymentStatus) {
           obj.paymentStatus = order.paymentStatus;
         }
+        return obj;
       });
 
     const result = await Order.bulkCreate(orders, {

@@ -27,6 +27,7 @@ class ShipmentService {
     endDate,
     shipmentStartDate,
     shipmentEndDate,
+    orderNumber
   }) {
     let whereClause = {
       [Op.and]: [
@@ -35,6 +36,21 @@ class ShipmentService {
         },
       ],
     };
+    if (orderNumber) {
+      whereClause[Op.and].push({
+        [Op.or]: [
+          sequelize.where(sequelize.fn("lower", sequelize.col("Order.name")), {
+            [Op.like]: `%${orderNumber.toLowerCase()}%`,
+          }),
+          sequelize.where(sequelize.fn("lower", sequelize.col("number")), {
+            [Op.like]: `%${orderNumber.toLowerCase()}%`,
+          }),
+          sequelize.where(sequelize.fn("lower", sequelize.col("orderNumber")), {
+            [Op.like]: `%${orderNumber.toLowerCase()}%`,
+          }),
+        ],
+      });
+    }
     if (shippingCompany) {
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("shippingCompany"), {

@@ -81,7 +81,8 @@ class OrderController {
           ...req.body,
           shippedFromInventory:
             req.body.shippedFromInventory &&
-            req.body.shippedFromInventory == "true"
+            (req.body.shippedFromInventory == "true" ||
+              req.body.shippedFromInventory == true)
               ? true
               : false,
         },

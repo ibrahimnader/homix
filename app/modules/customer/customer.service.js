@@ -107,8 +107,8 @@ class CustomerService {
           customer.lastName ||
           customer.last_name ||
           customer.default_address.last_name,
-        email: customer.email || customer.default_address.email,
-        phoneNumber: customer.phone || customer.default_address.phone,
+        email: customer.email || customer.default_address.email || "",
+        phoneNumber: customer.phone || customer.default_address.phone || "",
         address,
       };
     });

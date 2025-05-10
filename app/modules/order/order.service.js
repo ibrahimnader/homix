@@ -150,7 +150,7 @@ class OrderService {
           shippedFromInventory: isShipment ? true : false,
           shippingReceiveDate: order.shippingReceiveDate || null,
           shippingCompany: order.shippingCompany || null,
-          shippingFees: order.shippingFees || null,
+          shippingFees: order.shippingFees || 0,
           deliveryDate: order.deliveryDate || null,
           governorate: order.governorate || null,
           shipmentStatus: order.shipmentStatus || null,
@@ -712,8 +712,10 @@ class OrderService {
 
     Object.keys(orderData).forEach(
       (key) =>
-        orderData[key] === undefined ||
-        (orderData[key] === null && delete orderData[key])
+        (orderData[key] === undefined ||
+          orderData[key] === null ||
+          orderData[key] === "") &&
+        delete orderData[key]
     );
     if (orderData.status) {
       await OrderService.sendNotification(orderId, {

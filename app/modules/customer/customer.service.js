@@ -92,7 +92,7 @@ class CustomerService {
   static async saveCustomers(customers) {
     customers = customers.map((customer) => {
       const address = customer.default_address
-        ? `${customer.default_address.address1} ${customer.default_address.address2}-${customer.default_address.city}-${customer.default_address.province}-${customer.default_address.country}`
+        ? `${customer.default_address?.address1} ${customer.default_address?.address2}-${customer.default_address?.city}-${customer.default_address?.province}-${customer.default_address?.country}`
         : `${customer.address1 || ""} ${customer.address2 || ""}-${
             customer.city || ""
           }-${customer.province || ""}-${customer.country || ""}`;
@@ -101,14 +101,14 @@ class CustomerService {
         firstName:
           customer.firstName ||
           customer.first_name ||
-          customer.default_address.first_name ||
-          customer.default_address.name,
+          customer.default_address?.first_name ||
+          customer.default_address?.name,
         lastName:
           customer.lastName ||
           customer.last_name ||
-          customer.default_address.last_name,
-        email: customer.email || customer.default_address.email || "",
-        phoneNumber: customer.phone || customer.default_address.phone || "",
+          customer.default_address?.last_name,
+        email: customer.email || customer.default_address?.email || "",
+        phoneNumber: customer.phone || customer.default_address?.phone || "",
         address,
       };
     });

@@ -77,15 +77,7 @@ class OrderController {
 
       const result = await OrderService.updateOrder(
         orderId,
-        {
-          ...req.body,
-          shippedFromInventory:
-            req.body.shippedFromInventory &&
-            (req.body.shippedFromInventory == "true" ||
-              req.body.shippedFromInventory == true)
-              ? true
-              : false,
-        },
+        req.body,
         req.user
       );
       res.status(result.statusCode).json(result);

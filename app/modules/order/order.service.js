@@ -718,6 +718,9 @@ class OrderService {
         delete orderData[key]
     );
     if (orderData.status) {
+      if (orderData.status === ORDER_STATUS.IN_PROGRESS) {
+        orderData.PoDate = new Date();
+      }
       await OrderService.sendNotification(orderId, {
         orderId: orderId,
         oldStatus: order.status,

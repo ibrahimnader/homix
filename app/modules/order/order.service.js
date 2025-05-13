@@ -1,4 +1,5 @@
 const { Op, where, or } = require("sequelize");
+const ExcelJS = require("exceljs");
 const CustomerService = require("../customer/customer.service");
 const ShopifyHelper = require("../helpers/shopifyHelper");
 const OrderLine = require("../orderLines/orderline.model");
@@ -10,7 +11,13 @@ const Vendor = require("../vendor/vendor.model");
 const Customer = require("../customer/customer.model");
 const Note = require("../notes/notes.model");
 const User = require("../user/user.model");
-const { ORDER_STATUS, USER_TYPES } = require("../../../config/constants");
+const {
+  ORDER_STATUS,
+  USER_TYPES,
+  ORDER_STATUS_Arabic,
+  PAYMENT_STATUS,
+  PAYMENT_STATUS_ARABIC,
+} = require("../../../config/constants");
 const moment = require("moment-timezone");
 const Attachment = require("../attachments/attachment.model");
 const ProductType = require("../product/productType.model");
@@ -86,6 +93,11 @@ class OrderService {
     orders = orders
       .filter((order) => order.customer)
       .map((order) => {
+        const paymentStatus = order.payment_gateway_names.includes(
+          "Cash on Delivery (COD)"
+        )
+          ? PAYMENT_STATUS.COD
+          : PAYMENT_STATUS.PAID;
         let totalCost = 0;
         order.line_items.forEach((line) => {
           const discount_allocations = line.discount_allocations || [];
@@ -200,6 +212,8 @@ class OrderService {
         }
         if (order.paymentStatus) {
           obj.paymentStatus = order.paymentStatus;
+        } else {
+          obj.paymentStatus = paymentStatus;
         }
         return obj;
       });
@@ -433,6 +447,301 @@ class OrderService {
       },
     };
   }
+  static async exportOrders(
+    res,
+    {
+      vendorName,
+      vendorId,
+      orderNumber,
+      financialStatus,
+      status,
+      deliveryStatus,
+      startDate,
+      endDate,
+      vendorUser,
+      paymentStatus,
+    }
+  ) {
+    let whereClause = {
+      [Op.and]: [],
+    };
+
+    if (orderNumber) {
+      whereClause[Op.and].push({
+        [Op.or]: [
+          sequelize.where(sequelize.fn("lower", sequelize.col("Order.name")), {
+            [Op.like]: `%${orderNumber.toLowerCase()}%`,
+          }),
+          sequelize.where(sequelize.fn("lower", sequelize.col("number")), {
+            [Op.like]: `%${orderNumber.toLowerCase()}%`,
+          }),
+          sequelize.where(sequelize.fn("lower", sequelize.col("orderNumber")), {
+            [Op.like]: `%${orderNumber.toLowerCase()}%`,
+          }),
+        ],
+      });
+    }
+
+    if (financialStatus) {
+      whereClause[Op.and].push(
+        sequelize.where(
+          sequelize
+            .fn("lower", sequelize.col("financialStatus"))
+            .cast(sequelize.Sequelize.STRING),
+          {
+            [Op.like]: `%${financialStatus.toLowerCase()}%`,
+          }
+        )
+      );
+    }
+    if (paymentStatus) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.paymentStatus"), {
+          [Op.eq]: paymentStatus,
+        })
+      );
+    }
+    if (deliveryStatus) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.deliveryStatus"), {
+          [Op.eq]: deliveryStatus,
+        })
+      );
+    }
+    if (startDate && endDate) {
+      let startStartDate = moment
+        .tz(new Date(startDate), "Africa/Cairo")
+        .startOf("day")
+        .utc()
+        .toDate();
+
+      let endOfEndDate = moment
+        .tz(new Date(endDate), "Africa/Cairo")
+        .endOf("day")
+        .utc()
+        .toDate();
+
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.orderDate"), {
+          [Op.gte]: startStartDate,
+        })
+      );
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.orderDate"), {
+          [Op.lte]: endOfEndDate,
+        })
+      );
+    }
+    if (vendorName) {
+      whereClause[Op.and].push(
+        sequelize.where(
+          sequelize.fn(
+            "lower",
+            sequelize.col("orderLines.product.vendor.name")
+          ),
+          {
+            [Op.like]: `%${vendorName.toLowerCase()}%`,
+          }
+        )
+      );
+    }
+    if (vendorId && vendorId !== "0") {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
+          [Op.eq]: vendorId,
+        })
+      );
+    }
+
+    if (vendorUser) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.status"), {
+          [Op.gt]: ORDER_STATUS.IN_PROGRESS,
+        })
+      );
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.status"), {
+          [Op.ne]: ORDER_STATUS.CANCELED,
+        })
+      );
+    } else if (status) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.status"), {
+          [Op.eq]: status,
+        })
+      );
+    }
+    whereClause = whereClause[Op.and].length ? whereClause : {};
+    const orders = await Order.findAll({
+      include: [
+        {
+          model: OrderLine,
+          required: true,
+          as: "orderLines",
+          include: [
+            {
+              model: Product,
+              as: "product",
+              required: true,
+              include: [
+                {
+                  model: Vendor,
+                  as: "vendor",
+                  required: true,
+                },
+                {
+                  model: ProductType,
+                  as: "type",
+                  attributes: ["name"],
+                  required: false,
+                },
+              ],
+            },
+          ],
+        },
+        {
+          model: Note,
+          as: "notesList",
+          required: false,
+          include: [
+            {
+              model: User,
+              as: "user",
+              required: false,
+              attributes: ["firstName", "lastName"],
+            },
+            {
+              model: Attachment,
+              as: "attachments",
+              required: false,
+            },
+          ],
+        },
+        {
+          model: Customer,
+          as: "customer",
+          required: false,
+        },
+      ],
+      where: whereClause,
+      order: [["orderDate", "DESC"]],
+      subQuery: false,
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("orders");
+    worksheet.columns = [
+      {
+        header: "رقم الطلب",
+        key: "orderNumber",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: " المنتج",
+        key: "productCode",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: "الكمیة",
+        key: "quantity",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: "البائع",
+        key: "vendorName",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: "حالة الطلب",
+        key: "status",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: "طریقة الدفع",
+        key: "paymentStatus",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: "تاریخ أمر التصنیع",
+        key: "orderDate",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: "الأیام المنقضیة",
+        key: "daysPassed",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: "سعر التكلفة",
+        key: "cost",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: "سعر البیع",
+        key: "price",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: "المسئول",
+        key: "userName",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: "النوع",
+        key: "productType",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+    ];
+
+    // Add data rows
+    orders.forEach((order) => {
+      worksheet.addRow({
+        orderNumber: order.orderNumber,
+        productCode: order.orderLines[0].product.title,
+        quantity: order.orderLines[0].quantity,
+        vendorName: order.orderLines[0].product.vendor.name,
+        status: ORDER_STATUS_Arabic[order.status] || order.status,
+        paymentStatus:
+          PAYMENT_STATUS_ARABIC[order.paymentStatus] || order.paymentStatus,
+        orderDate: order.PoDate
+          ? moment(order.PoDate).format("YYYY-MM-DD")
+          : "",
+        daysPassed: order.PoDate
+          ? moment().diff(moment(order.PoDate), "days", true).toFixed(0)
+          : "",
+        cost: order.totalCost,
+        price: order.subTotalPrice,
+        userName: order.user
+          ? `${order.user.firstName} ${order.user.lastName}`
+          : "",
+        productType: order.orderLines[0].product?.type?.name || "",
+      });
+    });
+
+    // Set response headers
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", "attachment; filename=users.xlsx");
+
+    // Write to response stream
+    await workbook.xlsx.write(res);
+    res.end();
+  }
+
   static async financialReport(vendorId, startDate, endDate) {
     let startStartDate = startDate
       ? moment

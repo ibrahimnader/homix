@@ -20,6 +20,21 @@ class OrderController {
       });
     }
   }
+  static async exportOrders(req, res, next) {
+    try {
+      let vendorUser = false;
+      if (req.vendorId) {
+        req.query.vendorId = req.vendorId;
+        vendorUser = true;
+      }
+      await OrderService.exportOrders(res, {
+        ...req.query,
+        vendorUser,
+      });
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
   static async importOrders(req, res, next) {
     try {
       const result = await OrderService.importOrders();

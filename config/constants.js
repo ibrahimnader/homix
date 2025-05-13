@@ -16,6 +16,18 @@ const ORDER_STATUS = {
   // HALF_COMPLETED: 3,
   // OUT_FOR_DELIVERY: 4,
 };
+const ORDER_STATUS_Arabic = {
+  1: "معلق",
+  2: "قيد التنفيذ",
+  3: "مؤكد",
+  4: "ملغي",
+  5: "تم التسليم",
+  6: "مسترد",
+  7: "مستبدل",
+
+  // HALF_COMPLETED: 3,
+  // OUT_FOR_DELIVERY: 4,
+};
 const DELIVERY_STATUS = {
   ON_SCHEDULE: 1,
   ALMOST_LAST: 2,
@@ -36,6 +48,10 @@ const ORDER_LINE_STATUS = {
 const PAYMENT_STATUS = {
   COD: 1,
   PAID: 2,
+};
+const PAYMENT_STATUS_ARABIC = {
+  1: "الدفع عند الاستلام",
+  2: "مدفوع",
 };
 const FACTORY_STATUS = {
   ONLINE: 1,
@@ -100,5 +116,7 @@ module.exports = {
   SHIPMENTS_STATUS,
   SHIPMENT_TYPE,
   GOVERNORATES,
-  MANUFACTURE_STATUS
+  MANUFACTURE_STATUS,
+  ORDER_STATUS_Arabic,
+  PAYMENT_STATUS_ARABIC,
 };

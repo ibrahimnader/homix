@@ -62,6 +62,7 @@ OrderRouter.get(
   IsNotLogistic,
   OrderController.financialReport
 );
+OrderRouter.get("/export", OrderController.exportOrders);
 
 /**
  * @swagger

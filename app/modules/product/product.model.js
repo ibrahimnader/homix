@@ -15,6 +15,10 @@ const Product = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    typeId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
     image: {
       type: DataTypes.TEXT,
       allowNull: true,

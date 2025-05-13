@@ -382,11 +382,19 @@ class OrderService {
               model: Product,
               as: "product",
               required: true,
-              include: {
-                model: Vendor,
-                as: "vendor",
-                required: true,
-              },
+              include: [
+                {
+                  model: Vendor,
+                  as: "vendor",
+                  required: true,
+                },
+                {
+                  model: ProductType,
+                  as: "type",
+                  attributes: ["name"],
+                  required: false,
+                },
+              ],
             },
           ],
         },

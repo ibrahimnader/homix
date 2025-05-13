@@ -9,8 +9,23 @@ const { sequelize } = require("../../../config/db.config");
 const { saveProductsCategories } = require("../category/categoty.service");
 const ProductCategory = require("../category/productCategory.model");
 const Category = require("../category/category.model");
+const ProductType = require("./productType.model");
 
 class ProductsService {
+  static async getExistingTypesMap(typesNames) {
+    const typesMap = {};
+    const types = await ProductType.findAll({
+      where: {
+        name: {
+          [Op.in]: typesNames,
+        },
+      },
+    });
+    types.forEach((type) => {
+      typesMap[type.name] = type.id;
+    });
+    return typesMap;
+  }
   static async getProducts(
     page = 1,
     size = 50,
@@ -65,6 +80,12 @@ class ProductsService {
               attributes: ["title"],
             },
           ],
+          required: false,
+        },
+        {
+          model: ProductType,
+          as: "type",
+          attributes: ["name"],
           required: false,
         },
       ],
@@ -164,6 +185,7 @@ class ProductsService {
       "variants",
       "image",
       "collection_id",
+      "product_type",
     ];
     const products = await ShopifyHelper.importData(
       "products",
@@ -195,9 +217,15 @@ class ProductsService {
 
   static async saveImportedProducts(products) {
     const vendorsNames = products.map((product) => product.vendor);
+    const typesNames = products.map((product) => product.product_type);
     const vendorsMap = await VendorsService.getExistingVendorsMap(vendorsNames);
+    const typesMap = await ProductsService.getExistingTypesMap(typesNames);
 
-    const result = await ProductsService.saveProductToDB(products, vendorsMap);
+    const result = await ProductsService.saveProductToDB(
+      products,
+      vendorsMap,
+      typesMap
+    );
     const productsMap = {};
     result.forEach((product) => {
       productsMap[String(product.shopifyId)] = product;
@@ -226,7 +254,7 @@ class ProductsService {
     };
   }
 
-  static async saveProductToDB(productsData, vendorsMap) {
+  static async saveProductToDB(productsData, vendorsMap, typesMap) {
     const itemsIds = productsData
       .map((product) =>
         product.variants
@@ -244,6 +272,7 @@ class ProductsService {
       return {
         title: product.title,
         vendorId: vendorsMap[product.vendor],
+        typeId: typesMap[product.product_type] || "",
         image: product.image
           ? product.image.src
           : `${process.env.APP_URL}/uploads/default-product.png`,
@@ -274,9 +303,9 @@ class ProductsService {
         try {
           // First, check if product exists
           const existingProduct = await Product.findOne({
-            where: { shopifyId: product.shopifyId }
+            where: { shopifyId: product.shopifyId },
           });
-    
+
           if (existingProduct) {
             // Update existing product
             await existingProduct.update({
@@ -299,12 +328,15 @@ class ProductsService {
             });
           }
         } catch (error) {
-          console.error(`Error processing product ${product.shopifyId}:`, error);
+          console.error(
+            `Error processing product ${product.shopifyId}:`,
+            error
+          );
           return null;
         }
       })
     );
-    
+
     // Filter out any null results
     const filteredProducts = savedProducts.filter(Boolean);
     return savedProducts;

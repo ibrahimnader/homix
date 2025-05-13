@@ -112,10 +112,6 @@ class OrderService {
           line.cost = cost * line.quantity;
           totalCost += line.cost;
         });
-        lines.push({
-          order_id: order.orderNumber,
-          line_items: order.line_items,
-        });
         const customerName = `${
           order.customer.firstName ||
           order.customer.first_name ||
@@ -192,6 +188,10 @@ class OrderService {
         // status: order.status || null,
         // financialStatus: order.financial_status || null,
         // paymentStatus: order.paymentStatus || null,
+        lines.push({
+          order_id: obj.code,
+          line_items: order.line_items,
+        });
         if (obj.status) {
           obj.status = order.status;
         }
@@ -209,7 +209,7 @@ class OrderService {
     const orderLines = [];
     for (const { order_id, line_items } of lines) {
       const order = savedOrders.find(
-        (order) => order.orderNumber === String(order_id)
+        (order) => order.code === String(order_id)
       );
       for (const line of line_items) {
         orderLines.push({

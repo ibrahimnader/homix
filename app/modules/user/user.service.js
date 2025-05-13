@@ -22,7 +22,6 @@ class UserService {
         where: { email: String(email).toLowerCase() },
       });
 
-      
       // Check if password matches
       const isMatch = await bcrypt.compare(
         String(password),
@@ -188,7 +187,14 @@ class UserService {
 
   static async saveUsersForVendors(vendors) {
     const promises = [];
+    const namesSet = new Set();
+    let counter = 0;
     for (const vendor of vendors) {
+      let vendorName = vendor.name.toLowerCase();
+      if (namesSet.has(vendorName)) {
+        vendorName = `${vendorName}${counter}`;
+        counter++;
+      }
       vendor.name = vendor.name.replace(/[^a-zA-Z0-9]/g, "");
       const password = await bcrypt.hash(
         `${UserService.capitalizeFirstLetter(vendor.name.toLowerCase())}#${
@@ -198,15 +204,14 @@ class UserService {
       );
       promises.push(
         User.create({
-          email: `${vendor.name.toLowerCase()}@${
-            process.env.SHOPIFY_STORE
-          }.com`,
+          email: `${vendorName}@${process.env.SHOPIFY_STORE}.com`,
           password,
           firstName: vendor.name,
           userType: USER_TYPES.VENDOR,
           vendorId: vendor.id,
         })
       );
+      namesSet.add(vendorName);
     }
 
     let vendorsUsers = await Promise.all(promises);

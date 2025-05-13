@@ -4,7 +4,7 @@ const productsService = require("./product.service");
 class productsController {
   static async importProducts(req, res, next) {
     try {
-      await productsService.importProducts();
+      await productsService.importProducts({},true);
       res.status(200).json({
         status: true,
         message: "Products imported successfully",

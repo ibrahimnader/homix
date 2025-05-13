@@ -95,6 +95,7 @@ class ProductsService {
         {
           model: ProductType,
           as: "type",
+          required: false,
         },
       ],
       where: {
@@ -185,7 +186,7 @@ class ProductsService {
     }
     return result;
   }
-  static async importProducts(parameters) {
+  static async importProducts(parameters, fromImport = false) {
     const fields = [
       "id",
       "title",
@@ -195,15 +196,18 @@ class ProductsService {
       "collection_id",
       "product_type",
     ];
-    const products = await ShopifyHelper.importData(
-      "products",
-      fields,
-      parameters
-    );
+    const args = ["products", fields, parameters];
 
-    const result = await ProductsService.saveImportedProducts(products);
-
-    return result;
+    if (fromImport) {
+      args.push(async (products) => {
+        await ProductsService.saveImportedProducts(products);
+      });
+      await ShopifyHelper.importData(...args);
+    } else {
+      const products = await ShopifyHelper.importData(...args);
+      const result = await ProductsService.saveImportedProducts(products);
+      return result;
+    }
   }
   static async getInventoryMap(itemsIds) {
     const inventoryMap = {};
@@ -238,9 +242,12 @@ class ProductsService {
     );
     const productsMap = {};
     result.forEach((product) => {
+      if (!product) {
+        console.log("Product not found");
+      }
       productsMap[String(product.shopifyId)] = product;
     });
-    await saveProductsCategories(productsMap);
+    // await saveProductsCategories(productsMap);
     return {
       status: true,
       message: "Products imported successfully",
@@ -351,7 +358,7 @@ class ProductsService {
 
     // Filter out any null results
     const filteredProducts = savedProducts.filter(Boolean);
-    return savedProducts;
+    return filteredProducts;
   }
 
   static async getAllCategories() {

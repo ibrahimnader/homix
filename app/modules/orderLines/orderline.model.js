@@ -41,11 +41,11 @@ const OrderLine = sequelize.define(
       defaultValue: 0,
     },
     title: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: true,
     },
     name: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: true,
     },
     cost: {

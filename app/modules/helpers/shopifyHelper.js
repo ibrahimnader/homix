@@ -1,6 +1,11 @@
 const shopifyClient = require("../../../config/shopify");
 class ShopifyHelper {
-  static async importData(path, fields = [], parameters = {}) {
+  static async importData(
+    path,
+    fields = [],
+    parameters = {},
+    callbackFunction
+  ) {
     const data = [];
     // if (path === "products") {
     //   const query = {
@@ -29,7 +34,13 @@ class ShopifyHelper {
       },
     });
     let { body, pageInfo } = response;
-    data.push(...body[path]);
+    if (callbackFunction) {
+      console.log("processing ", path);
+      await callbackFunction(body[path]);
+      console.log("saved 250 ", path);
+    } else {
+      data.push(...body[path]);
+    }
 
     while (
       body[path] &&
@@ -38,6 +49,9 @@ class ShopifyHelper {
       pageInfo.nextPage.query &&
       pageInfo.nextPage.query.page_info
     ) {
+      //wait for 1 second
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
       query.page_info = pageInfo.nextPage.query.page_info;
 
       response = await shopifyClient.get({
@@ -47,7 +61,13 @@ class ShopifyHelper {
 
       body = response.body;
       pageInfo = response.pageInfo;
-      data.push(...body[path]);
+
+      if (callbackFunction) {
+        await callbackFunction(body[path]);
+        console.log("saved 250 ", path);
+      } else {
+        data.push(...body[path]);
+      }
     }
     // }
 

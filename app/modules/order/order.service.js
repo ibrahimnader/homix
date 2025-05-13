@@ -25,13 +25,19 @@ const PREFIX = "H";
 const CUSTOM_PREFIX = "CU";
 
 class OrderService {
-  static async importOrders() {
+  static async importOrders(parameters, fromImport) {
     const fields = [];
-    const orders = await ShopifyHelper.importData("orders", fields, {
-      status: "any",
-    });
-    const result = await OrderService.saveImportedOrders(orders);
-    return result;
+    const args = ["orders", fields, { ...parameters, status: "any" }];
+    if (fromImport) {
+      args.push(async (orders) => {
+        await OrderService.saveImportedOrders(orders);
+      });
+      await ShopifyHelper.importData(...args);
+    } else {
+      const orders = await ShopifyHelper.importData(...args);
+      const result = await OrderService.saveImportedOrders(orders);
+      return result;
+    }
   }
   static async saveImportedOrders(ordersFromShopify, isShipment = false, user) {
     let orders = [];

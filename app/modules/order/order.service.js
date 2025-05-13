@@ -76,7 +76,7 @@ class OrderService {
         customers.push(order.customer);
       }
     }
-    const [productsMap, customersIdsMap] = await Promise.all([
+    const [productsMap, customersNamesMap] = await Promise.all([
       ProductsService.getProductsMappedByShopifyIds([...productsIds]),
       CustomerService.getCustomersMappedByNames(customers),
     ]);
@@ -113,18 +113,25 @@ class OrderService {
           totalCost += line.cost;
         });
         lines.push({
-          order_id: order.id,
+          order_id: order.orderNumber,
           line_items: order.line_items,
         });
         const customerName = `${
           order.customer.firstName ||
           order.customer.first_name ||
           order.customer.default_address.first_name
-        } ${
+        }${
           order.customer.lastName ||
           order.customer.last_name ||
           order.customer.default_address.last_name
+        }${
+          order.customer.email || order.customer.default_address?.email || ""
+        }${
+          order.customer.phoneNumber ||
+          order.customer.default_address?.phone ||
+          ""
         }`;
+
         let number,
           orderNumber,
           name,
@@ -159,7 +166,7 @@ class OrderService {
             : 0,
           totalPrice: order.total_price,
           orderDate: order.created_at || new Date(),
-          customerId: customersIdsMap[customerName],
+          customerId: customersNamesMap[customerName],
           totalCost,
           custom,
           shippedFromInventory: isShipment ? true : false,
@@ -184,6 +191,7 @@ class OrderService {
         };
         // status: order.status || null,
         // financialStatus: order.financial_status || null,
+        // paymentStatus: order.paymentStatus || null,
         if (obj.status) {
           obj.status = order.status;
         }
@@ -196,24 +204,12 @@ class OrderService {
         return obj;
       });
 
-    const result = await Order.bulkCreate(orders, {
-      updateOnDuplicate: [
-        "shopifyId",
-        "subTotalPrice",
-        "totalDiscounts",
-        "totalTax",
-        "shippingFees",
-        "totalPrice",
-        "orderDate",
-        "customerId",
-        "totalCost",
-      ],
-    });
+    const result = await Order.bulkCreate(orders);
     const savedOrders = result.map((order) => order.toJSON());
     const orderLines = [];
     for (const { order_id, line_items } of lines) {
       const order = savedOrders.find(
-        (order) => order.shopifyId === String(order_id)
+        (order) => order.orderNumber === String(order_id)
       );
       for (const line of line_items) {
         orderLines.push({
@@ -234,22 +230,7 @@ class OrderService {
         });
       }
     }
-    await OrderLine.bulkCreate(orderLines, {
-      updateOnDuplicate: [
-        "shopifyId",
-        "orderId",
-        "productId",
-        "title",
-        "name",
-        "price",
-        "quantity",
-        "sku",
-        "variant_id",
-        "discount",
-        "cost",
-        "unitCost",
-      ],
-    });
+    await OrderLine.bulkCreate(orderLines);
     for (const order of savedOrders) {
       await OrderService.sendNotification(order.id, {
         orderId: order.id,

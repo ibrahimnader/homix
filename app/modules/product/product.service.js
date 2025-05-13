@@ -178,18 +178,27 @@ class ProductsService {
     };
   }
   static async getProductsMappedByShopifyIds(productsIds) {
+    const allVendorsMap = {};
     const products = await Product.findAll({
       where: {
         shopifyId: [...productsIds, "custom"],
       },
-      attributes: ["shopifyId", "id", "variants"],
+      attributes: ["shopifyId", "id", "variants", "vendorId"],
+      include: [
+        {
+          model: Vendor,
+          as: "vendor",
+        },
+      ],
     });
-    const result = {};
+    const productsMap = {};
     const existingShopifyIds = new Set();
     for (const product of products) {
-      result[product.shopifyId] = product;
+      productsMap[product.shopifyId] = product;
       existingShopifyIds.add(product.shopifyId.toString());
+      allVendorsMap[product.vendorId] = product.vendor;
     }
+
     const nonExistingProductsIds = productsIds.filter(
       (id) => !existingShopifyIds.has(id.toString())
     );
@@ -198,10 +207,16 @@ class ProductsService {
         ids: nonExistingProductsIds.join(","),
       });
       for (const product of res.data) {
-        result[product.shopifyId] = product;
+        productsMap[product.shopifyId] = product;
+      }
+      for (const [vendorId, vendor] of Object.entries(res.vendorsMap)) {
+        allVendorsMap[vendorId] = vendor;
       }
     }
-    return result;
+    return {
+      productsMap,
+      vendorsMap: allVendorsMap,
+    };
   }
   static async importProducts(parameters, fromImport = false) {
     const fields = [
@@ -257,18 +272,19 @@ class ProductsService {
       vendorsMap,
       typesMap
     );
-    const productsMap = {};
-    result.forEach((product) => {
-      if (!product) {
-        console.log("Product not found");
-      }
-      productsMap[String(product.shopifyId)] = product;
-    });
+    // const productsMap = {};
+    // result.forEach((product) => {
+    //   if (!product) {
+    //     console.log("Product not found");
+    //   }
+    //   productsMap[String(product.shopifyId)] = product;
+    // });
     // await saveProductsCategories(productsMap);
     return {
       status: true,
       message: "Products imported successfully",
       data: result,
+      vendorsMap,
       statusCode: 200,
     };
   }

@@ -28,9 +28,7 @@ class productsController {
       const categories = req.query.categoriesIds
         ? req.query.categoriesIds.split(",")
         : [];
-      const types = req.query.typesIds
-        ? req.query.typesIds.split(",")
-        : [];
+      const types = req.query.typesIds ? req.query.typesIds.split(",") : [];
 
       const result = await productsService.getProducts(
         page,
@@ -72,7 +70,7 @@ class productsController {
   }
   static async createProduct(req, res) {
     try {
-      const result = await productsService.saveImportedProducts([req.body]);
+      await productsService.saveImportedProducts([req.body]);
       res.status(200).json({
         status: true,
         statusCode: 200,

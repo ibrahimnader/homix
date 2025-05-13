@@ -28,16 +28,16 @@ class OrderService {
   static async importOrders(parameters, fromImport) {
     const fields = [];
     const args = ["orders", fields, { ...parameters, status: "any" }];
-    if (fromImport) {
-      args.push(async (orders) => {
-        await OrderService.saveImportedOrders(orders);
-      });
-      await ShopifyHelper.importData(...args);
-    } else {
-      const orders = await ShopifyHelper.importData(...args);
-      const result = await OrderService.saveImportedOrders(orders);
-      return result;
-    }
+    // if (fromImport) {
+    //   args.push(async (orders) => {
+    //     await OrderService.saveImportedOrders(orders);
+    //   });
+    //   await ShopifyHelper.importData(...args);
+    // } else {
+    const orders = await ShopifyHelper.importData(...args);
+    const result = await OrderService.saveImportedOrders(orders);
+    return result;
+    // }
   }
   static async saveImportedOrders(ordersFromShopify, isShipment = false, user) {
     let orders = [];
@@ -89,7 +89,7 @@ class OrderService {
         customers.push(order.customer);
       }
     }
-    const [productsMap, customersNamesMap] = await Promise.all([
+    const [{ productsMap, vendorsMap }, customersNamesMap] = await Promise.all([
       ProductsService.getProductsMappedByShopifyIds([...productsIds]),
       CustomerService.getCustomersMappedByNames(customers),
     ]);
@@ -99,11 +99,20 @@ class OrderService {
     orders = orders
       .filter((order) => order.customer)
       .map((order) => {
-        const paymentStatus = order.payment_gateway_names.includes(
-          "Cash on Delivery (COD)"
-        )
-          ? PAYMENT_STATUS.COD
-          : PAYMENT_STATUS.PAID;
+        const line = order.line_items[0];
+        const product = line.product_id
+          ? productsMap[line.product_id]
+          : productsMap["custom"];
+        if (!product) {
+          throw new Error(
+            `Product with id ${line.product_id} not found in products map`
+          );
+        }
+        const vendor = vendorsMap[product.vendorId];
+        const paymentStatus =
+          order.financial_status === "paid"
+            ? PAYMENT_STATUS.PAID
+            : PAYMENT_STATUS.COD;
         let totalCost = 0;
         order.line_items.forEach((line) => {
           const discount_allocations = line.discount_allocations || [];
@@ -112,12 +121,6 @@ class OrderService {
             0
           );
           line.discount = lineDiscount;
-          const product = line.product_id
-            ? productsMap[line.product_id]
-            : productsMap["custom"];
-          if (!product) {
-            console.log("product not found", line.product_id);
-          }
 
           const variant = product.variants
             ? product.variants.find(
@@ -178,6 +181,7 @@ class OrderService {
                 0
               )
             : 0,
+
           totalPrice: order.total_price,
           orderDate: order.created_at || new Date(),
           customerId: customersNamesMap[customerName],
@@ -192,7 +196,9 @@ class OrderService {
           shipmentStatus: order.shipmentStatus || null,
           shipmentType: order.shipmentType || null,
           expectedDate: order.expectedDate || null,
-
+          expectedDeliveryDate: vendor.daysToDeliver
+            ? moment().add(vendor.daysToDeliver, "days").toDate()
+            : null,
           receivedAmount: order.receivedAmount || 0,
           commission: order.commission || 0,
           shippingFees: order.shippingFees || 0,

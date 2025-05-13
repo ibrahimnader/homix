@@ -98,23 +98,30 @@ class VendorsService {
   static async getExistingVendorsMap(names) {
     const result = {};
     const uniqueNames = [...new Set(names)];
-    const vendorsData = uniqueNames.map((name) => ({
-      name,
-    }));
-    const createdVendors = await Vendor.bulkCreate(vendorsData, {
-      updateOnDuplicate: ["name"],
-    });
-
-    await UserService.saveUsersForVendorsWithNoUsers(createdVendors);
-    const vendors = await Vendor.findAll({
+    const existingVendors = await Vendor.findAll({
       where: {
         name: uniqueNames,
       },
     });
+    for (const vendor of existingVendors) {
+      result[vendor.name] = vendor;
+    }
+    const existingVendorsNames = new Set(
+      existingVendors.map((vendor) => vendor.name)
+    );
+    const createdVendors = names.filter(
+      (name) => !existingVendorsNames.has(name)
+    );
+    if (createdVendors.length) {
+      const createdVendorsData = await Vendor.bulkCreate(
+        createdVendors.map((name) => ({ name }))
+      );
+      createdVendorsData.forEach((vendor) => {
+        result[vendor.name] = vendor;
+      });
+    }
 
-    vendors.forEach((saved) => {
-      result[saved.name] = saved.id;
-    });
+    await UserService.saveUsersForVendorsWithNoUsers(createdVendors);
     return result;
   }
   static async getVendorByNameAndSaveIfNotExist(name) {

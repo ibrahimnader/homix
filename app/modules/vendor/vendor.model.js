@@ -9,6 +9,10 @@ const Vendor = sequelize.define(
       allowNull: false,
       unique: true,
     },
+    daysToDeliver: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
   },
   {
     tableName: "vendors",

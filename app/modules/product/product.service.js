@@ -26,7 +26,7 @@ class ProductsService {
     });
     //save new types to the database
     const newTypes = typesNames.filter((type) => !typesMap[type]);
-    const newTypesData = newTypes.map((type) => ({
+    const newTypesData = [...new Set(newTypes)].map((type) => ({
       name: type,
     }));
     const createdTypes = await ProductType.bulkCreate(newTypesData);

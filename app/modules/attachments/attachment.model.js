@@ -1,6 +1,7 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../../config/db.config");
 const Factory = require("../factory/factory.model");
+const Note = require("../notes/notes.model");
 
 const Attachment = sequelize.define(
   "Attachment",
@@ -38,6 +39,14 @@ Factory.hasMany(Attachment, {
   constraints: false,
   scope: {
     modelType: "Factory",
+  },
+  as: "attachments",
+});
+Note.hasMany(Attachment, {
+  foreignKey: "modelId",
+  constraints: false,
+  scope: {
+    modelType: "Note",
   },
   as: "attachments",
 });

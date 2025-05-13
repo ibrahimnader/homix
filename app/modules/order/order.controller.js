@@ -146,5 +146,21 @@ class OrderController {
       return next(new AppError(error.message, 500));
     }
   }
+
+  static async uploadFiles(req, res, next) {
+    try {
+      const noteId = req.params.id;
+      const { filePaths, fileNames, descriptions } = req;
+      let note = await OrderService.uploadFiles(
+        noteId,
+        filePaths,
+        fileNames,
+        descriptions
+      );
+      res.status(200).json(note);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
 }
 module.exports = OrderController;

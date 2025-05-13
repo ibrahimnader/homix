@@ -3,6 +3,7 @@ const OrderController = require("./order.controller");
 const verifyToken = require("../../middlewares/protectApi");
 const IsNotLogistic = require("../../middlewares/isNotLogistic");
 const isNotVendor = require("../../middlewares/isNotVendor");
+const fileUploadMiddleware = require("../../../config/fileUploadMiddleware");
 const OrderRouter = express.Router();
 
 /**
@@ -319,6 +320,12 @@ OrderRouter.delete(
   verifyToken,
   isNotVendor,
   OrderController.deleteNote
+);
+
+OrderRouter.post(
+  "/:orderId/notes/:noteId/upload",
+  fileUploadMiddleware("note"),
+  OrderController.uploadFiles
 );
 
 module.exports = OrderRouter;

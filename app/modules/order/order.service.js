@@ -409,6 +409,11 @@ class OrderService {
               required: false,
               attributes: ["firstName", "lastName"],
             },
+            {
+              model: Attachment,
+              as: "attachments",
+              required: false,
+            },
           ],
         },
         {
@@ -968,6 +973,32 @@ class OrderService {
         });
       }
     }
+  }
+
+  static async uploadFiles(noteId, filePaths, fileNames, descriptions) {
+    const note = await Note.findByPk(noteId);
+    if (!note) {
+      return {
+        status: false,
+        statusCode: 404,
+        message: "Note not found",
+      };
+    }
+    for (let i = 0; i < filePaths.length; i++) {
+      await Attachment.create({
+        modelId: noteId,
+        modelType: "Note",
+        name: fileNames[i],
+        url: filePaths[i],
+        description: descriptions[i] || "",
+      });
+    }
+
+    return {
+      status: true,
+      statusCode: 200,
+      message: "Files uploaded!",
+    };
   }
 }
 module.exports = OrderService;

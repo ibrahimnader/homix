@@ -156,6 +156,12 @@ OrderRouter.put(
   IsNotLogistic,
   OrderController.updateOrder
 );
+OrderRouter.put(
+  "/bulk-update",
+  verifyToken,
+  IsNotLogistic,
+  OrderController.BulkUpdate
+);
 
 /**
  * @swagger
@@ -202,6 +208,12 @@ OrderRouter.delete(
   verifyToken,
   isNotVendor,
   OrderController.deleteOrder
+);
+OrderRouter.delete(
+  "/bulk-delete",
+  verifyToken,
+  isNotVendor,
+  OrderController.bulkDelete
 );
 /**
  * @swagger

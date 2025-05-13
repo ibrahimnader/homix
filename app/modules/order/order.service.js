@@ -740,6 +740,54 @@ class OrderService {
       data: order,
     };
   }
+  static async BulkUpdate(body, user) {
+    const { orderIds, orderData } = body;
+    Object.keys(orderData).forEach(
+      (key) =>
+        (orderData[key] === undefined ||
+          orderData[key] === null ||
+          orderData[key] === "") &&
+        delete orderData[key]
+    );
+    if (orderData.status) {
+      if (orderData.status == ORDER_STATUS.IN_PROGRESS) {
+        orderData.PoDate = new Date();
+      }
+      const orders = await Order.findAll({
+        where: {
+          id: {
+            [Op.in]: orderIds,
+          },
+        },
+      });
+      for (const order of orders) {
+        await OrderService.sendNotification(order.id, {
+          orderId: order.id,
+          oldStatus: order.status,
+          newStatus: orderData.status,
+          user: {
+            firstName: user.firstName,
+            lastName: user.lastName,
+          },
+          type: "orderUpdate",
+        });
+      }
+    }
+
+    await Order.update(orderData, {
+      where: {
+        id: {
+          [Op.in]: orderIds,
+        },
+      },
+    });
+
+    return {
+      status: true,
+      statusCode: 200,
+      message: "Orders updated successfully",
+    };
+  }
 
   static async deleteOrder(orderId) {
     const order = await Order.findByPk(orderId);
@@ -755,6 +803,21 @@ class OrderService {
       status: true,
       statusCode: 200,
       message: "Order deleted successfully",
+    };
+  }
+  static async bulkDelete(body) {
+    const { orderIds } = body;
+    await Order.destroy({
+      where: {
+        id: {
+          [Op.in]: orderIds,
+        },
+      },
+    });
+    return {
+      status: true,
+      statusCode: 200,
+      message: "Orders deleted successfully",
     };
   }
   static async updateNote(user, OrderId, noteId, text) {

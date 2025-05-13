@@ -169,6 +169,20 @@ const Order = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    totalVendorDue: {
+      type: DataTypes.DECIMAL,
+      allowNull: true,
+      defaultValue: 0,
+    },
+    totalCompanyDue: {
+      type: DataTypes.DECIMAL,
+      allowNull: true,
+      defaultValue: 0,
+    },
+    manufactureStatus: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
   },
   {
     tableName: "orders",

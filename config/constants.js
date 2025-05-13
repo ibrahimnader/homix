@@ -81,6 +81,10 @@ const GOVERNORATES = {
   26: "البحيرة",
   27: "دمياط",
 };
+const MANUFACTURE_STATUS = {
+  Accepted: 1,
+  Rejected: 2,
+};
 
 module.exports = {
   USER_TYPES,
@@ -93,4 +97,5 @@ module.exports = {
   SHIPMENTS_STATUS,
   SHIPMENT_TYPE,
   GOVERNORATES,
+  MANUFACTURE_STATUS
 };

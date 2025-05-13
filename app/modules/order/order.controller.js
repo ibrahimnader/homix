@@ -85,11 +85,27 @@ class OrderController {
       return next(new AppError(error.message, 500));
     }
   }
+  static async BulkUpdate(req, res, next) {
+    try {
+      const result = await OrderService.BulkUpdate(req.body, req.user);
+      res.status(result.statusCode).json(result);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
 
   static async deleteOrder(req, res, next) {
     try {
       const { orderId } = req.params;
       const result = await OrderService.deleteOrder(orderId);
+      res.status(result.statusCode).json(result);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
+  static async bulkDelete(req, res, next) {
+    try {
+      const result = await OrderService.bulkDelete(req.body);
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));

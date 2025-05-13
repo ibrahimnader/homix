@@ -157,6 +157,10 @@ const Order = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    expectedDeliveryDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
     governorate: {
       type: DataTypes.STRING,
       allowNull: true,

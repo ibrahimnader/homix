@@ -12,6 +12,7 @@ const Note = require("../notes/notes.model");
 const User = require("../user/user.model");
 const { ORDER_STATUS, USER_TYPES } = require("../../../config/constants");
 const moment = require("moment-timezone");
+const Attachment = require("../attachments/attachment.model");
 const PREFIX = "H";
 const CUSTOM_PREFIX = "CU";
 

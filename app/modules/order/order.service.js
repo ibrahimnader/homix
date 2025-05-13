@@ -311,7 +311,7 @@ class OrderService {
             .fn("lower", sequelize.col("financialStatus"))
             .cast(sequelize.Sequelize.STRING),
           {
-            [Op.like]: `%${financialStatus.toLowerCase()}%`,
+            [Op.like]: Number(financialStatus),
           }
         )
       );
@@ -319,16 +319,30 @@ class OrderService {
     if (paymentStatus) {
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("Order.paymentStatus"), {
-          [Op.eq]: paymentStatus,
+          [Op.eq]: Number(paymentStatus),
         })
       );
     }
     if (deliveryStatus) {
-      whereClause[Op.and].push(
-        sequelize.where(sequelize.col("Order.deliveryStatus"), {
-          [Op.eq]: deliveryStatus,
-        })
-      );
+      if (deliveryStatus == DELIVERY_STATUS.LATE) {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+            [Op.lt]: new Date(),
+          })
+        );
+      } else if (deliveryStatus == DELIVERY_STATUS.ALMOST_LAST) {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+            [Op.lt]: moment().add(2, "days").toDate(),
+          })
+        );
+      } else {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+            [Op.gte]: new Date(),
+          })
+        );
+      }
     }
     if (startDate && endDate) {
       let startStartDate = moment
@@ -455,14 +469,13 @@ class OrderService {
       if (order.expectedDeliveryDate) {
         if (moment(order.expectedDeliveryDate).isBefore(new Date())) {
           order.deliveryStatus = DELIVERY_STATUS.LATE;
-        }else if (
+        } else if (
           moment(order.expectedDeliveryDate).isBefore(
             moment().add(2, "days").toDate()
           )
         ) {
           order.deliveryStatus = DELIVERY_STATUS.ALMOST_LAST;
-        }
-        else {
+        } else {
           order.deliveryStatus = DELIVERY_STATUS.ON_SCHEDULE;
         }
       }
@@ -531,11 +544,25 @@ class OrderService {
       );
     }
     if (deliveryStatus) {
-      whereClause[Op.and].push(
-        sequelize.where(sequelize.col("Order.deliveryStatus"), {
-          [Op.eq]: deliveryStatus,
-        })
-      );
+      if (deliveryStatus == DELIVERY_STATUS.LATE) {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+            [Op.lt]: new Date(),
+          })
+        );
+      } else if (deliveryStatus == DELIVERY_STATUS.ALMOST_LAST) {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+            [Op.lt]: moment().add(2, "days").toDate(),
+          })
+        );
+      } else {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+            [Op.gte]: new Date(),
+          })
+        );
+      }
     }
     if (startDate && endDate) {
       let startStartDate = moment

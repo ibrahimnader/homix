@@ -192,6 +192,38 @@ const Order = sequelize.define(
     tableName: "orders",
     timestamps: true,
     paranoid: true,
+    indexes: [
+      {
+        fields: ["code"],
+      },
+      {
+        fields: ["shopifyId"],
+      },
+      {
+        fields: ["orderNumber"],
+      },
+      {
+        fields: ["customerId"],
+      },
+      {
+        fields: ["userId"],
+      },
+      {
+        fields: ["financialStatus"],
+      },
+      {
+        fields: ["status"],
+      },
+      {
+        fields: ["paymentStatus"],
+      },
+      {
+        fields: ["deliveryStatus"],
+      },
+      {
+        fields: ["shipmentStatus"],
+      },
+    ],
   }
 );
 
@@ -211,5 +243,8 @@ Order.hasMany(Note, {
   scope: {
     entityType: "order", // This ensures only notes with entityType='order' are included
   },
+});
+Order.sync({ alter: true }).then(() => {
+  console.log("Order table synced");
 });
 module.exports = Order;

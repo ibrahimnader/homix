@@ -20,9 +20,11 @@ const Vendor = sequelize.define(
     paranoid: true,
   }
 );
+
 Vendor.hasOne(User, {
   foreignKey: "vendorId",
   as: "user",
 });
+
 
 module.exports = Vendor;

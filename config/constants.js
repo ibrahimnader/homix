@@ -83,7 +83,10 @@ const GOVERNORATES = {
 };
 const MANUFACTURE_STATUS = {
   Accepted: 1,
-  Rejected: 2,
+  IN_PRODUCTION: 2,
+  READY_FOR_DELIVERY: 3,
+  DELIVERED: 4,
+  FAILED_TO_DELIVER: 5,
 };
 
 module.exports = {

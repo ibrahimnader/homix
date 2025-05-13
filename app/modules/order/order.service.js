@@ -17,6 +17,7 @@ const {
   ORDER_STATUS_Arabic,
   PAYMENT_STATUS,
   PAYMENT_STATUS_ARABIC,
+  DELIVERY_STATUS,
 } = require("../../../config/constants");
 const moment = require("moment-timezone");
 const Attachment = require("../attachments/attachment.model");
@@ -450,6 +451,22 @@ class OrderService {
       offset: (page - 1) * Number(size),
       subQuery: false,
     });
+    for (const order of orders.rows) {
+      if (order.expectedDeliveryDate) {
+        if (moment(order.expectedDeliveryDate).isBefore(new Date())) {
+          order.deliveryStatus = DELIVERY_STATUS.LATE;
+        }else if (
+          moment(order.expectedDeliveryDate).isBefore(
+            moment().add(2, "days").toDate()
+          )
+        ) {
+          order.deliveryStatus = DELIVERY_STATUS.ALMOST_LAST;
+        }
+        else {
+          order.deliveryStatus = DELIVERY_STATUS.ON_SCHEDULE;
+        }
+      }
+    }
     return {
       status: true,
       statusCode: 200,

@@ -23,6 +23,19 @@ class OrderService {
     const orders = await ShopifyHelper.importData("orders", fields, {
       status: "any",
     });
+    const modifiedOrders = [];
+    orders.forEach((order) => {
+      if (order.line_items.length > 0) {
+        for (const line of order.line_items) {
+          modifiedOrders.push({
+            ...order,
+            line_items: [line],
+          });
+        }
+      } else {
+        modifiedOrders.push(order);
+      }
+    });
     const result = await OrderService.saveImportedOrders(orders);
     return result;
   }

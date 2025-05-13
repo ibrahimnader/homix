@@ -120,7 +120,12 @@ OrderRouter.get(
   IsNotLogistic,
   OrderController.getOneOrder
 );
-
+OrderRouter.put(
+  "/bulk-update",
+  verifyToken,
+  IsNotLogistic,
+  OrderController.BulkUpdate
+);
 /**
  * @swagger
  * /orders/{orderId}:
@@ -157,12 +162,6 @@ OrderRouter.put(
   IsNotLogistic,
   OrderController.updateOrder
 );
-OrderRouter.put(
-  "/bulk-update",
-  verifyToken,
-  IsNotLogistic,
-  OrderController.BulkUpdate
-);
 
 /**
  * @swagger
@@ -184,6 +183,12 @@ OrderRouter.post(
   OrderController.importOrders
 );
 
+OrderRouter.delete(
+  "/bulk-delete",
+  verifyToken,
+  isNotVendor,
+  OrderController.bulkDelete
+);
 /**
  *
  * @swagger
@@ -204,17 +209,12 @@ OrderRouter.post(
  * 200:
  * description: Order deleted successfully
  */
+
 OrderRouter.delete(
   "/:orderId",
   verifyToken,
   isNotVendor,
   OrderController.deleteOrder
-);
-OrderRouter.delete(
-  "/bulk-delete",
-  verifyToken,
-  isNotVendor,
-  OrderController.bulkDelete
 );
 /**
  * @swagger

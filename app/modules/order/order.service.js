@@ -765,7 +765,7 @@ class OrderService {
       const orders = await Order.findAll({
         where: {
           id: {
-            [Op.in]: orderIds,
+            [Op.in]: orderIds.map((id) => Number(id)),
           },
         },
       });
@@ -819,7 +819,7 @@ class OrderService {
     await Order.destroy({
       where: {
         id: {
-          [Op.in]: orderIds,
+          [Op.in]: orderIds.map((id) => Number(id)),
         },
       },
     });

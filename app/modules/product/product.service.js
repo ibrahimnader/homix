@@ -24,6 +24,16 @@ class ProductsService {
     types.forEach((type) => {
       typesMap[type.name] = type.id;
     });
+    //save new types to the database
+    const newTypes = typesNames.filter((type) => !typesMap[type]);
+    const newTypesData = newTypes.map((type) => ({
+      name: type,
+    }));
+    const createdTypes = await ProductType.bulkCreate(newTypesData);
+    createdTypes.forEach((type) => {
+      typesMap[type.name] = type.id;
+    });
+
     return typesMap;
   }
   static async getProducts(
@@ -85,8 +95,6 @@ class ProductsService {
         {
           model: ProductType,
           as: "type",
-          attributes: ["name"],
-          required: false,
         },
       ],
       where: {
@@ -217,7 +225,9 @@ class ProductsService {
 
   static async saveImportedProducts(products) {
     const vendorsNames = products.map((product) => product.vendor);
-    const typesNames = products.map((product) => product.product_type);
+    const typesNames = products
+      .map((product) => product.product_type)
+      .filter(Boolean);
     const vendorsMap = await VendorsService.getExistingVendorsMap(vendorsNames);
     const typesMap = await ProductsService.getExistingTypesMap(typesNames);
 
@@ -272,7 +282,7 @@ class ProductsService {
       return {
         title: product.title,
         vendorId: vendorsMap[product.vendor],
-        typeId: typesMap[product.product_type] || "",
+        typeId: typesMap[product.product_type] || null,
         image: product.image
           ? product.image.src
           : `${process.env.APP_URL}/uploads/default-product.png`,

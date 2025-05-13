@@ -622,6 +622,12 @@ class OrderService {
           as: "customer",
           required: false,
         },
+        {
+          model: User,
+          as: "user",
+          required: false,
+          attributes: ["firstName", "lastName"],
+        },
       ],
       where: whereClause,
       order: [["orderDate", "DESC"]],
@@ -735,7 +741,7 @@ class OrderService {
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
-    res.setHeader("Content-Disposition", "attachment; filename=users.xlsx");
+    res.setHeader("Content-Disposition", "attachment; filename=orders.xlsx");
 
     // Write to response stream
     await workbook.xlsx.write(res);

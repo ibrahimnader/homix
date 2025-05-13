@@ -68,6 +68,7 @@ ProductsRouter.post("/", productsController.createProduct);
  *       200:
  *         description: List of products
  */
+ProductsRouter.get("/types", verifyToken, productsController.getProductsTypes);
 ProductsRouter.get("/", verifyToken, productsController.getProducts);
 
 /**

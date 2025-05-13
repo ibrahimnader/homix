@@ -36,12 +36,23 @@ class ProductsService {
 
     return typesMap;
   }
+  static async getProductsTypes() {
+    const types = await ProductType.findAll({
+      attributes: ["name", "id"],
+    });
+    return {
+      status: true,
+      statusCode: 200,
+      data: types,
+    };
+  }
   static async getProducts(
     page = 1,
     size = 50,
     searchQuery = "",
     vendorsId,
-    categories
+    categories,
+    typesIds
   ) {
     // search if product title contains search query or product vendor contains search query or product variant title contains search query
 
@@ -63,6 +74,12 @@ class ProductsService {
 
       whereClause.id = {
         [Op.in]: productIds.map((p) => p.productId),
+      };
+    }
+    if (typesIds?.length) {
+      const validTypesIds = typesIds.map((id) => Number(id)).filter(Boolean);
+      whereClause.typeId = {
+        [Op.in]: validTypesIds,
       };
     }
 

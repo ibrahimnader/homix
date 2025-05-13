@@ -4,7 +4,7 @@ const productsService = require("./product.service");
 class productsController {
   static async importProducts(req, res, next) {
     try {
-      await productsService.importProducts({},true);
+      await productsService.importProducts({}, true);
       res.status(200).json({
         status: true,
         message: "Products imported successfully",
@@ -28,14 +28,26 @@ class productsController {
       const categories = req.query.categoriesIds
         ? req.query.categoriesIds.split(",")
         : [];
+      const types = req.query.typesIds
+        ? req.query.typesIds.split(",")
+        : [];
 
       const result = await productsService.getProducts(
         page,
         size,
         searchQuery,
         vendors,
-        categories
+        categories,
+        types
       );
+      res.status(result.statusCode).json(result);
+    } catch (error) {
+      return next(new AppError(error.message, 500));
+    }
+  }
+  static async getProductsTypes(req, res, next) {
+    try {
+      const result = await productsService.getProductsTypes();
       res.status(result.statusCode).json(result);
     } catch (error) {
       return next(new AppError(error.message, 500));

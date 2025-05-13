@@ -323,6 +323,7 @@ class ProductsService {
               vendorId: product.vendorId,
               image: product.image,
               variants: product.variants,
+              typeId: product.typeId,
               // Add other fields as needed
             });
             return existingProduct;
@@ -334,6 +335,7 @@ class ProductsService {
               image: product.image,
               shopifyId: product.shopifyId,
               variants: product.variants,
+              typeId: product.typeId,
               // Add other fields as needed
             });
           }

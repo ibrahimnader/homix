@@ -23,23 +23,23 @@ class OrderService {
     const orders = await ShopifyHelper.importData("orders", fields, {
       status: "any",
     });
-    const modifiedOrders = [];
-    orders.forEach((order) => {
+    const result = await OrderService.saveImportedOrders(orders);
+    return result;
+  }
+  static async saveImportedOrders(ordersFromShopify, isShipment = false, user) {
+    let orders = [];
+    ordersFromShopify.forEach((order) => {
       if (order.line_items.length > 0) {
         for (const line of order.line_items) {
-          modifiedOrders.push({
+          orders.push({
             ...order,
             line_items: [line],
           });
         }
       } else {
-        modifiedOrders.push(order);
+        orders.push(order);
       }
     });
-    const result = await OrderService.saveImportedOrders(orders);
-    return result;
-  }
-  static async saveImportedOrders(orders, isShipment = false, user) {
     const productsIds = new Set();
     const customers = [];
     const lastOrder = await Order.findOne({

@@ -164,7 +164,7 @@ class OrderController {
 
   static async uploadFiles(req, res, next) {
     try {
-      const noteId = req.params.id;
+      const noteId = req.params.noteId;
       const { filePaths, fileNames, descriptions } = req;
       let note = await OrderService.uploadFiles(
         noteId,

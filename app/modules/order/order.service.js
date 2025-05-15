@@ -1015,11 +1015,15 @@ class OrderService {
               model: Product,
               as: "product",
               required: true,
-              include: {
-                model: Vendor,
-                as: "vendor",
-                required: true,
-              },
+              include: [
+                { model: Vendor, as: "vendor", required: true },
+                {
+                  model: ProductType,
+                  as: "type",
+                  attributes: ["name"],
+                  required: false,
+                },
+              ],
             },
           ],
         },
@@ -1034,12 +1038,17 @@ class OrderService {
               required: false,
               attributes: ["firstName", "lastName"],
             },
+            {
+              model: Attachment,
+              as: "attachments",
+              required: false,
+            },
           ],
         },
         {
           model: Customer,
           as: "customer",
-          required: true,
+          required: false,
         },
       ],
     });

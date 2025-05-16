@@ -73,8 +73,8 @@ class VendorsService {
   }
 
   static async update(id, data) {
-    const vendor = await Vendor.findByPk(id);
-    if (!vendor) {
+    const existingVendor = await Vendor.findByPk(id);
+    if (!existingVendor) {
       return {
         status: false,
         message: "Vendor not found",
@@ -83,6 +83,10 @@ class VendorsService {
     }
 
     const user = await UserService.updateVendorUser(id, data);
+    const vendor = await existingVendor.update({
+      name: data.name,
+      daysToDeliver: data.daysToDeliver,
+    });
 
     return {
       status: true,

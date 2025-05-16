@@ -145,8 +145,8 @@ class OrderService {
         }${
           order.customer.email || order.customer.default_address?.email || ""
         }${
-          order.customer.phoneNumber ||
-          order.customer.default_address?.phoneNumber ||
+          order.customer.phone ||
+          order.customer.default_address?.phone ||
           ""
         }`;
 

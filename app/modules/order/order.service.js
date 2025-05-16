@@ -29,16 +29,16 @@ class OrderService {
   static async importOrders(parameters, fromImport) {
     const fields = [];
     const args = ["orders", fields, { ...parameters, status: "any" }];
-    // if (fromImport) {
-    //   args.push(async (orders) => {
-    //     await OrderService.saveImportedOrders(orders);
-    //   });
-    //   await ShopifyHelper.importData(...args);
-    // } else {
+    if (fromImport) {
+      args.push(async (orders) => {
+        await OrderService.saveImportedOrders(orders);
+      });
+      await ShopifyHelper.importData(...args);
+    } else {
     const orders = await ShopifyHelper.importData(...args);
     const result = await OrderService.saveImportedOrders(orders);
     return result;
-    // }
+    }
   }
   static async saveImportedOrders(ordersFromShopify, isShipment = false, user) {
     let orders = [];
@@ -146,7 +146,7 @@ class OrderService {
           order.customer.email || order.customer.default_address?.email || ""
         }${
           order.customer.phoneNumber ||
-          order.customer.default_address?.phone ||
+          order.customer.default_address?.phoneNumber ||
           ""
         }`;
 

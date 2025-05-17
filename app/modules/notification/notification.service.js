@@ -15,23 +15,19 @@ class NotificationService {
     }
   }
 
-  static async markAsRead(notificationId, userId) {
+  static async markAsRead(userId) {
     try {
-      const notification = await Notification.findOne({
-        where: {
-          id: notificationId,
-          userId,
+      await Notification.update(
+        {
+          readAt: new Date(),
         },
-      });
-
-      if (!notification) {
-        throw new Error("Notification not found");
-      }
-
-      notification.readAt = new Date();
-      await notification.save();
-
-      return notification;
+        {
+          where: {
+            userId,
+            readAt: null,
+          },
+        }
+      );
     } catch (error) {
       throw new Error("Error marking notification as read");
     }

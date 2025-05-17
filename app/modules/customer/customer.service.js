@@ -78,11 +78,12 @@ class CustomerService {
     const result = {};
     const existingShopifyIds = new Set();
     for (const customer of customersFromDB) {
-      result[
-        `${customer.firstName}${customer.lastName}${customer.email || ""}${
-          customer.phoneNumber || ""
-        }`
-      ] = customer.id;
+      const key = customer.shopifyId
+        ? customer.shopifyId
+        : `${customer.firstName}${customer.lastName}${customer.email || ""}${
+            customer.phoneNumber || ""
+          }`;
+      result[key] = customer.id;
       if (customer.shopifyId) {
         existingShopifyIds.add(customer.shopifyId.toString());
       }
@@ -94,10 +95,12 @@ class CustomerService {
     if (nonExistingCustomers.length > 0) {
       const res = await CustomerService.saveCustomers(nonExistingCustomers);
       for (const customer of res) {
-        const customerName = `${customer.firstName}${customer.lastName}${
-          customer.email || ""
-        }${customer.phoneNumber || ""}`;
-        result[customerName] = customer.id;
+        const key = customer.shopifyId
+          ? customer.shopifyId
+          : `${customer.firstName}${customer.lastName}${customer.email || ""}${
+              customer.phoneNumber || ""
+            }`;
+        result[key] = customer.id;
       }
     }
     return result;

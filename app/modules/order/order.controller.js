@@ -37,8 +37,11 @@ class OrderController {
   }
   static async importOrders(req, res, next) {
     try {
-      const result = await OrderService.importOrders({},true);
-      res.status(result.statusCode).json(result);
+      await OrderService.importOrders({}, true);
+      res.status(200).json({
+        status: true,
+        message: "Orders imported successfully",
+      });
     } catch (error) {
       console.log(error);
       return next(new AppError(error.message, 500));

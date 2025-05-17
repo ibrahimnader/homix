@@ -1,7 +1,6 @@
 const express = require("express");
 const OrderController = require("./order.controller");
 const verifyToken = require("../../middlewares/protectApi");
-const IsNotLogistic = require("../../middlewares/isNotLogistic");
 const isNotVendor = require("../../middlewares/isNotVendor");
 const fileUploadMiddleware = require("../../../config/fileUploadMiddleware");
 const OrderRouter = express.Router();
@@ -59,7 +58,7 @@ OrderRouter.post("/", OrderController.createOrder);
 OrderRouter.get(
   "/financialReport",
   verifyToken,
-  IsNotLogistic,
+  isNotVendor,
   OrderController.financialReport
 );
 OrderRouter.get("/export", OrderController.exportOrders);
@@ -94,7 +93,7 @@ OrderRouter.get("/export", OrderController.exportOrders);
  *       200:
  *         description: List of orders
  */
-OrderRouter.get("/", verifyToken, IsNotLogistic, OrderController.getOrders);
+OrderRouter.get("/", verifyToken, isNotVendor, OrderController.getOrders);
 
 /**
  * @swagger
@@ -118,13 +117,13 @@ OrderRouter.get("/", verifyToken, IsNotLogistic, OrderController.getOrders);
 OrderRouter.get(
   "/:orderId",
   verifyToken,
-  IsNotLogistic,
+  isNotVendor,
   OrderController.getOneOrder
 );
 OrderRouter.put(
   "/bulk-update",
   verifyToken,
-  IsNotLogistic,
+  isNotVendor,
   OrderController.BulkUpdate
 );
 /**
@@ -160,7 +159,7 @@ OrderRouter.put(
 OrderRouter.put(
   "/:orderId",
   verifyToken,
-  IsNotLogistic,
+  isNotVendor,
   OrderController.updateOrder
 );
 
@@ -180,7 +179,7 @@ OrderRouter.put(
 OrderRouter.post(
   "/import",
   verifyToken,
-  IsNotLogistic,
+  isNotVendor,
   OrderController.importOrders
 );
 

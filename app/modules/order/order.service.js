@@ -70,7 +70,7 @@ class OrderService {
     });
 
     // Get last code number or default to 0
-    const lastCode = lastOrder?.code || `${PREFIX}0`;
+    const lastCode = lastOrder?.code || `0`;
     const codeNumber = parseInt(lastCode.replace(PREFIX, ""), 10);
 
     // Get last custom code number or default to 0

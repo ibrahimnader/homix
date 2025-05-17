@@ -45,6 +45,7 @@ const isNotVendor = require("../app/middlewares/isNotVendor");
 const CategoriesRouter = require("../app/modules/product/categories.routes");
 const ShipmentRouter = require("../app/modules/shipments/shipment.routes");
 const NotificationRouter = require("../app/modules/notification/notification.router");
+const IsNotLogistic = require("../app/middlewares/isNotLogistic");
 
 // Swagger UI route
 mainRouter.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
@@ -107,7 +108,7 @@ mainRouter.use("/users", UserRouter);
  *       200:
  *         description: List of factories
  */
-mainRouter.use("/factories", verifyToken, isAdmin, FactoryRouter);
+mainRouter.use("/factories", verifyToken, IsNotLogistic, FactoryRouter);
 
 /**
  * @swagger

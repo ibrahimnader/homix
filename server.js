@@ -56,7 +56,7 @@ const startServer = async () => {
   </head>
   <script src="/socket.io/socket.io.js"></script>
   <script>
-    const socket = io();
+    const socket = io("http://localhost:3000", {path: '/socket.io'});
     
     socket.on('connect', () => {
       console.log('Connected to server with ID:', socket.id);

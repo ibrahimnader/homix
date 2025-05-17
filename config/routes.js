@@ -44,6 +44,7 @@ const OrderLineRouter = require("../app/modules/orderLines/orderLine.routes");
 const isNotVendor = require("../app/middlewares/isNotVendor");
 const CategoriesRouter = require("../app/modules/product/categories.routes");
 const ShipmentRouter = require("../app/modules/shipments/shipment.routes");
+const NotificationRouter = require("../app/modules/notification/notification.router");
 
 // Swagger UI route
 mainRouter.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
@@ -183,5 +184,7 @@ mainRouter.use("/employees", verifyToken, isNotVendor, EmployeeRouter);
 mainRouter.use("/customers", verifyToken, isNotVendor, CustomerRouter);
 
 mainRouter.use("/shipments", verifyToken, isNotVendor, ShipmentRouter);
+
+mainRouter.use("/notifications", verifyToken, NotificationRouter);
 
 module.exports = mainRouter;

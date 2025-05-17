@@ -35,9 +35,9 @@ class OrderService {
       });
       await ShopifyHelper.importData(...args);
     } else {
-    const orders = await ShopifyHelper.importData(...args);
-    const result = await OrderService.saveImportedOrders(orders);
-    return result;
+      const orders = await ShopifyHelper.importData(...args);
+      const result = await OrderService.saveImportedOrders(orders);
+      return result;
     }
   }
   static async saveImportedOrders(ordersFromShopify, isShipment = false, user) {
@@ -145,9 +145,7 @@ class OrderService {
         }${
           order.customer.email || order.customer.default_address?.email || ""
         }${
-          order.customer.phone ||
-          order.customer.default_address?.phone ||
-          ""
+          order.customer.phone || order.customer.default_address?.phone || ""
         }`;
 
         let number,
@@ -259,7 +257,7 @@ class OrderService {
     }
     await OrderLine.bulkCreate(orderLines);
     for (const order of savedOrders) {
-      await OrderService.sendNotification(order.id, {
+      await OrderService.sendNotification(order.id, order.orderNumber, {
         orderId: order.id,
         type: "orderCreate",
       });
@@ -1110,16 +1108,21 @@ class OrderService {
       if (orderData.status == ORDER_STATUS.IN_PROGRESS) {
         orderData.PoDate = new Date();
       }
-      await OrderService.sendNotification(orderId, {
-        orderId: orderId,
-        oldStatus: order.status,
-        newStatus: orderData.status,
-        user: {
-          firstName: user.firstName,
-          lastName: user.lastName,
+      await OrderService.sendNotification(
+        orderId,
+        order.orderNumber,
+        {
+          orderId: orderId,
+          oldStatus: order.status,
+          newStatus: orderData.status,
+          user: {
+            firstName: user.firstName,
+            lastName: user.lastName,
+          },
+          type: "orderUpdate",
         },
-        type: "orderUpdate",
-      });
+        true
+      );
     }
 
     await order.update(orderData);
@@ -1150,16 +1153,21 @@ class OrderService {
         },
       });
       for (const order of orders) {
-        await OrderService.sendNotification(order.id, {
-          orderId: order.id,
-          oldStatus: order.status,
-          newStatus: orderData.status,
-          user: {
-            firstName: user.firstName,
-            lastName: user.lastName,
+        await OrderService.sendNotification(
+          order.id,
+          order.orderNumber,
+          {
+            orderId: order.id,
+            oldStatus: order.status,
+            newStatus: orderData.status,
+            user: {
+              firstName: user.firstName,
+              lastName: user.lastName,
+            },
+            type: "orderUpdate",
           },
-          type: "orderUpdate",
-        });
+          true
+        );
       }
     }
 
@@ -1262,17 +1270,23 @@ class OrderService {
       entityId: Number(orderId),
       entityType: "order",
     });
-    await OrderService.sendNotification(orderId, {
-      orderId: orderId,
-      note: {
-        text: newNote.text,
+    await OrderService.sendNotification(
+      orderId,
+      order.orderNumber,
+      {
+        orderId: orderId,
+        note: {
+          text: newNote.text,
+        },
+        user: {
+          firstName: user.firstName,
+          lastName: user.lastName,
+        },
+        type: "note",
       },
-      user: {
-        firstName: user.firstName,
-        lastName: user.lastName,
-      },
-      type: "note",
-    });
+      false,
+      true
+    );
 
     return {
       status: true,
@@ -1314,7 +1328,13 @@ class OrderService {
       message: "Note deleted successfully",
     };
   }
-  static async sendNotification(orderId, data) {
+  static async sendNotification(
+    orderId,
+    orderNumber,
+    data,
+    isUpdateStatus = false,
+    addNote = false
+  ) {
     const orderLines = await OrderLine.findAll({
       where: {
         orderId: orderId,
@@ -1328,6 +1348,15 @@ class OrderService {
       ],
       toJSON: true,
     });
+    if (isUpdateStatus) {
+      data.text = `تم تحديث حالة الطلب رقم ${orderNumber} من ${
+        ORDER_STATUS_Arabic[data.oldStatus]
+      } الى ${ORDER_STATUS_Arabic[data.newStatus]}`;
+    } else if (addNote) {
+      data.text = `تم اضافة ملاحظة جديدة على الطلب رقم ${orderNumber}`;
+    } else {
+      data.text = `تم اضافة طلب جديد رقم ${orderNumber}`;
+    }
 
     const vendorsIds = orderLines.map((line) => line.product.vendorId);
 
@@ -1341,6 +1370,16 @@ class OrderService {
       attributes: ["socketId"],
       toJSON: true,
     });
+    const notifications = [];
+    for (const user of users) {
+      const notification = {
+        userId: user.id,
+        entityId: orderId,
+        entityType: "order",
+        text: data.text,
+      };
+      notifications.push(notification);
+    }
     const socketsIds = users.map((user) => user.socketId).filter(Boolean);
     if (socketsIds.length > 0) {
       for (const socketId of socketsIds) {

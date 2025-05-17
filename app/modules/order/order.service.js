@@ -135,19 +135,25 @@ class OrderService {
           line.cost = cost * line.quantity;
           totalCost += line.cost;
         });
-        const customerName = `${
-          order.customer.firstName ||
-          order.customer.first_name ||
-          order.customer.default_address.first_name
-        }${
-          order.customer.lastName ||
-          order.customer.last_name ||
-          order.customer.default_address.last_name
-        }${
-          order.customer.email || order.customer.default_address?.email || ""
-        }${
-          order.customer.phone || order.customer.default_address?.phone || ""
-        }`;
+        const customerKey = order.id
+          ? order.customer.id
+          : `${
+              order.customer.firstName ||
+              order.customer.first_name ||
+              order.customer.default_address.first_name
+            }${
+              order.customer.lastName ||
+              order.customer.last_name ||
+              order.customer.default_address.last_name
+            }${
+              order.customer.email ||
+              order.customer.default_address?.email ||
+              ""
+            }${
+              order.customer.phone ||
+              order.customer.default_address?.phone ||
+              ""
+            }`;
 
         let number,
           orderNumber,
@@ -184,7 +190,7 @@ class OrderService {
 
           totalPrice: order.total_price,
           orderDate: order.created_at || new Date(),
-          customerId: customersNamesMap[customerName],
+          customerId: customersNamesMap[customerKey],
           totalCost,
           custom,
           shippedFromInventory: isShipment ? true : false,

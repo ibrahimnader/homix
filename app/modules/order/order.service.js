@@ -1380,6 +1380,7 @@ class OrderService {
       };
       notifications.push(notification);
     }
+    await Notification.bulkCreate(notifications);
     const socketsIds = users.map((user) => user.socketId).filter(Boolean);
     if (socketsIds.length > 0) {
       for (const socketId of socketsIds) {

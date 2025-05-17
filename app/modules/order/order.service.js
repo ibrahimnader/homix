@@ -1368,7 +1368,7 @@ class OrderService {
           { userType: { [Op.ne]: USER_TYPES.VENDOR } },
         ],
       },
-      attributes: ["socketId"],
+      attributes: ["socketId", "id"],
       toJSON: true,
     });
     const notifications = [];

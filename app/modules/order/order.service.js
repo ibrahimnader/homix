@@ -11,6 +11,7 @@ const Vendor = require("../vendor/vendor.model");
 const Customer = require("../customer/customer.model");
 const Note = require("../notes/notes.model");
 const User = require("../user/user.model");
+const Notification = require("../notification/notification.model");
 const {
   ORDER_STATUS,
   USER_TYPES,

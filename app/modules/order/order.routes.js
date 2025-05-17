@@ -58,7 +58,6 @@ OrderRouter.post("/", OrderController.createOrder);
 OrderRouter.get(
   "/financialReport",
   verifyToken,
-  isNotVendor,
   OrderController.financialReport
 );
 OrderRouter.get("/export", OrderController.exportOrders);
@@ -93,7 +92,7 @@ OrderRouter.get("/export", OrderController.exportOrders);
  *       200:
  *         description: List of orders
  */
-OrderRouter.get("/", verifyToken, isNotVendor, OrderController.getOrders);
+OrderRouter.get("/", verifyToken, OrderController.getOrders);
 
 /**
  * @swagger
@@ -117,13 +116,11 @@ OrderRouter.get("/", verifyToken, isNotVendor, OrderController.getOrders);
 OrderRouter.get(
   "/:orderId",
   verifyToken,
-  isNotVendor,
   OrderController.getOneOrder
 );
 OrderRouter.put(
   "/bulk-update",
   verifyToken,
-  isNotVendor,
   OrderController.BulkUpdate
 );
 /**
@@ -159,7 +156,6 @@ OrderRouter.put(
 OrderRouter.put(
   "/:orderId",
   verifyToken,
-  isNotVendor,
   OrderController.updateOrder
 );
 
@@ -179,7 +175,6 @@ OrderRouter.put(
 OrderRouter.post(
   "/import",
   verifyToken,
-  isNotVendor,
   OrderController.importOrders
 );
 

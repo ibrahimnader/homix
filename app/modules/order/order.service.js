@@ -693,8 +693,8 @@ class OrderService {
     const worksheet = workbook.addWorksheet("orders");
     worksheet.columns = [
       {
-        header: "رقم الطلب",
-        key: "orderNumber",
+        header: "كود العملية",
+        key: "code",
         width: 20,
         style: { alignment: { horizontal: "right" } },
       },
@@ -769,6 +769,7 @@ class OrderService {
     // Add data rows
     orders.forEach((order) => {
       worksheet.addRow({
+        code: order.code,
         orderNumber: order.orderNumber,
         productCode: order.orderLines[0].product.title,
         quantity: order.orderLines[0].quantity,

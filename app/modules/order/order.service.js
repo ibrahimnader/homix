@@ -169,7 +169,7 @@ class OrderService {
         let obj = {
           shopifyId: String(order.id),
           name,
-          code: `${PREFIX}${codeNumber}`,
+          code: codeNumber,
           number,
           orderNumber,
           subTotalPrice: order.total_line_items_price,

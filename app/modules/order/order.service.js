@@ -693,8 +693,14 @@ class OrderService {
     const worksheet = workbook.addWorksheet("orders");
     worksheet.columns = [
       {
-        header: "كود العملية",
+        header: "الكود التعريفي",
         key: "code",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: "كود العملية",
+        key: "orderNumber",
         width: 20,
         style: { alignment: { horizontal: "right" } },
       },

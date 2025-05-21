@@ -330,55 +330,37 @@ class OrderService {
     }
     if (deliveryStatus) {
       deliveryStatus = deliveryStatus.split(",");
-      let lessThanDate = null;
-      let greaterThanDate = null;
+      const operations = [];
 
       if (deliveryStatus.length) {
         if (
           deliveryStatus.map((st) => Number(st)).includes(DELIVERY_STATUS.LATE)
         ) {
-          lessThanDate = moment().startOf("day").toDate();
+          operations.push({ [Op.lt]: moment().startOf("day").toDate() });
         }
         if (
           deliveryStatus
             .map((st) => Number(st))
             .includes(DELIVERY_STATUS.ALMOST_LAST)
         ) {
-          lessThanDate = moment().startOf("day").add(2, "days").toDate();
-          greaterThanDate = moment().startOf("day").toDate();
+          operations.push({
+            [Op.and]: [
+              { [Op.lt]: moment().startOf("day").add(2, "days").toDate() },
+              { [Op.gte]: moment().startOf("day").toDate() },
+            ],
+          });
         }
         if (
           deliveryStatus
             .map((st) => Number(st))
             .includes(DELIVERY_STATUS.ON_SCHEDULE)
         ) {
-          greaterThanDate = moment().add(2, "days").startOf("day").toDate();
+          operations.push({ [Op.gte]: moment().startOf("day").toDate() });
         }
       }
-      if (lessThanDate && greaterThanDate) {
-        {
-          whereClause[Op.and].push(
-            sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-              [Op.or]: [
-                { [Op.lt]: lessThanDate },
-                { [Op.gte]: greaterThanDate },
-              ],
-            })
-          );
-        }
-      } else if (lessThanDate) {
-        whereClause[Op.and].push(
-          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-            [Op.lt]: lessThanDate,
-          })
-        );
-      } else if (greaterThanDate) {
-        whereClause[Op.and].push(
-          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-            [Op.gte]: greaterThanDate,
-          })
-        );
-      }
+      sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+        [Op.and]: operations,
+      });
     }
     if (startDate && endDate) {
       let startStartDate = moment

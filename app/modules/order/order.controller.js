@@ -51,7 +51,7 @@ class OrderController {
     try {
       let vendorUser = false;
       if (req.vendorId) {
-        req.query.vendorId = [`${req.vendorId}`];
+        req.query.vendorId = `${req.vendorId}`;
         vendorUser = true;
       }
       const result = await OrderService.getOrders({

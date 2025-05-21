@@ -1182,7 +1182,7 @@ class OrderService {
     }
 
     await order.update(orderData);
-    const returnedOrder = await order.findOne({
+    const returnedOrder = await Order.findOne({
       where: {
         id: orderId,
       },

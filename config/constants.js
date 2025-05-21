@@ -24,6 +24,7 @@ const ORDER_STATUS_Arabic = {
   5: "تم التسليم",
   6: "مسترد",
   7: "مستبدل",
+  8: "في المخزن",
 
   // HALF_COMPLETED: 3,
   // OUT_FOR_DELIVERY: 4,

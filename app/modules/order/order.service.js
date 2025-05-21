@@ -1114,58 +1114,7 @@ class OrderService {
     };
   }
   static async updateOrder(orderId, orderData, user) {
-    const order = await Order.findOne({
-      where: {
-        id: orderId,
-      },
-      subQuery: false,
-      include: [
-        {
-          model: OrderLine,
-          required: true,
-          as: "orderLines",
-          include: [
-            {
-              model: Product,
-              as: "product",
-              required: true,
-              include: [
-                { model: Vendor, as: "vendor", required: true },
-                {
-                  model: ProductType,
-                  as: "type",
-                  attributes: ["name"],
-                  required: false,
-                },
-              ],
-            },
-          ],
-        },
-        {
-          model: Note,
-          as: "notesList",
-          required: false,
-          include: [
-            {
-              model: User,
-              as: "user",
-              required: false,
-              attributes: ["firstName", "lastName"],
-            },
-            {
-              model: Attachment,
-              as: "attachments",
-              required: false,
-            },
-          ],
-        },
-        {
-          model: Customer,
-          as: "customer",
-          required: false,
-        },
-      ],
-    });
+    const order = await Order.findByPk(orderId)
     if (!order) {
       return {
         status: false,
@@ -1233,10 +1182,61 @@ class OrderService {
     }
 
     await order.update(orderData);
+    const returnedOrder = await order.findOne({
+      where: {
+        id: orderId,
+      },
+      include: [
+        {
+          model: OrderLine,
+          required: true,
+          as: "orderLines",
+          include: [
+            {
+              model: Product,
+              as: "product",
+              required: true,
+              include: [
+                { model: Vendor, as: "vendor", required: true },
+                {
+                  model: ProductType,
+                  as: "type",
+                  attributes: ["name"],
+                  required: false,
+                },
+              ],
+            },
+          ],
+        },
+        {
+          model: Note,
+          as: "notesList",
+          required: false,
+          include: [
+            {
+              model: User,
+              as: "user",
+              required: false,
+              attributes: ["firstName", "lastName"],
+            },
+            {
+              model: Attachment,
+              as: "attachments",
+              required: false,
+            },
+          ],
+        },
+        {
+          model: Customer,
+          as: "customer",
+          required: false,
+        },
+      ],
+    });
     return {
       status: true,
       statusCode: 200,
-      data: order,
+      data: returnedOrder,
     };
   }
   static async BulkUpdate(body, user) {

@@ -509,7 +509,11 @@ class OrderService {
     });
     for (const order of orders.rows) {
       if (order.expectedDeliveryDate) {
-        if (moment(order.expectedDeliveryDate).isBefore(moment().startOf("day").toDate())) {
+        if (
+          moment(order.expectedDeliveryDate).isBefore(
+            moment().startOf("day").toDate()
+          )
+        ) {
           order.deliveryStatus = DELIVERY_STATUS.LATE;
         } else if (
           moment(order.expectedDeliveryDate).isBefore(

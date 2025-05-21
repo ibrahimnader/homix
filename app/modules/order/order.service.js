@@ -409,7 +409,7 @@ class OrderService {
     if (vendorUser) {
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("Order.status"), {
-          [Op.gt]: ORDER_STATUS.IN_PROGRESS,
+          [Op.gte]: ORDER_STATUS.IN_PROGRESS,
         })
       );
       whereClause[Op.and].push(

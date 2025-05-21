@@ -328,31 +328,34 @@ class OrderService {
         })
       );
     }
-    if (deliveryStatus && deliveryStatus.length > 0) {
-      if (
-        deliveryStatus.map((st) => Number(st)).includes(DELIVERY_STATUS.LATE)
-      ) {
-        whereClause[Op.and].push(
-          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-            [Op.lt]: new Date(),
-          })
-        );
-      } else if (
-        deliveryStatus
-          .map((st) => Number(st))
-          .includes(DELIVERY_STATUS.ALMOST_LAST)
-      ) {
-        whereClause[Op.and].push(
-          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-            [Op.lt]: moment().add(2, "days").toDate(),
-          })
-        );
-      } else {
-        whereClause[Op.and].push(
-          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-            [Op.gte]: new Date(),
-          })
-        );
+    if (deliveryStatus) {
+      deliveryStatus = deliveryStatus.split(",");
+      if (deliveryStatus.length) {
+        if (
+          deliveryStatus.map((st) => Number(st)).includes(DELIVERY_STATUS.LATE)
+        ) {
+          whereClause[Op.and].push(
+            sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+              [Op.lt]: new Date(),
+            })
+          );
+        } else if (
+          deliveryStatus
+            .map((st) => Number(st))
+            .includes(DELIVERY_STATUS.ALMOST_LAST)
+        ) {
+          whereClause[Op.and].push(
+            sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+              [Op.lt]: moment().add(2, "days").toDate(),
+            })
+          );
+        } else {
+          whereClause[Op.and].push(
+            sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+              [Op.gte]: new Date(),
+            })
+          );
+        }
       }
     }
     if (startDate && endDate) {
@@ -392,12 +395,15 @@ class OrderService {
         )
       );
     }
-    if (vendorId && vendorId.length > 0) {
-      whereClause[Op.and].push(
-        sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
-          [Op.in]: vendorId.map((id) => Number(id)),
-        })
-      );
+    if (vendorId) {
+      vendorId = vendorId.split(",");
+      if (vendorId.length) {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
+            [Op.in]: vendorId.map((id) => Number(id)),
+          })
+        );
+      }
     }
 
     if (vendorUser) {
@@ -411,12 +417,15 @@ class OrderService {
           [Op.ne]: ORDER_STATUS.CANCELED,
         })
       );
-    } else if (status && status.length > 0) {
-      whereClause[Op.and].push(
-        sequelize.where(sequelize.col("Order.status"), {
-          [Op.eq]: status.map((s) => Number(s)),
-        })
-      );
+    } else if (status) {
+      status = status.split(",");
+      if (status.length) {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("Order.status"), {
+            [Op.eq]: status.map((s) => Number(s)),
+          })
+        );
+      }
     }
     whereClause = whereClause[Op.and].length ? whereClause : {};
     const orders = await Order.findAndCountAll({

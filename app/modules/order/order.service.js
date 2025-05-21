@@ -337,36 +337,22 @@ class OrderService {
         if (
           deliveryStatus.map((st) => Number(st)).includes(DELIVERY_STATUS.LATE)
         ) {
-          lessThanDate = moment()
-            .tz(new Date(), "Africa/Cairo")
-            .startOf("day")
-            .toDate();
+          lessThanDate = moment().startOf("day").toDate();
         }
         if (
           deliveryStatus
             .map((st) => Number(st))
             .includes(DELIVERY_STATUS.ALMOST_LAST)
         ) {
-          lessThanDate = moment()
-            .tz(new Date(), "Africa/Cairo")
-            .startOf("day")
-            .add(2, "days")
-            .toDate();
-          greaterThanDate = moment()
-            .tz(new Date(), "Africa/Cairo")
-            .startOf("day")
-            .toDate();
+          lessThanDate = moment().startOf("day").add(2, "days").toDate();
+          greaterThanDate = moment().startOf("day").toDate();
         }
         if (
           deliveryStatus
             .map((st) => Number(st))
             .includes(DELIVERY_STATUS.ON_SCHEDULE)
         ) {
-          greaterThanDate = moment()
-            .add(2, "days")
-            .tz(new Date(), "Africa/Cairo")
-            .startOf("day")
-            .toDate();
+          greaterThanDate = moment().add(2, "days").startOf("day").toDate();
         }
       }
       if (lessThanDate && greaterThanDate) {
@@ -525,20 +511,13 @@ class OrderService {
       if (order.expectedDeliveryDate) {
         if (
           moment(order.expectedDeliveryDate).isBefore(
-            moment()
-              .tz(new Date(), "Africa/Cairo")
-              .startOf("day")
-              .toDate()
+            moment().startOf("day").toDate()
           )
         ) {
           order.deliveryStatus = DELIVERY_STATUS.LATE;
         } else if (
           moment(order.expectedDeliveryDate).isBefore(
-            moment()
-              .tz(new Date(), "Africa/Cairo")
-              .startOf("day")
-              .add(2, "days")
-              .toDate()
+            moment().startOf("day").add(2, "days").toDate()
           )
         ) {
           order.deliveryStatus = DELIVERY_STATUS.ALMOST_LAST;

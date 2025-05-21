@@ -366,14 +366,13 @@ class OrderService {
             })
           );
         }
-      }if(lessThanDate) {
+      } else if (lessThanDate) {
         whereClause[Op.and].push(
           sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
             [Op.lt]: lessThanDate,
           })
         );
-      }
-      if (greaterThanDate) {
+      } else if (greaterThanDate) {
         whereClause[Op.and].push(
           sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
             [Op.gte]: greaterThanDate,
@@ -510,7 +509,7 @@ class OrderService {
     });
     for (const order of orders.rows) {
       if (order.expectedDeliveryDate) {
-        if (moment(order.expectedDeliveryDate).isBefore(new Date())) {
+        if (moment(order.expectedDeliveryDate).isBefore(moment().startOf("day").toDate())) {
           order.deliveryStatus = DELIVERY_STATUS.LATE;
         } else if (
           moment(order.expectedDeliveryDate).isBefore(

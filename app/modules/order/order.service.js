@@ -338,7 +338,7 @@ class OrderService {
           deliveryStatus.map((st) => Number(st)).includes(DELIVERY_STATUS.LATE)
         ) {
           lessThanDate = moment()
-            .tz(new Date(startDate), "Africa/Cairo")
+            .tz(new Date(), "Africa/Cairo")
             .startOf("day")
             .toDate();
         }
@@ -348,12 +348,12 @@ class OrderService {
             .includes(DELIVERY_STATUS.ALMOST_LAST)
         ) {
           lessThanDate = moment()
-            .tz(new Date(startDate), "Africa/Cairo")
+            .tz(new Date(), "Africa/Cairo")
             .startOf("day")
             .add(2, "days")
             .toDate();
           greaterThanDate = moment()
-            .tz(new Date(startDate), "Africa/Cairo")
+            .tz(new Date(), "Africa/Cairo")
             .startOf("day")
             .toDate();
         }
@@ -364,7 +364,7 @@ class OrderService {
         ) {
           greaterThanDate = moment()
             .add(2, "days")
-            .tz(new Date(startDate), "Africa/Cairo")
+            .tz(new Date(), "Africa/Cairo")
             .startOf("day")
             .toDate();
         }

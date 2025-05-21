@@ -422,7 +422,7 @@ class OrderService {
       if (status.length) {
         whereClause[Op.and].push(
           sequelize.where(sequelize.col("Order.status"), {
-            [Op.eq]: status.map((s) => Number(s)),
+            [Op.in]: status.map((s) => Number(s)),
           })
         );
       }

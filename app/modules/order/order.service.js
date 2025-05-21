@@ -328,14 +328,20 @@ class OrderService {
         })
       );
     }
-    if (deliveryStatus) {
-      if (deliveryStatus == DELIVERY_STATUS.LATE) {
+    if (deliveryStatus && deliveryStatus.length > 0) {
+      if (
+        deliveryStatus.map((st) => Number(st)).includes(DELIVERY_STATUS.LATE)
+      ) {
         whereClause[Op.and].push(
           sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
             [Op.lt]: new Date(),
           })
         );
-      } else if (deliveryStatus == DELIVERY_STATUS.ALMOST_LAST) {
+      } else if (
+        deliveryStatus
+          .map((st) => Number(st))
+          .includes(DELIVERY_STATUS.ALMOST_LAST)
+      ) {
         whereClause[Op.and].push(
           sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
             [Op.lt]: moment().add(2, "days").toDate(),
@@ -386,10 +392,10 @@ class OrderService {
         )
       );
     }
-    if (vendorId && vendorId !== "0") {
+    if (vendorId && vendorId.length > 0) {
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
-          [Op.eq]: vendorId,
+          [Op.in]: vendorId.map((id) => Number(id)),
         })
       );
     }
@@ -405,10 +411,10 @@ class OrderService {
           [Op.ne]: ORDER_STATUS.CANCELED,
         })
       );
-    } else if (status) {
+    } else if (status && status.length > 0) {
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("Order.status"), {
-          [Op.eq]: status,
+          [Op.eq]: status.map((s) => Number(s)),
         })
       );
     }

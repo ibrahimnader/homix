@@ -337,22 +337,36 @@ class OrderService {
         if (
           deliveryStatus.map((st) => Number(st)).includes(DELIVERY_STATUS.LATE)
         ) {
-          lessThanDate = moment().startOf("day").toDate();
+          lessThanDate = moment()
+            .tz(new Date(startDate), "Africa/Cairo")
+            .startOf("day")
+            .toDate();
         }
         if (
           deliveryStatus
             .map((st) => Number(st))
             .includes(DELIVERY_STATUS.ALMOST_LAST)
         ) {
-          lessThanDate = moment().add(2, "days").toDate();
-          greaterThanDate = moment().startOf("day").toDate();
+          lessThanDate = moment()
+            .tz(new Date(startDate), "Africa/Cairo")
+            .startOf("day")
+            .add(2, "days")
+            .toDate();
+          greaterThanDate = moment()
+            .tz(new Date(startDate), "Africa/Cairo")
+            .startOf("day")
+            .toDate();
         }
         if (
           deliveryStatus
             .map((st) => Number(st))
             .includes(DELIVERY_STATUS.ON_SCHEDULE)
         ) {
-          greaterThanDate = moment().add(2, "days").toDate();
+          greaterThanDate = moment()
+            .add(2, "days")
+            .tz(new Date(startDate), "Africa/Cairo")
+            .startOf("day")
+            .toDate();
         }
       }
       if (lessThanDate && greaterThanDate) {
@@ -511,13 +525,20 @@ class OrderService {
       if (order.expectedDeliveryDate) {
         if (
           moment(order.expectedDeliveryDate).isBefore(
-            moment().startOf("day").toDate()
+            moment()
+              .tz(new Date(startDate), "Africa/Cairo")
+              .startOf("day")
+              .toDate()
           )
         ) {
           order.deliveryStatus = DELIVERY_STATUS.LATE;
         } else if (
           moment(order.expectedDeliveryDate).isBefore(
-            moment().add(2, "days").toDate()
+            moment()
+              .tz(new Date(startDate), "Africa/Cairo")
+              .startOf("day")
+              .add(2, "days")
+              .toDate()
           )
         ) {
           order.deliveryStatus = DELIVERY_STATUS.ALMOST_LAST;
@@ -607,7 +628,11 @@ class OrderService {
         ) {
           whereClause[Op.and].push(
             sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-              [Op.lt]: moment().add(2, "days").toDate(),
+              [Op.lt]: moment()
+                .tz(new Date(startDate), "Africa/Cairo")
+                .startOf("day")
+                .add(2, "days")
+                .toDate(),
             })
           );
         } else {

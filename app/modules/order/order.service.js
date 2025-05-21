@@ -551,7 +551,7 @@ class OrderService {
             .fn("lower", sequelize.col("financialStatus"))
             .cast(sequelize.Sequelize.STRING),
           {
-            [Op.like]: `%${financialStatus.toLowerCase()}%`,
+            [Op.like]: Number(financialStatus),
           }
         )
       );
@@ -559,29 +559,38 @@ class OrderService {
     if (paymentStatus) {
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("Order.paymentStatus"), {
-          [Op.eq]: paymentStatus,
+          [Op.eq]: Number(paymentStatus),
         })
       );
     }
     if (deliveryStatus) {
-      if (deliveryStatus == DELIVERY_STATUS.LATE) {
-        whereClause[Op.and].push(
-          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-            [Op.lt]: new Date(),
-          })
-        );
-      } else if (deliveryStatus == DELIVERY_STATUS.ALMOST_LAST) {
-        whereClause[Op.and].push(
-          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-            [Op.lt]: moment().add(2, "days").toDate(),
-          })
-        );
-      } else {
-        whereClause[Op.and].push(
-          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-            [Op.gte]: new Date(),
-          })
-        );
+      deliveryStatus = deliveryStatus.split(",");
+      if (deliveryStatus.length) {
+        if (
+          deliveryStatus.map((st) => Number(st)).includes(DELIVERY_STATUS.LATE)
+        ) {
+          whereClause[Op.and].push(
+            sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+              [Op.lt]: new Date(),
+            })
+          );
+        } else if (
+          deliveryStatus
+            .map((st) => Number(st))
+            .includes(DELIVERY_STATUS.ALMOST_LAST)
+        ) {
+          whereClause[Op.and].push(
+            sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+              [Op.lt]: moment().add(2, "days").toDate(),
+            })
+          );
+        } else {
+          whereClause[Op.and].push(
+            sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+              [Op.gte]: new Date(),
+            })
+          );
+        }
       }
     }
     if (startDate && endDate) {
@@ -621,12 +630,15 @@ class OrderService {
         )
       );
     }
-    if (vendorId && vendorId !== "0") {
-      whereClause[Op.and].push(
-        sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
-          [Op.eq]: vendorId,
-        })
-      );
+    if (vendorId) {
+      vendorId = vendorId.split(",");
+      if (vendorId.length) {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("orderLines.product.vendor.id"), {
+            [Op.in]: vendorId.map((id) => Number(id)),
+          })
+        );
+      }
     }
 
     if (vendorUser) {
@@ -641,11 +653,14 @@ class OrderService {
         })
       );
     } else if (status) {
-      whereClause[Op.and].push(
-        sequelize.where(sequelize.col("Order.status"), {
-          [Op.eq]: status,
-        })
-      );
+      status = status.split(",");
+      if (status.length) {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("Order.status"), {
+            [Op.in]: status.map((s) => Number(s)),
+          })
+        );
+      }
     }
     whereClause = whereClause[Op.and].length ? whereClause : {};
     const orders = await Order.findAll({
@@ -798,7 +813,7 @@ class OrderService {
       worksheet.addRow({
         code: order.code,
         orderNumber: order.orderNumber,
-        productCode: order.orderLines[0].product.title,
+        productName: order.orderLines[0].product.title,
         quantity: order.orderLines[0].quantity,
         vendorName: order.orderLines[0].product.vendor.name,
         status: ORDER_STATUS_Arabic[order.status] || order.status,
@@ -816,6 +831,9 @@ class OrderService {
           ? `${order.user.firstName} ${order.user.lastName}`
           : "",
         productType: order.orderLines[0].product?.type?.name || "",
+        productCode: order.orderLines[0].product.variants[0]
+          ? order.orderLines[0].product.variants[0].sku
+          : "",
       });
     });
 

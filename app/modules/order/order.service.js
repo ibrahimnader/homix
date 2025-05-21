@@ -329,39 +329,42 @@ class OrderService {
       );
     }
     if (deliveryStatus) {
-      deliveryStatus = deliveryStatus.split(",");
+      const statusArray = deliveryStatus.split(",").map(Number);
       const operations = [];
 
-      if (deliveryStatus.length) {
-        if (
-          deliveryStatus.map((st) => Number(st)).includes(DELIVERY_STATUS.LATE)
-        ) {
-          operations.push({ [Op.lt]: moment().startOf("day").toDate() });
-        }
-        if (
-          deliveryStatus
-            .map((st) => Number(st))
-            .includes(DELIVERY_STATUS.ALMOST_LAST)
-        ) {
-          operations.push({
-            [Op.and]: [
-              { [Op.lt]: moment().startOf("day").add(2, "days").toDate() },
-              { [Op.gte]: moment().startOf("day").toDate() },
-            ],
-          });
-        }
-        if (
-          deliveryStatus
-            .map((st) => Number(st))
-            .includes(DELIVERY_STATUS.ON_SCHEDULE)
-        ) {
-          operations.push({ [Op.gte]: moment().startOf("day").toDate() });
-        }
+      const today = moment().startOf("day");
+      const twoDaysLater = moment(today).add(2, "days");
+
+      if (statusArray.includes(DELIVERY_STATUS.LATE)) {
+        operations.push({
+          [Op.lt]: today.toDate(),
+        });
       }
-      sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-        [Op.and]: operations,
-      });
+
+      if (statusArray.includes(DELIVERY_STATUS.ALMOST_LAST)) {
+        operations.push({
+          [Op.and]: [
+            { [Op.gte]: today.toDate() },
+            { [Op.lt]: twoDaysLater.toDate() },
+          ],
+        });
+      }
+
+      if (statusArray.includes(DELIVERY_STATUS.ON_SCHEDULE)) {
+        operations.push({
+          [Op.gte]: twoDaysLater.toDate(),
+        });
+      }
+
+      if (operations.length) {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+            [Op.and]: [{ [Op.ne]: null }, { [Op.or]: operations }],
+          })
+        );
+      }
     }
+
     if (startDate && endDate) {
       let startStartDate = moment
         .tz(new Date(startDate), "Africa/Cairo")

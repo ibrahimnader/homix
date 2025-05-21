@@ -526,7 +526,7 @@ class OrderService {
         if (
           moment(order.expectedDeliveryDate).isBefore(
             moment()
-              .tz(new Date(startDate), "Africa/Cairo")
+              .tz(new Date(), "Africa/Cairo")
               .startOf("day")
               .toDate()
           )
@@ -535,7 +535,7 @@ class OrderService {
         } else if (
           moment(order.expectedDeliveryDate).isBefore(
             moment()
-              .tz(new Date(startDate), "Africa/Cairo")
+              .tz(new Date(), "Africa/Cairo")
               .startOf("day")
               .add(2, "days")
               .toDate()

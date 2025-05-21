@@ -842,8 +842,7 @@ class OrderService {
           : "",
         productType: order.orderLines[0].product?.type?.name || "",
         productCode: variant? variant.sku : ""
-          ? order.orderLines[0].product.variants.financial_status
-          : "",
+         
       });
     });
 

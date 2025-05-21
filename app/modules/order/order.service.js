@@ -816,6 +816,10 @@ class OrderService {
 
     // Add data rows
     orders.forEach((order) => {
+      const line = order.orderLines[0];
+      const variant = order.orderLines[0].product.variants.find(
+        (variant) => String(variant.shopifyId) === String(line.variant_id)
+      );
       worksheet.addRow({
         code: order.code,
         orderNumber: order.orderNumber,
@@ -837,8 +841,8 @@ class OrderService {
           ? `${order.user.firstName} ${order.user.lastName}`
           : "",
         productType: order.orderLines[0].product?.type?.name || "",
-        productCode: order.orderLines[0].product.variants[0]
-          ? order.orderLines[0].product.variants[0].sku
+        productCode: variant? variant.sku : ""
+          ? order.orderLines[0].product.variants.financial_status
           : "",
       });
     });

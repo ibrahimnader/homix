@@ -742,6 +742,12 @@ class OrderService {
       },
       {
         header: " المنتج",
+        key: "productName",
+        width: 20,
+        style: { alignment: { horizontal: "right" } },
+      },
+      {
+        header: " كود المنتج",
         key: "productCode",
         width: 20,
         style: { alignment: { horizontal: "right" } },

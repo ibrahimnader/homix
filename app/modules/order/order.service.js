@@ -330,32 +330,55 @@ class OrderService {
     }
     if (deliveryStatus) {
       deliveryStatus = deliveryStatus.split(",");
+      let lessThanDate = null;
+      let greaterThanDate = null;
+
       if (deliveryStatus.length) {
         if (
           deliveryStatus.map((st) => Number(st)).includes(DELIVERY_STATUS.LATE)
         ) {
-          whereClause[Op.and].push(
-            sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-              [Op.lt]: new Date(),
-            })
-          );
-        } else if (
+          lessThanDate = moment().startOf("day").toDate();
+        }
+        if (
           deliveryStatus
             .map((st) => Number(st))
             .includes(DELIVERY_STATUS.ALMOST_LAST)
         ) {
+          lessThanDate = moment().add(2, "days").toDate();
+          greaterThanDate = moment().startOf("day").toDate();
+        }
+        if (
+          deliveryStatus
+            .map((st) => Number(st))
+            .includes(DELIVERY_STATUS.ON_SCHEDULE)
+        ) {
+          greaterThanDate = moment().add(2, "days").toDate();
+        }
+      }
+      if (lessThanDate && greaterThanDate) {
+        {
           whereClause[Op.and].push(
             sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-              [Op.lt]: moment().add(2, "days").toDate(),
-            })
-          );
-        } else {
-          whereClause[Op.and].push(
-            sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
-              [Op.gte]: new Date(),
+              [Op.or]: [
+                { [Op.lt]: lessThanDate },
+                { [Op.gte]: greaterThanDate },
+              ],
             })
           );
         }
+      }if(lessThanDate) {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+            [Op.lt]: lessThanDate,
+          })
+        );
+      }
+      if (greaterThanDate) {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("Order.expectedDeliveryDate"), {
+            [Op.gte]: greaterThanDate,
+          })
+        );
       }
     }
     if (startDate && endDate) {
@@ -841,8 +864,7 @@ class OrderService {
           ? `${order.user.firstName} ${order.user.lastName}`
           : "",
         productType: order.orderLines[0].product?.type?.name || "",
-        productCode: variant? variant.sku : ""
-         
+        productCode: variant ? variant.sku : "",
       });
     });
 
@@ -1114,7 +1136,7 @@ class OrderService {
     };
   }
   static async updateOrder(orderId, orderData, user) {
-    const order = await Order.findByPk(orderId)
+    const order = await Order.findByPk(orderId);
     if (!order) {
       return {
         status: false,
@@ -1157,7 +1179,7 @@ class OrderService {
       (key) =>
         (orderData[key] === undefined ||
           orderData[key] === null ||
-          orderData[key] === "Invalid date"||
+          orderData[key] === "Invalid date" ||
           orderData[key] === "") &&
         delete orderData[key]
     );

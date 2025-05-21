@@ -1157,6 +1157,7 @@ class OrderService {
       (key) =>
         (orderData[key] === undefined ||
           orderData[key] === null ||
+          orderData[key] === "Invalid date"||
           orderData[key] === "") &&
         delete orderData[key]
     );

@@ -7,69 +7,77 @@ class ShopifyHelper {
     callbackFunction
   ) {
     const data = [];
-    // if (path === "products") {
-    //   const query = {
-    //     limit: 10,
-    //     fields: fields.join(","),
-    //   };
-    //   let response = await shopifyClient.get({
-    //     path,
-    //     query: {
-    //       ...query,
-    //       ...parameters,
-    //     },
-    //   });
-    //   let { body, pageInfo } = response;
-    //   data.push(...body[path]);
-    // } else {
-    const query = {
-      limit: 250,
-      fields: fields.join(","),
-    };
-    let response = await shopifyClient.get({
-      path,
-      query: {
-        ...query,
-        ...parameters,
-      },
-    });
-    let { body, pageInfo } = response;
-    if (callbackFunction) {
-      console.log("processing ", path);
-      await callbackFunction(body[path]);
-      console.log("saved 250 ", path);
-    } else {
-      data.push(...body[path]);
-    }
-
-    while (
-      body[path] &&
-      body[path].length > 0 &&
-      pageInfo.nextPage &&
-      pageInfo.nextPage.query &&
-      pageInfo.nextPage.query.page_info
-    ) {
-      //wait for 1 second
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      query.page_info = pageInfo.nextPage.query.page_info;
-
-      response = await shopifyClient.get({
+    if (path === "orders") {
+      const query = {
+        limit: 1,
+        fields: fields.join(","),
+      };
+      let response = await shopifyClient.get({
         path,
-        query,
+        query: {
+          ...query,
+          ...{
+            ...parameters,
+          },
+        },
       });
-
-      body = response.body;
-      pageInfo = response.pageInfo;
-
+      let { body, pageInfo } = response;
       if (callbackFunction) {
+        console.log("processing ", path);
         await callbackFunction(body[path]);
         console.log("saved 250 ", path);
       } else {
         data.push(...body[path]);
       }
+    } else {
+      const query = {
+        limit: 250,
+        fields: fields.join(","),
+      };
+      let response = await shopifyClient.get({
+        path,
+        query: {
+          ...query,
+          ...parameters,
+        },
+      });
+      let { body, pageInfo } = response;
+      if (callbackFunction) {
+        console.log("processing ", path);
+        await callbackFunction(body[path]);
+        console.log("saved 250 ", path);
+      } else {
+        data.push(...body[path]);
+      }
+
+      while (
+        body[path] &&
+        body[path].length > 0 &&
+        pageInfo.nextPage &&
+        pageInfo.nextPage.query &&
+        pageInfo.nextPage.query.page_info
+      ) {
+        //wait for 1 second
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        query.page_info = pageInfo.nextPage.query.page_info;
+
+        response = await shopifyClient.get({
+          path,
+          query,
+        });
+
+        body = response.body;
+        pageInfo = response.pageInfo;
+
+        if (callbackFunction) {
+          await callbackFunction(body[path]);
+          console.log("saved 250 ", path);
+        } else {
+          data.push(...body[path]);
+        }
+      }
     }
-    // }
 
     return data;
   }

@@ -1202,8 +1202,8 @@ class OrderService {
     }
     if (order.shippingFees) {
       orderData.totalPrice =
-        Number(orderData.subTotalPrice) -
-        Number(orderData.totalDiscounts) +
+        Number(order.subTotalPrice) -
+        Number(order.totalDiscounts) +
         Number(orderData.shippingFees);
     }
 

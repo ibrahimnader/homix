@@ -19,7 +19,7 @@ const Order = sequelize.define(
       allowNull: false,
     },
     code: {
-      type: DataTypes.STRING,
+      type: DataTypes.INTEGER,
       // allowNull: false,
       // unique: true,
     },

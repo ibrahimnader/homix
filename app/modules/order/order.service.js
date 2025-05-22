@@ -1,4 +1,4 @@
-const { Op, where, or } = require("sequelize");
+const { Op, where, or, literal } = require("sequelize");
 const ExcelJS = require("exceljs");
 const CustomerService = require("../customer/customer.service");
 const ShopifyHelper = require("../helpers/shopifyHelper");
@@ -77,7 +77,7 @@ class OrderService {
           [Op.not]: null,
         },
       },
-      order: [["code", "DESC"]],
+      order: [[literal('CAST("code" AS INTEGER)'), 'DESC']],
       attributes: ["code"],
     });
     const lastCustomOrder = await Order.findOne({
@@ -87,7 +87,7 @@ class OrderService {
         },
         custom: true,
       },
-      order: [["code", "DESC"]],
+      order: [[literal('CAST("code" AS INTEGER)'), 'DESC']],
       attributes: ["number"],
     });
 

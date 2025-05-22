@@ -124,6 +124,9 @@ class OrderService {
             ? PAYMENT_STATUS.PAID
             : PAYMENT_STATUS.COD;
         let totalCost = 0;
+        let totalPrice = 0;
+        let subTotalPrice = 0;
+        let total_discounts = 0;
         order.line_items.forEach((line) => {
           const discount_allocations = line.discount_allocations || [];
           const lineDiscount = discount_allocations.reduce(
@@ -142,6 +145,8 @@ class OrderService {
           line.unitCost = cost;
           line.cost = cost * line.quantity;
           totalCost += line.cost;
+          subTotalPrice = line.price * line.quantity;
+          total_discounts += lineDiscount;
         });
         const customerKey = order.id
           ? order.customer.id
@@ -186,17 +191,10 @@ class OrderService {
           code: codeNumber,
           number,
           orderNumber,
-          subTotalPrice: order.total_line_items_price,
-          totalDiscounts: order.total_discounts,
+          subTotalPrice: subTotalPrice,
+          totalDiscounts: total_discounts,
           totalTax: order.total_tax,
-          shippingFees: order.shipping_lines
-            ? order.shipping_lines.reduce(
-                (acc, item) => acc + Number(item.price),
-                0
-              )
-            : 0,
-
-          totalPrice: order.total_price,
+          totalPrice: subTotalPrice - total_discounts,
           orderDate: order.created_at || new Date(),
           customerId: customersNamesMap[customerKey],
           totalCost,
@@ -204,7 +202,6 @@ class OrderService {
           shippedFromInventory: isShipment ? true : false,
           shippingReceiveDate: order.shippingReceiveDate || null,
           shippingCompany: order.shippingCompany || null,
-          shippingFees: order.shippingFees || 0,
           deliveryDate: order.deliveryDate || null,
           governorate: order.governorate || null,
           shipmentStatus: order.shipmentStatus || null,
@@ -1202,6 +1199,12 @@ class OrderService {
         },
         true
       );
+    }
+    if (order.shippingFees) {
+      orderData.totalPrice =
+        Number(orderData.subTotalPrice) -
+        Number(orderData.totalDiscounts) +
+        Number(orderData.shippingFees);
     }
 
     await order.update(orderData);

@@ -58,14 +58,14 @@ class OrderService {
     const productsIds = new Set();
     const customers = [];
     const lastOrder = await Order.findOne({
-      order: [["createdAt", "DESC"]],
+      order: [["code", "DESC"]],
       attributes: ["code"],
     });
     const lastCustomOrder = await Order.findOne({
       where: {
         custom: true,
       },
-      order: [["createdAt", "DESC"]],
+      order: [["code", "DESC"]],
       attributes: ["number"],
     });
 
@@ -744,13 +744,13 @@ class OrderService {
     const worksheet = workbook.addWorksheet("orders");
     worksheet.columns = [
       {
-        header: "الكود التعريفي",
+        header: "كود العملية",
         key: "code",
         width: 20,
         style: { alignment: { horizontal: "right" } },
       },
       {
-        header: "كود العملية",
+        header: "رقم الطلب",
         key: "orderNumber",
         width: 20,
         style: { alignment: { horizontal: "right" } },

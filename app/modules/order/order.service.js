@@ -58,11 +58,19 @@ class OrderService {
     const productsIds = new Set();
     const customers = [];
     const lastOrder = await Order.findOne({
+      where: {
+        code: {
+          [Op.not]: null,
+        },
+      },
       order: [["code", "DESC"]],
       attributes: ["code"],
     });
     const lastCustomOrder = await Order.findOne({
       where: {
+        code: {
+          [Op.not]: null,
+        },
         custom: true,
       },
       order: [["code", "DESC"]],

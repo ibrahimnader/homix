@@ -54,7 +54,7 @@ class OrderService {
             );
             const discount = lineDiscount / line.quantity;
             //split line into multiple lines with quantity 1
-            for (let i = 1; i < line.quantity; i++) {
+            for (let i = 0; i < line.quantity; i++) {
               const newLine = { ...line, quantity: 1 };
               newLine.discount = discount;
               orders.push({
@@ -63,10 +63,6 @@ class OrderService {
               });
             }
           }
-          orders.push({
-            ...order,
-            line_items: [line],
-          });
         }
       } else {
         orders.push(order);

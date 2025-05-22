@@ -46,6 +46,23 @@ class OrderService {
     ordersFromShopify.forEach((order) => {
       if (order.line_items.length > 0) {
         for (const line of order.line_items) {
+          if (line.quantity > 1) {
+            const discount_allocations = line.discount_allocations || [];
+            const lineDiscount = discount_allocations.reduce(
+              (acc, item) => acc + Number(item.amount),
+              0
+            );
+            const discount = lineDiscount / line.quantity;
+            //split line into multiple lines with quantity 1
+            for (let i = 0; i < line.quantity; i++) {
+              const newLine = { ...line, quantity: 1 };
+              newLine.discount = discount;
+              orders.push({
+                ...order,
+                line_items: [newLine],
+              });
+            }
+          }
           orders.push({
             ...order,
             line_items: [line],
@@ -55,6 +72,7 @@ class OrderService {
         orders.push(order);
       }
     });
+
     const productsIds = new Set();
     const customers = [];
     const lastOrder = await Order.findOne({

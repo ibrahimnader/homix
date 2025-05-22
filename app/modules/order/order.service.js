@@ -142,13 +142,6 @@ class OrderService {
         let subTotalPrice = 0;
         let total_discounts = 0;
         order.line_items.forEach((line) => {
-          const discount_allocations = line.discount_allocations || [];
-          const lineDiscount = discount_allocations.reduce(
-            (acc, item) => acc + Number(item.amount),
-            0
-          );
-          line.discount = lineDiscount;
-
           const variant = product.variants
             ? product.variants.find(
                 (variant) =>
@@ -160,7 +153,7 @@ class OrderService {
           line.cost = cost * line.quantity;
           totalCost += line.cost;
           subTotalPrice = line.price * line.quantity;
-          total_discounts += lineDiscount;
+          total_discounts += line.discount || 0;
         });
         const customerKey = order.id
           ? order.customer.id

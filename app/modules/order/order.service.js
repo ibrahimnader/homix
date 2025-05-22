@@ -44,7 +44,7 @@ class OrderService {
   static async saveImportedOrders(ordersFromShopify, isShipment = false, user) {
     let orders = [];
     ordersFromShopify.forEach((order) => {
-      if (order.line_items.length > 0) {
+      if (order.line_items.length > 1) {
         for (const line of order.line_items) {
           if (line.quantity > 1) {
             const discount_allocations = line.discount_allocations || [];

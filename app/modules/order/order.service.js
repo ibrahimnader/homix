@@ -19,6 +19,7 @@ const {
   PAYMENT_STATUS,
   PAYMENT_STATUS_ARABIC,
   DELIVERY_STATUS,
+  MANUFACTURE_STATUS_ARABIC,
 } = require("../../../config/constants");
 const moment = require("moment-timezone");
 const Attachment = require("../attachments/attachment.model");
@@ -77,7 +78,7 @@ class OrderService {
           [Op.not]: null,
         },
       },
-      order: [[literal('CAST("code" AS INTEGER)'), 'DESC']],
+      order: [[literal('CAST("code" AS INTEGER)'), "DESC"]],
       attributes: ["code"],
     });
     const lastCustomOrder = await Order.findOne({
@@ -87,7 +88,7 @@ class OrderService {
         },
         custom: true,
       },
-      order: [[literal('CAST("code" AS INTEGER)'), 'DESC']],
+      order: [[literal('CAST("code" AS INTEGER)'), "DESC"]],
       attributes: ["number"],
     });
 
@@ -1210,6 +1211,25 @@ class OrderService {
         true
       );
     }
+    if (orderData.manufactureStatus) {
+      await OrderService.sendNotification(
+        orderId,
+        order.orderNumber,
+        {
+          orderId: orderId,
+          oldStatus: order.manufactureStatus,
+          newStatus: orderData.manufactureStatus,
+          user: {
+            firstName: user.firstName,
+            lastName: user.lastName,
+          },
+          type: "orderUpdateManufactureStatus",
+        },
+        false,
+        false,
+        true
+      );
+    }
     if (order.shippingFees) {
       orderData.totalPrice =
         Number(order.subTotalPrice) -
@@ -1477,7 +1497,8 @@ class OrderService {
     orderNumber,
     data,
     isUpdateStatus = false,
-    addNote = false
+    addNote = false,
+    isUpdateManufactureStatus = false
   ) {
     const orderLines = await OrderLine.findAll({
       where: {
@@ -1492,7 +1513,11 @@ class OrderService {
       ],
       toJSON: true,
     });
-    if (isUpdateStatus) {
+    if (isUpdateManufactureStatus) {
+      data.text = `تم تحديث حالة التصنيع للطلب رقم ${orderNumber} من ${
+        MANUFACTURE_STATUS_ARABIC[data.oldStatus]
+      } الى ${MANUFACTURE_STATUS_ARABIC[data.newStatus]}`;
+    } else if (isUpdateStatus) {
       data.text = `تم تحديث حالة الطلب رقم ${orderNumber} من ${
         ORDER_STATUS_Arabic[data.oldStatus]
       } الى ${ORDER_STATUS_Arabic[data.newStatus]}`;

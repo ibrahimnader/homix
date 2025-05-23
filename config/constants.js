@@ -106,6 +106,13 @@ const MANUFACTURE_STATUS = {
   FAILED_TO_DELIVER: 5,
 };
 
+const MANUFACTURE_STATUS_ARABIC = {
+  1: "مقبول",
+  2: "قيد الإنتاج",
+  3: "جاهز للتسليم",
+  4: "تم التسليم",
+  5: "فشل في التسليم",
+};
 module.exports = {
   USER_TYPES,
   ORDER_STATUS,
@@ -120,4 +127,5 @@ module.exports = {
   MANUFACTURE_STATUS,
   ORDER_STATUS_Arabic,
   PAYMENT_STATUS_ARABIC,
+  MANUFACTURE_STATUS_ARABIC
 };

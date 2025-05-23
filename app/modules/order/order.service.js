@@ -1237,10 +1237,13 @@ class OrderService {
       }
     }
     if (order.shippingFees) {
+      const subTotal = Number(order.subTotalPrice) || 0;
+      const totalDiscounts = Number(order.totalDiscounts) || 0;
+      orderData.shippingFees = Number(order.shippingFees) || 0;
       orderData.totalPrice =
-        Number(order.subTotalPrice) -
-        Number(order.totalDiscounts) +
-        Number(orderData.shippingFees);
+        Number(subTotal) +
+        Number(orderData.shippingFees) -
+        Number(totalDiscounts);
     }
 
     await order.update(orderData);

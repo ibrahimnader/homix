@@ -1192,43 +1192,49 @@ class OrderService {
         delete orderData[key]
     );
     if (orderData.status) {
-      if (orderData.status == ORDER_STATUS.IN_PROGRESS) {
-        orderData.PoDate = new Date();
-      }
-      await OrderService.sendNotification(
-        orderId,
-        order.orderNumber,
-        {
-          orderId: orderId,
-          oldStatus: order.status,
-          newStatus: orderData.status,
-          user: {
-            firstName: user.firstName,
-            lastName: user.lastName,
+      if (Number(order.status) !== Number(orderData.status)) {
+        if (orderData.status == ORDER_STATUS.IN_PROGRESS) {
+          orderData.PoDate = new Date();
+        }
+        await OrderService.sendNotification(
+          orderId,
+          order.orderNumber,
+          {
+            orderId: orderId,
+            oldStatus: order.status,
+            newStatus: orderData.status,
+            user: {
+              firstName: user.firstName,
+              lastName: user.lastName,
+            },
+            type: "orderUpdate",
           },
-          type: "orderUpdate",
-        },
-        true
-      );
+          true
+        );
+      }
     }
     if (orderData.manufactureStatus) {
-      await OrderService.sendNotification(
-        orderId,
-        order.orderNumber,
-        {
-          orderId: orderId,
-          oldStatus: order.manufactureStatus,
-          newStatus: orderData.manufactureStatus,
-          user: {
-            firstName: user.firstName,
-            lastName: user.lastName,
+      if (
+        Number(order.manufactureStatus) !== Number(orderData.manufactureStatus)
+      ) {
+        await OrderService.sendNotification(
+          orderId,
+          order.orderNumber,
+          {
+            orderId: orderId,
+            oldStatus: order.manufactureStatus,
+            newStatus: orderData.manufactureStatus,
+            user: {
+              firstName: user.firstName,
+              lastName: user.lastName,
+            },
+            type: "orderUpdateManufactureStatus",
           },
-          type: "orderUpdateManufactureStatus",
-        },
-        false,
-        false,
-        true
-      );
+          false,
+          false,
+          true
+        );
+      }
     }
     if (order.shippingFees) {
       orderData.totalPrice =
@@ -1317,21 +1323,23 @@ class OrderService {
         },
       });
       for (const order of orders) {
-        await OrderService.sendNotification(
-          order.id,
-          order.orderNumber,
-          {
-            orderId: order.id,
-            oldStatus: order.status,
-            newStatus: orderData.status,
-            user: {
-              firstName: user.firstName,
-              lastName: user.lastName,
+        if (Number(order.status) !== Number(orderData.status)) {
+          await OrderService.sendNotification(
+            order.id,
+            order.orderNumber,
+            {
+              orderId: order.id,
+              oldStatus: order.status,
+              newStatus: orderData.status,
+              user: {
+                firstName: user.firstName,
+                lastName: user.lastName,
+              },
+              type: "orderUpdate",
             },
-            type: "orderUpdate",
-          },
-          true
-        );
+            true
+          );
+        }
       }
     }
 

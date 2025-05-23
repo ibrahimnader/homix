@@ -247,7 +247,6 @@ OrderRouter.delete(
 OrderRouter.put(
   "/:orderId/notes/:noteId",
   verifyToken,
-  isNotVendor,
   OrderController.updateNote
 );
 
@@ -282,7 +281,6 @@ OrderRouter.put(
 OrderRouter.post(
   "/:orderId/notes",
   verifyToken,
-  isNotVendor,
   OrderController.addNote
 );
 
@@ -313,7 +311,6 @@ OrderRouter.post(
 OrderRouter.delete(
   "/:orderId/notes/:noteId",
   verifyToken,
-  isNotVendor,
   OrderController.deleteNote
 );
 

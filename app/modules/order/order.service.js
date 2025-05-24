@@ -63,10 +63,13 @@ class OrderService {
                 line_items: [newLine],
               });
             }
+          } else {
+            orders.push({
+              ...order,
+              line_items: [line],
+            });
           }
         }
-      } else if (order.line_items.length === 1) {
-        orders.push({ ...order, line_items: [line] });
       } else {
         orders.push(order);
       }

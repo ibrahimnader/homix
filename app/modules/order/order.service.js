@@ -1491,10 +1491,7 @@ class OrderService {
         message: "Note not found",
       };
     }
-    if (
-      user.userType === USER_TYPES.VENDOR ||
-      user.id.toString() !== note.userId.toString()
-    ) {
+    if (user.id.toString() !== note.userId.toString()) {
       return {
         status: false,
         statusCode: 403,

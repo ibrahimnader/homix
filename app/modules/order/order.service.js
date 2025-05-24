@@ -1525,9 +1525,13 @@ class OrderService {
       toJSON: true,
     });
     if (isUpdateManufactureStatus) {
-      data.text = `تم تحديث حالة التصنيع للطلب رقم ${orderNumber} من ${
-        MANUFACTURE_STATUS_ARABIC[data.oldStatus]
-      } الى ${MANUFACTURE_STATUS_ARABIC[data.newStatus]}`;
+      if (data.oldStatus) {
+        data.text = `تم تحديث حالة التصنيع للطلب رقم ${orderNumber} من ${
+          MANUFACTURE_STATUS_ARABIC[data.oldStatus]
+        } الى ${MANUFACTURE_STATUS_ARABIC[data.newStatus]}`;
+      } else {
+        data.text = `تم تحديث حالة التصنيع للطلب رقم ${orderNumber} الى ${MANUFACTURE_STATUS_ARABIC[data.newStatus]}`;
+      }
     } else if (isUpdateStatus) {
       data.text = `تم تحديث حالة الطلب رقم ${orderNumber} من ${
         ORDER_STATUS_Arabic[data.oldStatus]

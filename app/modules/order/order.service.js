@@ -65,6 +65,8 @@ class OrderService {
             }
           }
         }
+      } else if (order.line_items.length === 1) {
+        orders.push({ ...order, line_items: [line] });
       } else {
         orders.push(order);
       }
@@ -1530,7 +1532,9 @@ class OrderService {
           MANUFACTURE_STATUS_ARABIC[data.oldStatus]
         } الى ${MANUFACTURE_STATUS_ARABIC[data.newStatus]}`;
       } else {
-        data.text = `تم تحديث حالة التصنيع للطلب رقم ${orderNumber} الى ${MANUFACTURE_STATUS_ARABIC[data.newStatus]}`;
+        data.text = `تم تحديث حالة التصنيع للطلب رقم ${orderNumber} الى ${
+          MANUFACTURE_STATUS_ARABIC[data.newStatus]
+        }`;
       }
     } else if (isUpdateStatus) {
       data.text = `تم تحديث حالة الطلب رقم ${orderNumber} من ${

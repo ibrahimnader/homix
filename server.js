@@ -157,15 +157,12 @@ const startServer = async () => {
       console.log("A user connected with ID:", socket.id);
 
       socket.on("subscribe", async (data) => {
-        console.log("Subscribed to notification with data:", data);
         const userId = data.userId;
         try {
           const user = await User.findByPk(userId);
           if (user) {
-            user.socketId = socket.id;
+            user.socketIds = [...(user.socketIds || []), socket.id];
             await user.save();
-            console.log(`User ${userId} registered with socket ${socket.id}`);
-
             // Send a confirmation back to the client
             socket.emit("notification", {
               message: "Successfully subscribed to notifications",
@@ -182,12 +179,14 @@ const startServer = async () => {
         console.log("User disconnected:", socket.id);
         try {
           if (socket.handshake.query && socket.handshake.query.userId) {
-            await User.update(
-              { socketId: null },
-              {
-                where: { id: socket.handshake.query.userId },
-              }
-            );
+            const userId = socket.handshake.query.userId;
+            const user = await User.findByPk(userId);
+            if (user) {
+              // Remove the socket ID from the user's list
+              user.socketIds = (user.socketIds || []).filter(id => id !== socket.id);
+              await user.save();
+            } else {
+            }
           }
         } catch (err) {
           console.error("Error updating user on disconnect:", err);

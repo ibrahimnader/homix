@@ -1555,7 +1555,7 @@ class OrderService {
           { userType: { [Op.ne]: USER_TYPES.VENDOR } },
         ],
       },
-      attributes: ["socketId", "id"],
+      attributes: ["socketIds", "id"],
       toJSON: true,
     });
     const notifications = [];
@@ -1569,7 +1569,7 @@ class OrderService {
       notifications.push(notification);
     }
     await Notification.bulkCreate(notifications);
-    const socketsIds = users.map((user) => user.socketId).filter(Boolean);
+    const socketsIds = users.map((user) => user.socketIds).filter(sockets=> sockets && sockets.length > 0).flat();
     if (socketsIds.length > 0) {
       for (const socketId of socketsIds) {
         global.socketIO.to(socketId).emit("notification", {

@@ -30,8 +30,8 @@ const User = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
-    socketId: {
-      type: DataTypes.STRING,
+    socketIds: {
+      type: DataTypes.ARRAY(DataTypes.STRING),
       allowNull: true,
     },
   },

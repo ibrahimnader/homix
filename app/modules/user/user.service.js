@@ -186,6 +186,16 @@ class UserService {
   }
 
   static async saveUsersForVendors(vendors) {
+    const candidateEmails = vendors.map(
+      (vendor) => `${vendor.name.toLowerCase()}@${process.env.SHOPIFY_STORE}.com`
+    );
+    const existingUsers = await User.findAll({
+      where: { email: { [Op.in]: candidateEmails } },
+      paranoid: false,
+      attributes: ["email"],
+    });
+    const existingEmails = new Set(existingUsers.map((user) => user.email));
+
     const promises = [];
     const namesSet = new Set();
     let counter = 0;
@@ -202,9 +212,15 @@ class UserService {
         }`,
         10
       );
+      // Avoid unique constraint violations when another vendor already
+      // claimed this email (e.g. duplicate vendor names differing only by case)
+      let email = `${vendorName}@${process.env.SHOPIFY_STORE}.com`;
+      if (existingEmails.has(email)) {
+        email = `${vendorName}${vendor.id}@${process.env.SHOPIFY_STORE}.com`;
+      }
       promises.push(
         User.create({
-          email: `${vendorName}@${process.env.SHOPIFY_STORE}.com`,
+          email,
           password,
           firstName: vendor.name,
           userType: USER_TYPES.VENDOR,

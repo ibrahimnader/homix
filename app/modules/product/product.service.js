@@ -209,8 +209,8 @@ class ProductsService {
       for (const product of res.data) {
         productsMap[product.shopifyId] = product;
       }
-      for (const [vendorId, vendor] of Object.entries(res.vendorsMap)) {
-        allVendorsMap[vendorId] = vendor;
+      for (const vendor of Object.values(res.vendorsMap)) {
+        allVendorsMap[vendor.id] = vendor;
       }
     }
     return {

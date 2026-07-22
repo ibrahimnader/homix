@@ -1,3 +1,4 @@
+const { Op, fn, col, where } = require("sequelize");
 const User = require("../user/user.model");
 const UserService = require("../user/user.service");
 const Vendor = require("./vendor.model");
@@ -102,19 +103,24 @@ class VendorsService {
   static async getExistingVendorsMap(names) {
     const result = {};
     const uniqueNames = [...new Set(names)];
+    const lowerNames = uniqueNames.map((name) => name.toLowerCase());
+    // Match vendor names case-insensitively so e.g. "enarat" and "Enarat"
+    // resolve to the same vendor instead of creating a duplicate.
     const existingVendors = await Vendor.findAll({
-      where: {
-        name: uniqueNames,
-      },
+      where: where(fn("lower", col("name")), { [Op.in]: lowerNames }),
     });
+    const existingVendorsByLowerName = new Map();
     for (const vendor of existingVendors) {
-      result[vendor.name] = vendor;
+      existingVendorsByLowerName.set(vendor.name.toLowerCase(), vendor);
     }
-    const existingVendorsNames = new Set(
-      existingVendors.map((vendor) => vendor.name)
-    );
+    for (const name of uniqueNames) {
+      const match = existingVendorsByLowerName.get(name.toLowerCase());
+      if (match) {
+        result[name] = match;
+      }
+    }
     const createdVendors = uniqueNames.filter(
-      (name) => !existingVendorsNames.has(name)
+      (name) => !existingVendorsByLowerName.has(name.toLowerCase())
     );
     if (createdVendors.length) {
       const createdVendorsData = await Vendor.bulkCreate(

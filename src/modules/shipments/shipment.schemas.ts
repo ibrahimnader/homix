@@ -151,6 +151,20 @@ export const shipmentCreateSchema = z.object({
 
 export const shipmentMutationSchema = z.record(z.string(), z.unknown());
 
+/* Bulk edit only ever exposes these five fields in the UI, so — unlike the
+   single-shipment edit, which is a free-form passthrough — this is an explicit
+   allow-list: touching many rows at once deserves tighter validation. */
+export const shipmentBulkUpdateSchema = z.object({
+  data: z.object({
+    deliveryBy: z.coerce.number().int().positive().optional(),
+    governorate: z.string().trim().optional(),
+    shipmentStatus: z.coerce.number().int().positive().optional(),
+    shipmentType: z.string().trim().optional(),
+    userId: z.coerce.number().int().positive().optional(),
+  }).refine((value) => Object.keys(value).length > 0, "No fields to update"),
+  shipmentIds: z.array(z.coerce.number().int().positive()).min(1),
+});
+
 export const shipmentNoteSchema = z.object({
   text: z.string().optional().default(""),
 });
@@ -230,6 +244,11 @@ export const shipmentDeliveryAccountMutationSchema = z.object({
   accountingReference: z.string().trim().optional(),
   accountingStatus: z.coerce.number().int().positive().optional(),
 }).refine((value) => Object.keys(value).length > 0, "No fields to update");
+
+export const shipmentDeliveryAccountBulkMutationSchema = z.object({
+  data: shipmentDeliveryAccountMutationSchema,
+  orderIds: z.array(z.coerce.number().int().positive()).min(1),
+});
 
 export const shipmentExpenseAccountsQuerySchema = z.object({
   accountingStatus: z.coerce.number().int().positive().optional(),

@@ -1455,6 +1455,37 @@ export class ShipmentRepository {
     return true;
   }
 
+  /**
+   * Applies the same accounting-status change to several delivered shipments at
+   * once. Reuses updateDeliveryAccount per row so a row that isn't actually
+   * delivered yet (accounting record not found) is skipped rather than aborting
+   * the whole batch.
+   */
+  public async bulkUpdateDeliveryAccounts(
+    orderIds: number[],
+    payload: { accountingDate?: string | null; accountingReference?: string; accountingStatus?: number },
+  ): Promise<{ updatedCount: number; skippedIds: number[] }> {
+    let updatedCount = 0;
+    const skippedIds: number[] = [];
+    for (const orderId of orderIds) {
+      try {
+        const updated = await this.updateDeliveryAccount(orderId, payload);
+        if (updated) {
+          updatedCount += 1;
+        } else {
+          skippedIds.push(orderId);
+        }
+      } catch (error) {
+        if (error instanceof NotFoundError) {
+          skippedIds.push(orderId);
+          continue;
+        }
+        throw error;
+      }
+    }
+    return { skippedIds, updatedCount };
+  }
+
   public async listDeliveryAccounts(filters: DeliveryAccountsListQuery, vendorId?: number | null): Promise<DeliveryAccountsListResponse> {
     const whereClause: Record<PropertyKey, unknown> = {
       ...buildHomixShipmentScope(),
@@ -2127,6 +2158,27 @@ export class ShipmentRepository {
       );
     }
     return shipment;
+  }
+
+  /**
+   * Applies the same partial update — shipment status, shipment type,
+   * governorate, delivery-by, assignee — to several shipments at once, reusing
+   * updateShipment per row so the status→order-status cascade, the empty-string
+   * normalization, and the audit log entries all stay identical to a single edit.
+   */
+  public async bulkUpdateShipments(
+    shipmentIds: number[],
+    payload: Record<string, unknown>,
+    userId?: number,
+  ): Promise<number> {
+    let updatedCount = 0;
+    for (const shipmentId of shipmentIds) {
+      const updated = await this.updateShipment(shipmentId, payload, userId);
+      if (updated) {
+        updatedCount += 1;
+      }
+    }
+    return updatedCount;
   }
 
   public async deleteShipment(shipmentId: number): Promise<boolean> {

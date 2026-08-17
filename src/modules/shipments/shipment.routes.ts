@@ -4,7 +4,9 @@ import { asyncHandler, validateRequest } from "../../shared/http";
 import { ShipmentController } from "./shipment.controller";
 import { ShipmentRepository } from "./shipment.repo";
 import {
+  shipmentBulkUpdateSchema,
   shipmentCreateSchema,
+  shipmentDeliveryAccountBulkMutationSchema,
   shipmentDeliveryAccountMutationSchema,
   shipmentDeliveryAccountParamsSchema,
   shipmentDeliveryAccountsExportQuerySchema,
@@ -942,6 +944,46 @@ shipmentRouter.get(
  *       404:
  *         description: Delivery account not found
  */
+/**
+ * @swagger
+ * /shipments/accounts/deliveries/bulk-update:
+ *   put:
+ *     security:
+ *       - bearerAuth: []
+ *     tags: [Shipments]
+ *     summary: Update the accounting state of several delivered shipments at once
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [orderIds, data]
+ *             properties:
+ *               orderIds:
+ *                 type: array
+ *                 items: { type: integer }
+ *               data:
+ *                 type: object
+ *                 properties:
+ *                   accountingStatus:
+ *                     type: integer
+ *                     description: 1 = pending, 2 = settled
+ *                   accountingDate:
+ *                     type: string
+ *                   accountingReference:
+ *                     type: string
+ *     responses:
+ *       200:
+ *         description: Delivery accounts updated successfully
+ */
+shipmentRouter.put(
+  "/accounts/deliveries/bulk-update",
+  requirePermission("finance_settle"),
+  validateRequest({ body: shipmentDeliveryAccountBulkMutationSchema }),
+  asyncHandler(shipmentController.bulkUpdateDeliveryAccounts),
+);
+
 shipmentRouter.put(
   "/accounts/deliveries/:orderId",
   requirePermission("finance_settle"),
@@ -1281,6 +1323,44 @@ shipmentRouter.get(
   requirePermission("ship_view"),
   validateRequest({ query: shipmentListQuerySchema }),
   asyncHandler(shipmentController.listShipments),
+);
+
+/**
+ * @swagger
+ * /shipments/bulk-update:
+ *   put:
+ *     security:
+ *       - bearerAuth: []
+ *     tags: [Shipments]
+ *     summary: Update several shipments at once (status, type, governorate, delivery-by, assignee)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [shipmentIds, data]
+ *             properties:
+ *               shipmentIds:
+ *                 type: array
+ *                 items: { type: integer }
+ *               data:
+ *                 type: object
+ *                 properties:
+ *                   shipmentStatus: { type: integer }
+ *                   shipmentType: { type: string }
+ *                   governorate: { type: string }
+ *                   deliveryBy: { type: integer }
+ *                   userId: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Shipments updated successfully
+ */
+shipmentRouter.put(
+  "/bulk-update",
+  requirePermission("ship_edit"),
+  validateRequest({ body: shipmentBulkUpdateSchema }),
+  asyncHandler(shipmentController.bulkUpdateShipments),
 );
 
 /**

@@ -160,6 +160,14 @@ export class ShipmentService {
     return success({ message: "Delivery account updated successfully" });
   }
 
+  public async bulkUpdateDeliveryAccounts(
+    orderIds: number[],
+    payload: { accountingDate?: string | null; accountingReference?: string; accountingStatus?: number },
+  ): Promise<Result<{ message: string; skippedIds: number[]; updatedCount: number }>> {
+    const { skippedIds, updatedCount } = await this.shipmentRepository.bulkUpdateDeliveryAccounts(orderIds, payload);
+    return success({ message: "Delivery accounts updated successfully", skippedIds, updatedCount });
+  }
+
   public async listInventory(filters: InventoryListQuery, vendorId?: number | null): Promise<Result<InventoryListResponse>> {
     return success(await this.shipmentRepository.listInventory(filters, vendorId));
   }
@@ -389,6 +397,15 @@ export class ShipmentService {
     }
 
     return success(shipment);
+  }
+
+  public async bulkUpdateShipments(
+    shipmentIds: number[],
+    payload: ShipmentMutationPayload,
+    user: ShipmentRequestUser,
+  ): Promise<Result<{ message: string; updatedCount: number }>> {
+    const updatedCount = await this.shipmentRepository.bulkUpdateShipments(shipmentIds, payload, user.id);
+    return success({ message: "Shipments updated successfully", updatedCount });
   }
 
   public async deleteShipment(shipmentId: number): Promise<Result<{ message: string }>> {

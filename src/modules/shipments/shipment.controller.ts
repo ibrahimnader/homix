@@ -109,6 +109,13 @@ export class ShipmentController {
     response.status(200).json({ ...unwrap(await this.shipmentService.updateDeliveryAccount(Number(request.params.orderId), request.body)), status: true });
   };
 
+  public bulkUpdateDeliveryAccounts = async (request: Request, response: Response): Promise<void> => {
+    response.status(200).json({
+      data: unwrap(await this.shipmentService.bulkUpdateDeliveryAccounts(request.body.orderIds, request.body.data)),
+      status: true,
+    });
+  };
+
   public listExpenseAccounts = async (request: Request, response: Response): Promise<void> => {
     response.status(200).json({ data: unwrap(await this.shipmentService.listExpenseAccounts(request.query as never)), status: true });
   };
@@ -178,6 +185,17 @@ export class ShipmentController {
       data: unwrap(await this.shipmentService.updateShipment(
         Number(request.params.shipmentId),
         request.body,
+        request.user ?? { id: 0 },
+      )),
+      status: true,
+    });
+  };
+
+  public bulkUpdateShipments = async (request: Request, response: Response): Promise<void> => {
+    response.status(200).json({
+      data: unwrap(await this.shipmentService.bulkUpdateShipments(
+        request.body.shipmentIds,
+        request.body.data,
         request.user ?? { id: 0 },
       )),
       status: true,

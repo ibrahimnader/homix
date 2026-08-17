@@ -10,7 +10,7 @@ import {
   replaceManagedOptions,
   type ManagedOptionValue,
 } from "../settings/managed-options";
-import { DELIVERY_BY, ORDER_SOURCE_ARABIC, ORDER_SOURCE, ORDER_STATUS, PAYMENT_STATUS, SHIPMENT_SCHEDULE_STATUS_ARABIC } from "../../../config/constants";
+import { DELIVERY_BY, ORDER_SOURCE_ARABIC, ORDER_SOURCE, ORDER_STATUS, PAYMENT_STATUS, SHIPMENT_SCHEDULE_STATUS_ARABIC, USER_TYPES } from "../../../config/constants";
 import {
   ACCOUNTING_STATUS,
   ACCOUNT_STATUS_LABELS,
@@ -746,7 +746,7 @@ export class ShipmentRepository {
    * count plus the remaining lookups issued in parallel.
    */
   public async getMeta(): Promise<ShipmentMetaResponse> {
-    const [statusCountRows, shippingCompanies, inventoryCount, expensesCount, expenseTypes] = await Promise.all([
+    const [statusCountRows, shippingCompanies, inventoryCount, expensesCount, expenseTypes, assignees] = await Promise.all([
       orderModel.findAll({
         attributes: ["shipmentStatus", [fn("COUNT", col("Order.id")), "rowCount"]],
         group: ["Order.shipmentStatus"],
@@ -757,6 +757,14 @@ export class ShipmentRepository {
       shipmentInventoryModel.count(),
       shipmentExpenseModel.count(),
       listManagedOptions(MANAGED_OPTION_GROUP.EXPENSE_TYPE),
+      /* «المسؤول» يعني موظفي هوميكس فقط — استبعاد حسابات البائعين، ومصدرها الـ
+         meta لا /users حتى تعمل لأي دور يرى الشحنات أصلاً (orders.repo.getMeta
+         يطبّق نفس المنطق لنفس السبب). */
+      userModel.findAll({
+        attributes: ["firstName", "id", "lastName"],
+        order: [["firstName", "ASC"]],
+        where: { userType: { [Op.not]: USER_TYPES.VENDOR } },
+      }),
     ]);
 
     let shipmentsCount = 0;
@@ -777,6 +785,10 @@ export class ShipmentRepository {
     return {
       deliveryByOptions: Object.entries(DELIVERY_BY_LABELS).map(([id, label]) => ({ id: Number(id), label })),
       accountingStatuses: Object.entries(ACCOUNT_STATUS_LABELS).map(([id, label]) => ({ id: Number(id), label })),
+      assignees: assignees.map((user: unknown) => {
+        const plainUser = toPlain(user);
+        return { id: toNumber(plainUser.id), label: `${toText(plainUser.firstName)} ${toText(plainUser.lastName)}`.trim() };
+      }),
       customerReturnStatuses: Object.entries(CUSTOMER_RETURN_STATUS_LABELS).map(([id, label]) => ({ id: Number(id), label })),
       expenseTypes,
       governorates: Object.entries(GOVERNORATE_LABELS).map(([id, label]) => ({ id: Number(id), label })),

@@ -103,6 +103,7 @@ export type ShipmentMetaOption = {
 
 export type ShipmentMetaResponse = {
   accountingStatuses: ShipmentMetaOption[];
+  assignees: ShipmentMetaOption[];
   customerReturnStatuses: ShipmentMetaOption[];
   deliveryByOptions: ShipmentMetaOption[];
   expenseTypes: ShipmentMetaOption[];

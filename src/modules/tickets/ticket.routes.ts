@@ -38,7 +38,7 @@ const requireTicketWritePermission: express.RequestHandler = (request, response,
     return next();
   }
 
-  return response.json({
+  return response.status(403).json({
     status: false,
     message: "Unauthorized",
   });

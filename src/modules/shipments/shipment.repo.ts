@@ -106,6 +106,15 @@ const ORDER_SOURCE_LABELS = ORDER_SOURCE_ARABIC as Record<number, string>;
 const SHIPMENT_SCHEDULE_LABELS = SHIPMENT_SCHEDULE_STATUS_ARABIC as Record<number, string>;
 const SHIPMENT_SORTABLE_FIELDS = ["orderDate", "priority", "subTotalPrice", "totalPrice"] as const;
 
+/** governorate is stored as free text on newer rows but as the numeric id on
+ * older ones (and on rows written by the bulk-edit filter, which needs the id
+ * to match) — resolve either shape to its Arabic name for display. */
+const resolveGovernorateDisplayLabel = (value: unknown): string => {
+  const text = toText(value);
+  if (!text) return "";
+  return GOVERNORATE_LABELS[Number(text)] ?? text;
+};
+
 /**
  * A shipment record is just the order's own row, so its shipmentStatus and the
  * order's lifecycle status are two different fields that can drift apart. These
@@ -498,7 +507,7 @@ const mapShipmentListItem = (orderValue: unknown): ShipmentListItem => {
     priority: deliveryPriority,
     priorityLabel: getShipmentPriorityLabel(deliveryPriority),
     deliveryDate: toIsoString(order.deliveryDate),
-    governorate: toText(order.governorate),
+    governorate: resolveGovernorateDisplayLabel(order.governorate),
     id: toNumber(order.id),
     operationNumber: normalizeOperationCode(order.code),
     orderSource: toNullableNumber(order.orderSource),

@@ -65,6 +65,15 @@ export class TicketController {
     response.status(200).json({ data: unwrap(result), status: true });
   };
 
+  public deleteTicket = async (request: Request, response: Response): Promise<void> => {
+    const result = await this.ticketService.deleteTicket(
+      Number(request.params.ticketId),
+      request.user ?? { id: 0 },
+      request.vendorId,
+    );
+    response.status(200).json({ ...unwrap(result), status: true });
+  };
+
   public addNote = async (request: Request, response: Response): Promise<void> => {
     const result = await this.ticketService.addNote(
       Number(request.params.ticketId),

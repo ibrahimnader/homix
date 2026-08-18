@@ -329,6 +329,17 @@ export class ShipmentService {
     return success(expense);
   }
 
+  public async bulkUpdateExpenseAccounts(
+    expenseIds: number[],
+    payload: Partial<ExpenseMutationInput>,
+  ): Promise<Result<{ message: string; skippedIds: number[]; updatedCount: number }>> {
+    if (payload.type !== undefined && !(await this.shipmentRepository.hasExpenseType(payload.type))) {
+      throw new NotFoundError("Expense type not found");
+    }
+    const { skippedIds, updatedCount } = await this.shipmentRepository.bulkUpdateExpenseAccounts(expenseIds, payload);
+    return success({ message: "Expenses updated successfully", skippedIds, updatedCount });
+  }
+
   public async deleteExpenseAccount(expenseId: number): Promise<Result<{ message: string }>> {
     const deleted = await this.shipmentRepository.deleteExpenseAccount(expenseId);
     if (!deleted) {

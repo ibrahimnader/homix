@@ -270,6 +270,11 @@ export const shipmentExpenseMutationSchema = z.object({
   type: z.coerce.number().int().positive(),
 });
 
+export const shipmentExpenseBulkMutationSchema = z.object({
+  data: shipmentExpenseMutationSchema.partial().refine((value) => Object.keys(value).length > 0, "No fields to update"),
+  expenseIds: z.array(z.coerce.number().int().positive()).min(1),
+});
+
 export const shipmentExpenseTypesMutationSchema = z.object({
   options: z.array(z.object({
     id: z.coerce.number().int().positive().optional(),

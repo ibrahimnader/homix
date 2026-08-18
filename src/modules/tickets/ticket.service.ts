@@ -238,6 +238,34 @@ export class TicketService {
     return success(ticket);
   }
 
+  public async deleteTicket(
+    ticketId: number,
+    user: TicketRequestUser,
+    vendorId?: number | null,
+  ): Promise<Result<{ message: string }>> {
+    const existingTicket = await this.ticketRepository.getRawTicketById(ticketId, vendorId);
+    if (!existingTicket) {
+      throw new NotFoundError("Ticket not found");
+    }
+
+    const deleted = await this.ticketRepository.deleteTicket(ticketId);
+    if (!deleted) {
+      throw new NotFoundError("Ticket not found");
+    }
+
+    await this.ticketRepository.createLogs([{
+      action: "delete",
+      entityId: ticketId,
+      entityType: "ticket",
+      field: "ticket",
+      from: "",
+      to: "",
+      userId: user.id,
+    }]);
+
+    return success({ message: "Ticket deleted successfully" });
+  }
+
   public async addNote(
     ticketId: number,
     payload: TicketNoteInput,

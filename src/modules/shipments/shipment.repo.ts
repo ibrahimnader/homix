@@ -1777,6 +1777,25 @@ export class ShipmentRepository {
     };
   }
 
+  /** يطبّق نفس تعديل updateExpenseAccount على عدة مصروفات دفعة واحدة — صف يفشل يُتخطّى بدل إفشال الدفعة كلها. */
+  public async bulkUpdateExpenseAccounts(
+    expenseIds: number[],
+    payload: Partial<ExpenseMutationInput>,
+  ): Promise<{ updatedCount: number; skippedIds: number[] }> {
+    let updatedCount = 0;
+    const skippedIds: number[] = [];
+    for (const expenseId of expenseIds) {
+      // eslint-disable-next-line no-await-in-loop -- sequential, small batches from a UI selection
+      const updated = await this.updateExpenseAccount(expenseId, payload);
+      if (updated) {
+        updatedCount += 1;
+      } else {
+        skippedIds.push(expenseId);
+      }
+    }
+    return { skippedIds, updatedCount };
+  }
+
   public updateExpenseTypes(options: Array<{ id?: number; label: string }>): Promise<ManagedOptionValue[]> {
     return replaceManagedOptions(MANAGED_OPTION_GROUP.EXPENSE_TYPE, options);
   }

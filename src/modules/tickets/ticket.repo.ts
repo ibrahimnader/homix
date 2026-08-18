@@ -789,6 +789,17 @@ export class TicketRepository {
     await ticket.update(payload as Record<string, unknown>);
   }
 
+  /** Ticket is paranoid, so this is a soft delete (sets deletedAt). */
+  public async deleteTicket(ticketId: number): Promise<boolean> {
+    const ticket = await ticketModel.findByPk(ticketId);
+    if (!ticket || typeof ticket.destroy !== "function") {
+      return false;
+    }
+
+    await ticket.destroy();
+    return true;
+  }
+
   public async createLogs(entries: Array<Record<string, unknown>>): Promise<void> {
     if (entries.length === 0) {
       return;

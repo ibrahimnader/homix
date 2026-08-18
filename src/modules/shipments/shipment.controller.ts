@@ -161,6 +161,13 @@ export class ShipmentController {
     });
   };
 
+  public bulkUpdateExpenseAccounts = async (request: Request, response: Response): Promise<void> => {
+    response.status(200).json({
+      data: unwrap(await this.shipmentService.bulkUpdateExpenseAccounts(request.body.expenseIds, request.body.data)),
+      status: true,
+    });
+  };
+
   public deleteExpenseAccount = async (request: Request, response: Response): Promise<void> => {
     response.status(200).json({ ...unwrap(await this.shipmentService.deleteExpenseAccount(Number(request.params.expenseId))), status: true });
   };

@@ -13,6 +13,7 @@ import {
   shipmentDeliveryAccountsQuerySchema,
   shipmentExpenseAccountsExportQuerySchema,
   shipmentExportQuerySchema,
+  shipmentExpenseBulkMutationSchema,
   shipmentExpenseMutationSchema,
   shipmentExpenseTypesMutationSchema,
   shipmentExpenseParamsSchema,
@@ -1064,6 +1065,13 @@ shipmentRouter.post(
   requirePermission("finance_settle"),
   validateRequest({ body: shipmentExpenseMutationSchema }),
   asyncHandler(shipmentController.createExpenseAccount),
+);
+
+shipmentRouter.put(
+  "/accounts/expenses/bulk-update",
+  requirePermission("finance_settle"),
+  validateRequest({ body: shipmentExpenseBulkMutationSchema }),
+  asyncHandler(shipmentController.bulkUpdateExpenseAccounts),
 );
 
 shipmentRouter.put(

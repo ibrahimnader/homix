@@ -566,6 +566,13 @@ ticketRouter.patch(
   asyncHandler(ticketController.updateTicket),
 );
 
+ticketRouter.delete(
+  "/:ticketId",
+  requirePermission("tickets_close"),
+  validateRequest({ params: ticketIdParamsSchema }),
+  asyncHandler(ticketController.deleteTicket),
+);
+
 /**
  * @swagger
  * /tickets/{ticketId}/notes:

@@ -351,14 +351,14 @@ const buildShipmentWhereClause = (
   if (filters.scheduledDateFrom) {
     const scheduledDateFrom = toDateRangeBoundary(filters.scheduledDateFrom, "start");
     if (scheduledDateFrom) {
-      andConditions.push(where(col("Order.expectedDeliveryDate"), { [Op.gte]: scheduledDateFrom }));
+      andConditions.push(where(col("Order.scheduledDeliveryDate"), { [Op.gte]: scheduledDateFrom }));
     }
   }
 
   if (filters.scheduledDateTo) {
     const scheduledDateTo = toDateRangeBoundary(filters.scheduledDateTo, "end");
     if (scheduledDateTo) {
-      andConditions.push(where(col("Order.expectedDeliveryDate"), { [Op.lte]: scheduledDateTo }));
+      andConditions.push(where(col("Order.scheduledDeliveryDate"), { [Op.lte]: scheduledDateTo }));
     }
   }
 
@@ -516,7 +516,7 @@ const mapShipmentListItem = (orderValue: unknown): ShipmentListItem => {
     paymentStatus: toNullableNumber(order.paymentStatus),
     paymentStatusLabel: PAYMENT_STATUS_LABELS[toNumber(order.paymentStatus)] ?? "",
     receivedInWarehouseDate: toIsoString(order.shippingReceiveDate),
-    scheduledDeliveryDate: toIsoString(order.expectedDeliveryDate),
+    scheduledDeliveryDate: toIsoString(order.scheduledDeliveryDate),
     scheduleStatus: toNullableNumber(order.scheduleStatus),
     scheduleStatusLabel: SHIPMENT_SCHEDULE_LABELS[toNumber(order.scheduleStatus)] ?? "",
     sellerName: toText(vendor.name),
@@ -2161,6 +2161,7 @@ export class ShipmentRepository {
       "deliveryDate",
       "governorate",
       "scheduleStatus",
+      "scheduledDeliveryDate",
       "shipmentStatus",
       "shipmentType",
       "shippingCompany",

@@ -208,6 +208,11 @@ const Order = sequelize.define(
         isIn: [Object.values(SHIPMENT_SCHEDULE_STATUS)],
       },
     },
+    // موعد الجدولة — يُدخَل يدويًا من فريق اللوجيستيك، وليس مشتقًا من expectedDeliveryDate.
+    scheduledDeliveryDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
     shipmentType: {
       type: DataTypes.STRING,
       allowNull: true,
@@ -263,6 +268,13 @@ const Order = sequelize.define(
           order.setDataValue("shippedFromInventory", deliveryBy === DELIVERY_BY.HOMIX);
           if (Array.isArray(options?.fields) && !options.fields.includes("shippedFromInventory")) {
             options.fields.push("shippedFromInventory");
+          }
+        }
+        // توصيل بواسطة هوميكس بدون حالة شحنة سابقة => تبدأ الحالة "معلقة" بدل ما تفضل فاضية.
+        if (deliveryBy === DELIVERY_BY.HOMIX && order.getDataValue("shipmentStatus") == null) {
+          order.setDataValue("shipmentStatus", SHIPMENTS_STATUS.PENDING);
+          if (Array.isArray(options?.fields) && !options.fields.includes("shipmentStatus")) {
+            options.fields.push("shipmentStatus");
           }
         }
       },

@@ -2184,19 +2184,22 @@ export class ShipmentRepository {
     }
 
     /* toBeCollected is only ever recalculated by the order-edit path
-       (normalizeOrderMutationPayload), not here — so a shipping-fee edit from
-       this screen used to leave toBeCollected stale (still reflecting the old
-       fee) until someone unrelatedly saved the order again. Recompute it
-       ourselves whenever shippingFees changes, using the same formula, and let
-       it override whatever stale toBeCollected the client happened to submit
-       alongside it (the edit form's toBeCollected field isn't itself derived,
-       so it can't be trusted once shippingFees moves in the same request). */
-    if (Object.prototype.hasOwnProperty.call(nextPayload, "shippingFees")) {
-      const nextShippingFees = toNumber(nextPayload.shippingFees);
+       (normalizeOrderMutationPayload), not here — so a shipping-fee or
+       down-payment edit from this screen used to leave toBeCollected stale
+       (still reflecting the old figures) until someone unrelatedly saved the
+       order again. Recompute it ourselves whenever either moves, using the
+       same formula, and let it override whatever stale toBeCollected the
+       client happened to submit alongside it (the edit form's toBeCollected
+       field isn't itself derived, so it can't be trusted once either input
+       moves in the same request). */
+    const recomputesCollection = Object.prototype.hasOwnProperty.call(nextPayload, "shippingFees")
+      || Object.prototype.hasOwnProperty.call(nextPayload, "downPayment");
+    if (recomputesCollection) {
       const subTotalPrice = toNumber(nextPayload.subTotalPrice ?? plainShipmentBeforeUpdate.subTotalPrice);
+      const shippingFees = toNumber(nextPayload.shippingFees ?? plainShipmentBeforeUpdate.shippingFees);
       const totalDiscounts = toNumber(nextPayload.totalDiscounts ?? plainShipmentBeforeUpdate.totalDiscounts);
       const downPayment = toNumber(nextPayload.downPayment ?? plainShipmentBeforeUpdate.downPayment);
-      nextPayload.toBeCollected = subTotalPrice + nextShippingFees - totalDiscounts - downPayment;
+      nextPayload.toBeCollected = subTotalPrice + shippingFees - totalDiscounts - downPayment;
     }
 
     await shipment.update(nextPayload);
@@ -2217,14 +2220,18 @@ export class ShipmentRepository {
         "status",
       );
     }
-    if (Object.prototype.hasOwnProperty.call(nextPayload, "shippingFees")) {
-      await logOrderFieldChange(
-        shipmentId,
-        plainShipmentBeforeUpdate.shippingFees,
-        nextPayload.shippingFees,
-        userId,
-        "shippingFees",
-      );
+    for (const field of ["shippingFees", "downPayment", "receivedAmount"] as const) {
+      if (Object.prototype.hasOwnProperty.call(nextPayload, field)) {
+        await logOrderFieldChange(
+          shipmentId,
+          plainShipmentBeforeUpdate[field],
+          nextPayload[field],
+          userId,
+          field,
+        );
+      }
+    }
+    if (recomputesCollection) {
       await logOrderFieldChange(
         shipmentId,
         plainShipmentBeforeUpdate.toBeCollected,

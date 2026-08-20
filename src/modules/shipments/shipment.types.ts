@@ -203,6 +203,9 @@ export type ShipmentDetailsResponse = {
   };
   financial: {
     amountToCollect: number;
+    discount: number;
+    downPayment: number;
+    receivedAmount: number;
     shippingCost: number;
     totalPrice: number;
   };

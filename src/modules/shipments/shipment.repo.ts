@@ -1007,6 +1007,9 @@ export class ShipmentRepository {
       },
       financial: {
         amountToCollect: getShipmentCollectionAmount(order),
+        discount: toNumber(order.totalDiscounts),
+        downPayment: toNumber(order.downPayment),
+        receivedAmount: toNumber(order.receivedAmount),
         shippingCost: toNumber(order.shippingFees),
         totalPrice: toNumber(order.totalPrice),
       },

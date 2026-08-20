@@ -127,7 +127,7 @@ const ORDER_STATUS_BY_SHIPMENT_STATUS: Partial<Record<number, number>> = {
   [SHIPMENT_STATUS.CANCELED]: ORDER_STATUS.CANCELED,
 };
 
-const logShipmentStatusTransition = async (
+const logOrderFieldChange = async (
   orderId: number,
   fromStatus: unknown,
   toStatus: unknown,
@@ -1179,7 +1179,7 @@ export class ShipmentRepository {
     const returnDate = payload.returnDate ? new Date(payload.returnDate) : new Date();
     const nextShipmentStatus = getShipmentStatusForReturnType(returnType);
     await shipment.update({ shipmentStatus: nextShipmentStatus });
-    await logShipmentStatusTransition(payload.orderId, plainShipment.shipmentStatus, nextShipmentStatus, userId);
+    await logOrderFieldChange(payload.orderId, plainShipment.shipmentStatus, nextShipmentStatus, userId);
     const createdRecord = await shipmentReturnModel.create({
       completedAt: isFinalReturnStatus(returnType, status) ? returnDate : null,
       orderId: payload.orderId,
@@ -1282,7 +1282,7 @@ export class ShipmentRepository {
     const plainShipmentBeforeSync = toPlain(shipment);
     if (toNumber(plainShipmentBeforeSync.shipmentStatus) !== shipmentStatus) {
       await shipment.update({ shipmentStatus });
-      await logShipmentStatusTransition(
+      await logOrderFieldChange(
         toNumber(plainShipmentBeforeSync.id),
         plainShipmentBeforeSync.shipmentStatus,
         shipmentStatus,
@@ -2180,9 +2180,25 @@ export class ShipmentRepository {
       }
     }
 
+    /* toBeCollected is only ever recalculated by the order-edit path
+       (normalizeOrderMutationPayload), not here — so a shipping-fee edit from
+       this screen used to leave toBeCollected stale (still reflecting the old
+       fee) until someone unrelatedly saved the order again. Recompute it
+       ourselves whenever shippingFees changes, using the same formula, and let
+       it override whatever stale toBeCollected the client happened to submit
+       alongside it (the edit form's toBeCollected field isn't itself derived,
+       so it can't be trusted once shippingFees moves in the same request). */
+    if (Object.prototype.hasOwnProperty.call(nextPayload, "shippingFees")) {
+      const nextShippingFees = toNumber(nextPayload.shippingFees);
+      const subTotalPrice = toNumber(nextPayload.subTotalPrice ?? plainShipmentBeforeUpdate.subTotalPrice);
+      const totalDiscounts = toNumber(nextPayload.totalDiscounts ?? plainShipmentBeforeUpdate.totalDiscounts);
+      const downPayment = toNumber(nextPayload.downPayment ?? plainShipmentBeforeUpdate.downPayment);
+      nextPayload.toBeCollected = subTotalPrice + nextShippingFees - totalDiscounts - downPayment;
+    }
+
     await shipment.update(nextPayload);
     if (Object.prototype.hasOwnProperty.call(nextPayload, "shipmentStatus")) {
-      await logShipmentStatusTransition(
+      await logOrderFieldChange(
         shipmentId,
         plainShipmentBeforeUpdate.shipmentStatus,
         nextPayload.shipmentStatus,
@@ -2190,12 +2206,28 @@ export class ShipmentRepository {
       );
     }
     if (cascadedOrderStatus !== undefined) {
-      await logShipmentStatusTransition(
+      await logOrderFieldChange(
         shipmentId,
         plainShipmentBeforeUpdate.status,
         cascadedOrderStatus,
         userId,
         "status",
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(nextPayload, "shippingFees")) {
+      await logOrderFieldChange(
+        shipmentId,
+        plainShipmentBeforeUpdate.shippingFees,
+        nextPayload.shippingFees,
+        userId,
+        "shippingFees",
+      );
+      await logOrderFieldChange(
+        shipmentId,
+        plainShipmentBeforeUpdate.toBeCollected,
+        nextPayload.toBeCollected,
+        userId,
+        "toBeCollected",
       );
     }
     return shipment;

@@ -233,6 +233,7 @@ export type OrderDetailsView = {
     downPayment: number;
     fine: number;
     shippingFees: number;
+    subTotalPrice: number;
     totalCost: number;
     totalPrice: number;
   };

@@ -751,7 +751,7 @@ export class OrderRepository {
         name: `${toText(customer.firstName)} ${toText(customer.lastName)}`.trim(),
         phoneNumber: toText(customer.phoneNumber),
       },
-      financial: { amountToCollect: getOrderCollectionAmount(plainOrder), commission: toNumber(plainOrder.commission), discount: toNumber(plainOrder.totalDiscounts), downPayment: toNumber(plainOrder.downPayment), fine: toNumber(plainOrder.fine), shippingFees: toNumber(plainOrder.shippingFees), totalCost: toNumber(plainOrder.totalCost), totalPrice: toNumber(plainOrder.totalPrice) },
+      financial: { amountToCollect: getOrderCollectionAmount(plainOrder), commission: toNumber(plainOrder.commission), discount: toNumber(plainOrder.totalDiscounts), downPayment: toNumber(plainOrder.downPayment), fine: toNumber(plainOrder.fine), shippingFees: toNumber(plainOrder.shippingFees), subTotalPrice: toNumber(plainOrder.subTotalPrice), totalCost: toNumber(plainOrder.totalCost), totalPrice: toNumber(plainOrder.totalPrice) },
       notes,
       order: {
         ...summary,

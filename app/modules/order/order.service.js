@@ -365,6 +365,14 @@ class OrderService {
           subTotalPrice += normalizeNumber(line.price) * line.quantity;
           total_discounts += line.discount || 0;
         });
+        /* Per-line `discount` only exists for Shopify imports (discount_allocations).
+           Manual order creation sends a single order-level discount instead
+           (normalizeOrderMutationPayload's `totalDiscounts`/`discount`) — respect it
+           when present, or every manually-entered discount silently becomes 0. */
+        const explicitOrderDiscount = order.totalDiscounts ?? order.discount;
+        if (explicitOrderDiscount !== undefined && explicitOrderDiscount !== null && explicitOrderDiscount !== "") {
+          total_discounts = normalizeNumber(explicitOrderDiscount);
+        }
         const customerKey = order.id
           ? order.customer.id
           : `${

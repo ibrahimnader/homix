@@ -775,6 +775,7 @@ export class OrderRepository {
           image: toText(product.image),
           itemType: toText(type.name),
           material: toText(plainLine.material),
+          price: toNumber(plainLine.price),
           productId: toNumber(product.id) || null,
           productName: toText(product.title, toText(plainLine.title)),
           quantity: toNumber(plainLine.quantity),

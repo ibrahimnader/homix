@@ -252,6 +252,7 @@ export type OrderDetailsView = {
     image: string;
     itemType: string;
     material: string;
+    price: number;
     productId: number | null;
     productName: string;
     quantity: number;

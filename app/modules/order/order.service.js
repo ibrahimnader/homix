@@ -283,10 +283,16 @@ class OrderService {
       const weights = splits.map((split) => getOrderLineItemsTotal(split.line_items));
       const shippingShares = distributeAmountByWeight(getShopifyShippingTotal(order), weights);
       const downPaymentShares = distributeAmountByWeight(order.downPayment, weights);
+      /* Manual order creation sends one order-level discount (order.totalDiscounts /
+         order.discount), same as shipping and down payment — it belongs to the whole
+         order, not to each split, so it needs the same proportional-share treatment
+         or every split ends up carrying the full discount amount. */
+      const discountShares = distributeAmountByWeight(order.totalDiscounts ?? order.discount ?? 0, weights);
 
       splits.forEach((split, index) => {
         split.__shippingShare = shippingShares[index];
         split.__downPaymentShare = downPaymentShares[index];
+        split.__discountShare = discountShares[index];
       });
 
       orders.push(...splits);
@@ -367,11 +373,12 @@ class OrderService {
         });
         /* Per-line `discount` only exists for Shopify imports (discount_allocations).
            Manual order creation sends a single order-level discount instead
-           (normalizeOrderMutationPayload's `totalDiscounts`/`discount`) — respect it
-           when present, or every manually-entered discount silently becomes 0. */
-        const explicitOrderDiscount = order.totalDiscounts ?? order.discount;
-        if (explicitOrderDiscount !== undefined && explicitOrderDiscount !== null && explicitOrderDiscount !== "") {
-          total_discounts = normalizeNumber(explicitOrderDiscount);
+           (normalizeOrderMutationPayload's `totalDiscounts`/`discount`) — use this
+           split's proportional share of it (computed above, same as shipping and
+           down payment), or every split ends up carrying the full discount amount
+           instead of splitting it. */
+        if (order.__discountShare !== undefined) {
+          total_discounts = normalizeNumber(order.__discountShare);
         }
         const customerKey = order.id
           ? order.customer.id

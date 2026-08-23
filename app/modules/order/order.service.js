@@ -286,13 +286,25 @@ class OrderService {
       /* Manual order creation sends one order-level discount (order.totalDiscounts /
          order.discount), same as shipping and down payment — it belongs to the whole
          order, not to each split, so it needs the same proportional-share treatment
-         or every split ends up carrying the full discount amount. */
-      const discountShares = distributeAmountByWeight(order.totalDiscounts ?? order.discount ?? 0, weights);
+         or every split ends up carrying the full discount amount. Shopify imports
+         never set either key (Shopify's own field is the snake_case
+         `total_discounts`, handled separately per line via `line.discount`), so only
+         compute a share when one of these was actually provided — distributeAmountByWeight
+         always returns a defined (zero-filled) array, so an unconditional call here would
+         silently wipe out every Shopify order's real per-line discount total below. */
+      const hasOrderLevelDiscount = [order.totalDiscounts, order.discount].some(
+        (value) => value !== undefined && value !== null && value !== "",
+      );
+      const discountShares = hasOrderLevelDiscount
+        ? distributeAmountByWeight(order.totalDiscounts ?? order.discount, weights)
+        : null;
 
       splits.forEach((split, index) => {
         split.__shippingShare = shippingShares[index];
         split.__downPaymentShare = downPaymentShares[index];
-        split.__discountShare = discountShares[index];
+        if (discountShares) {
+          split.__discountShare = discountShares[index];
+        }
       });
 
       orders.push(...splits);

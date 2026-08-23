@@ -57,6 +57,7 @@ export type OrderListItem = {
   manufactureStatus: number | null;
   manufactureStatusLabel: string;
   operationNumber: string;
+  poDate: string | null;
   orderSource: number | null;
   orderSourceLabel: string;
   orderDate: string | null;

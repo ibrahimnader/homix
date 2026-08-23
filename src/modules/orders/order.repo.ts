@@ -516,6 +516,8 @@ const mapOrderSummary = (value: unknown): OrderListItem => {
     expectedDeliveryDate: toIsoString(order.expectedDeliveryDate),
     fine: toNumber(order.fine),
     id: toNumber(order.id),
+    /** تاريخ التصنيع — يُختم فقط عند تحويل حالة الطلب إلى «قيد التصنيع» (order.service.js). */
+    poDate: toIsoString(order.PoDate),
     manufactureStatus: toNumber(order.manufactureStatus) || null,
     manufactureStatusLabel: getManufactureLabel(order.manufactureStatus),
     operationNumber: toText(order.code),

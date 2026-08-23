@@ -238,17 +238,18 @@ export class ShipmentService {
     const exportRows = report.items.map((item) => ({
       ...item,
       accountingDate: item.accountingDate?.slice(0, 10) ?? "",
+      deliveryDate: item.deliveryDate?.slice(0, 10) ?? "",
     }));
     await this.writeAccountsWorkbook(response, "delivery-accounts.xlsx", "deliveries", [
       { header: "رقم العملية", key: "operationNumber", width: 18 },
       { header: "رقم الطلب", key: "orderNumber", width: 18 },
       { header: "البائع", key: "sellerName", width: 24 },
       { header: "كود المنتج", key: "productCode", width: 18 },
-      { header: "التوصيل بواسطة", key: "deliveryBy", width: 22 },
-      { header: "تاريخ التسليم", key: "deliveryDate", width: 22 },
+      { header: "شركة الشحن", key: "shippingCompanyName", width: 22 },
+      { header: "تاريخ التسليم الفعلي", key: "deliveryDate", width: 22 },
       { header: "طريقة الدفع", key: "paymentMethodLabel", width: 20 },
-      { header: "المبلغ", key: "amountToCollect", width: 16 },
-      { header: "تكلفة الشحن", key: "shippingCost", width: 16 },
+      { header: "المبلغ المطلوب تحصيله", key: "amountToCollect", width: 18 },
+      { header: "المبلغ المستلم", key: "receivedAmount", width: 16 },
       { header: "حالة المحاسبة", key: "accountingStatusLabel", width: 20 },
       { header: "تاريخ المحاسبة", key: "accountingDate", width: 22 },
       { header: "المرجع", key: "reference", width: 22 },

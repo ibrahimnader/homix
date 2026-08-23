@@ -109,6 +109,17 @@ export class ShipmentController {
     response.status(200).json({ ...unwrap(await this.shipmentService.updateDeliveryAccount(Number(request.params.orderId), request.body)), status: true });
   };
 
+  /** "المرجع" هو مرفق مرفوع لا نص حر — يستقبل ملفًا واحدًا ويخزّن مساره في نفس حقل accountingReference. */
+  public uploadDeliveryAccountReference = async (request: Request, response: Response): Promise<void> => {
+    const filePath = (request.filePaths ?? [])[0];
+    if (!filePath) {
+      response.status(400).json({ message: "No file uploaded", status: false });
+      return;
+    }
+    await this.shipmentService.updateDeliveryAccount(Number(request.params.orderId), { accountingReference: filePath });
+    response.status(200).json({ data: { reference: filePath }, status: true });
+  };
+
   public bulkUpdateDeliveryAccounts = async (request: Request, response: Response): Promise<void> => {
     response.status(200).json({
       data: unwrap(await this.shipmentService.bulkUpdateDeliveryAccounts(request.body.orderIds, request.body.data)),

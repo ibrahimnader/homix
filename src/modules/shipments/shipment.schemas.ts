@@ -73,23 +73,12 @@ export const shipmentSummaryQuerySchema = shipmentListQuerySchema.omit({
   size: true,
 });
 
+/* Every filter the list view supports must also work in export — this used to omit
+   most of them (governorate, the date-range filters, shipmentStatus/Type, deliveryBy,
+   scheduleStatus, operationCode, customerName/Phone), so exporting with any of those
+   filters applied silently ignored them and downloaded everything. */
 export const shipmentExportQuerySchema = shipmentListQuerySchema.omit({
-  customerName: true,
-  customerPhone: true,
-  deliveryBy: true,
-  deliveryDateFrom: true,
-  deliveryDateTo: true,
-  governorate: true,
-  operationCode: true,
-  orderSource: true,
   page: true,
-  priority: true,
-  scheduleStatus: true,
-  scheduledDateFrom: true,
-  scheduledDateTo: true,
-  shipmentNumber: true,
-  shipmentStatus: true,
-  shipmentType: true,
   size: true,
 }).extend({
   financialStatus: z.string().trim().optional(),

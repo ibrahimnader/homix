@@ -10,6 +10,7 @@ const Vendor = require("../vendor/vendor.model");
 const Customer = require("../customer/customer.model");
 const Note = require("../notes/notes.model");
 const User = require("../user/user.model");
+const ShippingCompany = require("./shippingCompany.model");
 const {
   SHIPMENT_STATUS,
   USER_TYPES,
@@ -428,9 +429,22 @@ class ShipmentService {
       vendorName,
       vendorId,
       orderNumber,
+      operationCode,
+      customerName,
+      customerPhone,
       financialStatus,
       status,
       deliveryStatus,
+      shipmentStatus,
+      shipmentType,
+      deliveryBy,
+      shippingCompany,
+      scheduleStatus,
+      governorate,
+      deliveryDateFrom,
+      deliveryDateTo,
+      scheduledDateFrom,
+      scheduledDateTo,
       startDate,
       endDate,
       vendorUser,
@@ -460,6 +474,123 @@ class ShipmentService {
           }),
         ],
       });
+    }
+
+    if (operationCode) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.fn("lower", sequelize.col("Order.code")), {
+          [Op.like]: `%${operationCode.toLowerCase()}%`,
+        })
+      );
+    }
+
+    if (customerName) {
+      whereClause[Op.and].push(
+        sequelize.where(
+          sequelize.fn(
+            "lower",
+            sequelize.fn(
+              "concat",
+              sequelize.col("customer.firstName"),
+              " ",
+              sequelize.col("customer.lastName")
+            )
+          ),
+          { [Op.like]: `%${customerName.toLowerCase()}%` }
+        )
+      );
+    }
+
+    if (customerPhone) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("customer.phoneNumber"), {
+          [Op.like]: `%${customerPhone}%`,
+        })
+      );
+    }
+
+    if (shipmentStatus) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.shipmentStatus"), {
+          [Op.in]: shipmentStatus.split(",").map(Number),
+        })
+      );
+    }
+
+    if (shipmentType) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.fn("lower", sequelize.col("Order.shipmentType")), {
+          [Op.in]: shipmentType.split(",").map((value) => value.trim().toLowerCase()).filter(Boolean),
+        })
+      );
+    }
+
+    if (deliveryBy) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.deliveryBy"), {
+          [Op.in]: deliveryBy.split(",").map(Number),
+        })
+      );
+    }
+
+    if (scheduleStatus) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.scheduleStatus"), {
+          [Op.in]: scheduleStatus.split(",").map(Number),
+        })
+      );
+    }
+
+    if (governorate) {
+      /* governorate is stored as free text on newer rows but as the numeric id
+         on older ones — a selected id has to match either representation. */
+      const ids = governorate.split(",").map(Number).filter(Number.isFinite);
+      const values = ids.flatMap((id) => [String(id), GOVERNORATE_LABELS[id]]).filter(Boolean);
+      if (values.length) {
+        whereClause[Op.and].push(
+          sequelize.where(sequelize.col("Order.governorate"), { [Op.in]: values })
+        );
+      }
+    }
+
+    if (shippingCompany) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("shippingCompanyRecord.id"), {
+          [Op.in]: shippingCompany.split(",").map(Number).filter((id) => Number.isFinite(id)),
+        })
+      );
+    }
+
+    if (deliveryDateFrom) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.deliveryDate"), {
+          [Op.gte]: moment.tz(new Date(deliveryDateFrom), "Africa/Cairo").startOf("day").utc().toDate(),
+        })
+      );
+    }
+
+    if (deliveryDateTo) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.deliveryDate"), {
+          [Op.lte]: moment.tz(new Date(deliveryDateTo), "Africa/Cairo").endOf("day").utc().toDate(),
+        })
+      );
+    }
+
+    if (scheduledDateFrom) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.scheduledDeliveryDate"), {
+          [Op.gte]: moment.tz(new Date(scheduledDateFrom), "Africa/Cairo").startOf("day").utc().toDate(),
+        })
+      );
+    }
+
+    if (scheduledDateTo) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.scheduledDeliveryDate"), {
+          [Op.lte]: moment.tz(new Date(scheduledDateTo), "Africa/Cairo").endOf("day").utc().toDate(),
+        })
+      );
     }
 
     if (financialStatus) {
@@ -627,47 +758,57 @@ class ShipmentService {
     let offset = 0;
     let hasMore = true;
 
-    while (hasMore) {
-      const chunk = await Shipment.findAll({
+    const exportIncludes = [
+      {
+        model: OrderLine,
+        required: true,
+        as: "orderLines",
         include: [
           {
-            model: OrderLine,
+            model: Product,
+            as: "product",
             required: true,
-            as: "orderLines",
             include: [
               {
-                model: Product,
-                as: "product",
+                model: Vendor,
+                as: "vendor",
                 required: true,
-                include: [
-                  {
-                    model: Vendor,
-                    as: "vendor",
-                    required: true,
-                  },
-                  {
-                    model: ProductType,
-                    as: "type",
-                    attributes: ["name"],
-                    required: false,
-                  },
-                ],
+              },
+              {
+                model: ProductType,
+                as: "type",
+                attributes: ["name"],
+                required: false,
               },
             ],
           },
-          {
-            model: Customer,
-            as: "customer",
-            required: false,
-            attributes: ["id", "firstName", "lastName"],
-          },
-          {
-            model: User,
-            as: "user",
-            required: false,
-            attributes: ["firstName", "lastName"],
-          },
         ],
+      },
+      {
+        model: Customer,
+        as: "customer",
+        required: Boolean(customerName || customerPhone),
+        attributes: ["id", "firstName", "lastName"],
+      },
+      {
+        model: User,
+        as: "user",
+        required: false,
+        attributes: ["firstName", "lastName"],
+      },
+    ];
+    if (shippingCompany) {
+      exportIncludes.push({
+        model: ShippingCompany,
+        as: "shippingCompanyRecord",
+        required: true,
+        attributes: [],
+      });
+    }
+
+    while (hasMore) {
+      const chunk = await Shipment.findAll({
+        include: exportIncludes,
         where: whereClause,
         order: exportOrder,
         offset,

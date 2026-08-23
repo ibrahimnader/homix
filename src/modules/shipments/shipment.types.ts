@@ -294,17 +294,18 @@ export type DeliveryAccountItem = {
   accountingStatus: number;
   accountingStatusLabel: string;
   amountToCollect: number;
-  deliveryBy: string;
   deliveryDate: string | null;
   operationNumber: string;
   orderNumber: string;
   paymentMethod: string;
   paymentMethodLabel: string;
   productCode: string;
+  /** ما استُلم فعليًا — يُفترض مساويًا للمبلغ المطلوب تحصيله ما لم يُعدَّل صراحةً. */
+  receivedAmount: number;
   reference: string;
   sellerName: string;
   sellingPrice: number;
-  shippingCost: number;
+  shippingCompanyName: string;
 };
 
 export type DeliveryAccountsListResponse = {

@@ -1540,14 +1540,14 @@ export class ShipmentRepository {
       const accountingStatus = storedAccountingStatus
         ?? (paymentStatus === 2 ? ACCOUNTING_STATUS.SETTLED : ACCOUNTING_STATUS.PENDING);
       const deliveryBy = toNullableNumber(order.deliveryBy);
+      const amountToCollect = toNumber(order.toBeCollected || order.totalPrice);
+      const storedReceivedAmount = toNumber(order.receivedAmount);
 
       return {
         accountingDate: toIsoString(order.accountingDate ?? order.updatedAt),
         accountingStatus,
         accountingStatusLabel: ACCOUNT_STATUS_LABELS[accountingStatus] ?? String(accountingStatus),
-        amountToCollect: toNumber(order.toBeCollected || order.totalPrice),
-        deliveryBy: toText(toPlain(order.shippingCompanyRecord).name, toText(order.shippingCompany))
-          || (deliveryBy ? DELIVERY_BY_LABELS[deliveryBy] ?? String(deliveryBy) : ""),
+        amountToCollect,
         deliveryDate: toIsoString(order.deliveryDate),
         id: toNumber(order.id),
         operationNumber: normalizeOperationCode(order.code),
@@ -1555,10 +1555,13 @@ export class ShipmentRepository {
         paymentMethod: String(paymentStatus || ""),
         paymentMethodLabel: PAYMENT_STATUS_LABELS[paymentStatus] ?? "",
         productCode: toText(firstLine.sku),
+        // لسه محدش عدّل المبلغ المستلم فعليًا => افترض إنه اتحصّل بالكامل.
+        receivedAmount: storedReceivedAmount > 0 ? storedReceivedAmount : amountToCollect,
         reference: toText(order.accountingReference, toText(order.shopifyId)),
         sellerName: toText(vendor.name),
         sellingPrice: toNumber(firstLine.price) * Math.max(1, toNumber(firstLine.quantity)),
-        shippingCost: toNumber(order.shippingFees),
+        shippingCompanyName: toText(toPlain(order.shippingCompanyRecord).name, toText(order.shippingCompany))
+          || (deliveryBy ? DELIVERY_BY_LABELS[deliveryBy] ?? String(deliveryBy) : ""),
       } satisfies DeliveryAccountItem;
     }).filter((item: DeliveryAccountItem) => {
       if (filters.orderNumber && !item.orderNumber.toLowerCase().includes(filters.orderNumber.toLowerCase())) {

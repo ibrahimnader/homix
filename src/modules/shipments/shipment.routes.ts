@@ -43,6 +43,7 @@ import { ShipmentService } from "./shipment.service";
 const verifyToken = require("../../../app/middlewares/protectApi");
 const isNotVendor = require("../../../app/middlewares/isNotVendor");
 const requirePermission = require("../../../app/middlewares/requirePermission");
+const fileUploadMiddleware = require("../../../config/fileUploadMiddleware");
 
 const shipmentRepository = new ShipmentRepository();
 const shipmentService = new ShipmentService(shipmentRepository);
@@ -990,6 +991,45 @@ shipmentRouter.put(
   requirePermission("finance_settle"),
   validateRequest({ body: shipmentDeliveryAccountMutationSchema, params: shipmentDeliveryAccountParamsSchema }),
   asyncHandler(shipmentController.updateDeliveryAccount),
+);
+
+/**
+ * @swagger
+ * /shipments/accounts/deliveries/{orderId}/reference:
+ *   post:
+ *     security:
+ *       - bearerAuth: []
+ *     tags: [Shipments]
+ *     summary: Attach the reference document for a delivery's accounting record
+ *     description: "المرجع" is a single uploaded file (image or PDF), not free text — this stores it and records its path as the delivery's accountingReference.
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               files:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Reference attachment saved
+ *       400:
+ *         description: No file uploaded
+ */
+shipmentRouter.post(
+  "/accounts/deliveries/:orderId/reference",
+  requirePermission("finance_settle"),
+  validateRequest({ params: shipmentDeliveryAccountParamsSchema }),
+  fileUploadMiddleware("delivery-reference"),
+  asyncHandler(shipmentController.uploadDeliveryAccountReference),
 );
 
 /**

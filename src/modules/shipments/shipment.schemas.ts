@@ -232,6 +232,8 @@ export const shipmentDeliveryAccountMutationSchema = z.object({
   accountingDate: dateString.optional().nullable(),
   accountingReference: z.string().trim().optional(),
   accountingStatus: z.coerce.number().int().positive().optional(),
+  /** يخفي السجل عن تبويب الحسابات فقط — لا يمسّ الطلب/الشحنة نفسها. */
+  hidden: z.boolean().optional(),
 }).refine((value) => Object.keys(value).length > 0, "No fields to update");
 
 export const shipmentDeliveryAccountBulkMutationSchema = z.object({

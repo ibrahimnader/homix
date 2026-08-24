@@ -237,6 +237,12 @@ const Order = sequelize.define(
         isIn: [[1, 2]],
       },
     },
+    // Hides a row from the deliveries accounting ledger only — the order/shipment
+    // itself is untouched everywhere else. Null means "visible" (the default).
+    accountsHiddenAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
     accountingDate: {
       type: DataTypes.DATE,
       allowNull: true,

@@ -1450,7 +1450,7 @@ export class ShipmentRepository {
    */
   public async updateDeliveryAccount(
     orderId: number,
-    payload: { accountingDate?: string | null; accountingReference?: string; accountingStatus?: number },
+    payload: { accountingDate?: string | null; accountingReference?: string; accountingStatus?: number; hidden?: boolean },
   ): Promise<boolean> {
     const order = await orderModel.findByPk(orderId);
     if (!order) {
@@ -1474,6 +1474,9 @@ export class ShipmentRepository {
           : nextStatus === ACCOUNTING_STATUS.PENDING
             ? { accountingDate: null }
             : {}),
+      // Hides/unhides the row from the accounting ledger only — never touches
+      // the order or shipment itself.
+      ...(payload.hidden !== undefined ? { accountsHiddenAt: payload.hidden ? new Date() : null } : {}),
     });
 
     return true;
@@ -1514,6 +1517,7 @@ export class ShipmentRepository {
     const whereClause: Record<PropertyKey, unknown> = {
       ...buildHomixShipmentScope(),
       shipmentStatus: SHIPMENT_STATUS.DELIVERED,
+      accountsHiddenAt: null,
     };
 
     const result = await orderModel.findAndCountAll({

@@ -534,22 +534,51 @@ class ShipmentService {
     }
 
     if (scheduleStatus) {
-      whereClause[Op.and].push(
-        sequelize.where(sequelize.col("Order.scheduleStatus"), {
-          [Op.in]: scheduleStatus.split(",").map(Number),
-        })
-      );
+      const tokens = scheduleStatus.split(",").map((value) => value.trim()).filter(Boolean);
+      const statuses = tokens
+        .filter((value) => value !== "__blank__")
+        .map(Number)
+        .filter(Number.isFinite);
+      const scheduleConditions = [];
+      if (statuses.length) {
+        scheduleConditions.push(
+          sequelize.where(sequelize.col("Order.scheduleStatus"), { [Op.in]: statuses })
+        );
+      }
+      if (tokens.includes("__blank__")) {
+        scheduleConditions.push(
+          sequelize.where(sequelize.col("Order.scheduleStatus"), { [Op.is]: null })
+        );
+      }
+      if (scheduleConditions.length === 1) {
+        whereClause[Op.and].push(scheduleConditions[0]);
+      } else if (scheduleConditions.length > 1) {
+        whereClause[Op.and].push({ [Op.or]: scheduleConditions });
+      }
     }
 
     if (governorate) {
       /* governorate is stored as free text on newer rows but as the numeric id
          on older ones — a selected id has to match either representation. */
-      const ids = governorate.split(",").map(Number).filter(Number.isFinite);
+      const tokens = governorate.split(",").map((value) => value.trim()).filter(Boolean);
+      const ids = tokens.filter((value) => value !== "__blank__").map(Number).filter(Number.isFinite);
       const values = ids.flatMap((id) => [String(id), GOVERNORATE_LABELS[id]]).filter(Boolean);
+      const governorateConditions = [];
       if (values.length) {
-        whereClause[Op.and].push(
+        governorateConditions.push(
           sequelize.where(sequelize.col("Order.governorate"), { [Op.in]: values })
         );
+      }
+      if (tokens.includes("__blank__")) {
+        governorateConditions.push(
+          sequelize.where(sequelize.col("Order.governorate"), { [Op.is]: null }),
+          sequelize.where(sequelize.col("Order.governorate"), { [Op.eq]: "" })
+        );
+      }
+      if (governorateConditions.length === 1) {
+        whereClause[Op.and].push(governorateConditions[0]);
+      } else if (governorateConditions.length > 1) {
+        whereClause[Op.and].push({ [Op.or]: governorateConditions });
       }
     }
 

@@ -262,9 +262,23 @@ const buildShipmentWhereClause = (
   }
 
   if (filters.scheduleStatus) {
-    andConditions.push(where(col("Order.scheduleStatus"), {
-      [Op.in]: filters.scheduleStatus.split(",").map(Number),
-    }));
+    const tokens = filters.scheduleStatus.split(",").map((value) => value.trim()).filter(Boolean);
+    const statuses = tokens
+      .filter((value) => value !== "__blank__")
+      .map(Number)
+      .filter(Number.isFinite);
+    const scheduleConditions: unknown[] = [];
+    if (statuses.length > 0) {
+      scheduleConditions.push(where(col("Order.scheduleStatus"), { [Op.in]: statuses }));
+    }
+    if (tokens.includes("__blank__")) {
+      scheduleConditions.push(where(col("Order.scheduleStatus"), { [Op.is]: null }));
+    }
+    if (scheduleConditions.length === 1) {
+      andConditions.push(scheduleConditions[0]);
+    } else if (scheduleConditions.length > 1) {
+      andConditions.push({ [Op.or]: scheduleConditions });
+    }
   }
 
   if (filters.shipmentType) {
@@ -293,10 +307,23 @@ const buildShipmentWhereClause = (
     /* governorate is stored as free text on newer rows but as the numeric id
        on older ones (see resolveGovernorateLabel), so a selected id has to
        match either representation. */
-    const ids = filters.governorate.split(",").map(Number).filter(Number.isFinite);
+    const tokens = filters.governorate.split(",").map((value) => value.trim()).filter(Boolean);
+    const ids = tokens.filter((value) => value !== "__blank__").map(Number).filter(Number.isFinite);
     const values = ids.flatMap((id) => [String(id), GOVERNORATE_LABELS[id]]).filter(Boolean) as string[];
+    const governorateConditions: unknown[] = [];
     if (values.length > 0) {
-      andConditions.push(where(col("Order.governorate"), { [Op.in]: values }));
+      governorateConditions.push(where(col("Order.governorate"), { [Op.in]: values }));
+    }
+    if (tokens.includes("__blank__")) {
+      governorateConditions.push(
+        where(col("Order.governorate"), { [Op.is]: null }),
+        where(col("Order.governorate"), { [Op.eq]: "" }),
+      );
+    }
+    if (governorateConditions.length === 1) {
+      andConditions.push(governorateConditions[0]);
+    } else if (governorateConditions.length > 1) {
+      andConditions.push({ [Op.or]: governorateConditions });
     }
   }
 

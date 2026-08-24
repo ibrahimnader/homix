@@ -695,6 +695,8 @@ describe("shipmentRouter", () => {
     const response = await request(app).get("/shipments/export").query({
       sort: { orderDate: -1 },
       orderNumber: "31667",
+      governorate: "__blank__",
+      scheduleStatus: "__blank__",
       startDate: "2026-05-01",
       endDate: "2026-05-02",
     });
@@ -704,7 +706,9 @@ describe("shipmentRouter", () => {
       expect.any(Object),
       expect.objectContaining({
         endDate: "2026-05-02",
+        governorate: "__blank__",
         orderNumber: "31667",
+        scheduleStatus: "__blank__",
         sort: { orderDate: -1 },
         startDate: "2026-05-01",
       }),
@@ -740,6 +744,35 @@ describe("shipmentRouter", () => {
         }),
       }),
     );
+  });
+
+  it("filters shipments with no schedule status", async () => {
+    const response = await request(app).get("/shipments").query({ page: 1, scheduleStatus: "__blank__", size: 20 });
+
+    expect(response.status).toBe(200);
+    const whereClause = orderModel.findAndCountAll.mock.calls[0][0].where as Record<PropertyKey, unknown>;
+    const conditions = whereClause[Op.and] as Array<{ logic?: Record<PropertyKey, unknown> }>;
+    expect(conditions).toContainEqual(expect.objectContaining({
+      logic: expect.objectContaining({ [Op.is]: null }),
+    }));
+  });
+
+  it("filters shipments with no governorate", async () => {
+    const response = await request(app).get("/shipments").query({ governorate: "__blank__", page: 1, size: 20 });
+
+    expect(response.status).toBe(200);
+    const whereClause = orderModel.findAndCountAll.mock.calls[0][0].where as Record<PropertyKey, unknown>;
+    const conditions = whereClause[Op.and] as Array<Record<PropertyKey, unknown>>;
+    const blankGovernorate = conditions.find((condition) => {
+      const alternatives = condition[Op.or] as Array<{ logic?: Record<PropertyKey, unknown> }> | undefined;
+      return Array.isArray(alternatives)
+        && alternatives.some((alternative) => alternative.logic?.[Op.is] === null)
+        && alternatives.some((alternative) => alternative.logic?.[Op.eq] === "");
+    });
+    expect(blankGovernorate?.[Op.or]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ logic: expect.objectContaining({ [Op.is]: null }) }),
+      expect.objectContaining({ logic: expect.objectContaining({ [Op.eq]: "" }) }),
+    ]));
   });
 
   it("filters shipments by shipping company id", async () => {

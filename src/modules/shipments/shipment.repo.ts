@@ -2157,7 +2157,10 @@ export class ShipmentRepository {
 
     const plainShipmentBeforeUpdate = toPlain(shipment);
     const nextPayload = await this.normalizeShippingCompanyPayload(payload);
-    if (Object.prototype.hasOwnProperty.call(nextPayload, "receivedAmount")) {
+    if (
+      Object.prototype.hasOwnProperty.call(nextPayload, "receivedAmount")
+      && toNumber(nextPayload.receivedAmount) !== toNumber(plainShipmentBeforeUpdate.receivedAmount)
+    ) {
       nextPayload.receivedAmountManuallySet = true;
     }
     if (

@@ -1068,10 +1068,10 @@ describe("shipmentRouter", () => {
     }));
   });
 
-  it("marks the received amount as manual even when the user enters zero", async () => {
+  it("marks the received amount as manual when the user changes it to zero", async () => {
     const shipmentRecord = makeShipmentRecord({
       id: 9802,
-      receivedAmount: 0,
+      receivedAmount: 500,
       receivedAmountManuallySet: false,
     });
     orderModel.findByPk.mockResolvedValue(shipmentRecord);
@@ -1081,6 +1081,29 @@ describe("shipmentRouter", () => {
     expect(response.status).toBe(200);
     expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({
       receivedAmount: 0,
+      receivedAmountManuallySet: true,
+    }));
+  });
+
+  it("does not mark the creation-time zero as manual when it was not changed", async () => {
+    const shipmentRecord = makeShipmentRecord({
+      id: 9802,
+      receivedAmount: 0,
+      receivedAmountManuallySet: false,
+    });
+    orderModel.findByPk.mockResolvedValue(shipmentRecord);
+
+    const response = await request(app).put("/shipments/9802").send({
+      receivedAmount: 0,
+      shipmentType: "separate",
+    });
+
+    expect(response.status).toBe(200);
+    expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      receivedAmount: 0,
+      shipmentType: "separate",
+    }));
+    expect(shipmentRecord.update).not.toHaveBeenCalledWith(expect.objectContaining({
       receivedAmountManuallySet: true,
     }));
   });

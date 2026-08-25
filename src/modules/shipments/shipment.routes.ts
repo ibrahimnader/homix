@@ -423,7 +423,9 @@ shipmentRouter.delete(
  */
 shipmentRouter.get(
   "/export",
-  requirePermission("finance_export"),
+  // The workbook contains the same shipment rows granted by ship_view; it is
+  // not a financial report and must remain available to logistics users.
+  requirePermission("ship_view"),
   validateRequest({ query: shipmentExportQuerySchema }),
   asyncHandler(shipmentController.exportShipments),
 );
@@ -908,7 +910,7 @@ shipmentRouter.get(
 
 shipmentRouter.get(
   "/accounts/deliveries/export",
-  requirePermission("finance_export"),
+  requirePermission("ship_delivery_accounts_view"),
   validateRequest({ query: shipmentDeliveryAccountsExportQuerySchema }),
   asyncHandler(shipmentController.exportDeliveryAccounts),
 );
@@ -1026,7 +1028,9 @@ shipmentRouter.put(
  */
 shipmentRouter.post(
   "/accounts/deliveries/:orderId/reference",
-  requirePermission("finance_settle"),
+  // Logistics owns shipment documents. Uploading a reference must not grant
+  // the separate finance_settle capability used to settle accounting rows.
+  requirePermission("ship_edit"),
   validateRequest({ params: shipmentDeliveryAccountParamsSchema }),
   fileUploadMiddleware("delivery-reference"),
   asyncHandler(shipmentController.uploadDeliveryAccountReference),
@@ -1095,7 +1099,7 @@ shipmentRouter.get(
 
 shipmentRouter.get(
   "/accounts/expenses/export",
-  requirePermission("finance_export"),
+  requirePermission("ship_expenses_view"),
   validateRequest({ query: shipmentExpenseAccountsExportQuerySchema }),
   asyncHandler(shipmentController.exportExpenseAccounts),
 );

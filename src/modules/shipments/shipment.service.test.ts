@@ -116,7 +116,7 @@ describe("ShipmentService", () => {
 
   it("creates vendor returns through the typed repository path", async () => {
     const repository = {
-      createReturnRecord: jest.fn().mockResolvedValue({ id: 41, status: 2 }),
+      createReturnRecord: jest.fn().mockResolvedValue({ id: 9802, orderId: 9802, status: 2 }),
     } as never;
 
     const service = new ShipmentService(repository);
@@ -124,7 +124,7 @@ describe("ShipmentService", () => {
     await expect(
       service.createVendorReturn({ orderId: 9802, reason: "منتج تالف", status: 2 }, { id: 7 }),
     ).resolves.toEqual({
-      data: { id: 41, status: 2 },
+      data: { id: 9802, orderId: 9802, status: 2 },
       ok: true,
     });
     expect((repository as unknown as { createReturnRecord: jest.Mock }).createReturnRecord)
@@ -134,17 +134,45 @@ describe("ShipmentService", () => {
   it("updates vendor returns through the typed repository path", async () => {
     const repository = {
       findReturnById: jest.fn().mockResolvedValue({ toJSON: () => ({ status: 2 }) }),
-      updateReturnRecord: jest.fn().mockResolvedValue({ id: 41, status: 3 }),
+      updateReturnRecord: jest.fn().mockResolvedValue({ id: 9802, orderId: 9802, status: 3 }),
     } as never;
 
     const service = new ShipmentService(repository);
 
     await expect(
-      service.updateVendorReturn(41, { status: 3 }, { id: 1, userType: "1" } as never),
+      service.updateVendorReturn(9802, { status: 3 }, { id: 1, userType: "1" } as never),
     ).resolves.toEqual({
-      data: { id: 41, status: 3 },
+      data: { id: 9802, orderId: 9802, status: 3 },
       ok: true,
     });
+  });
+
+  it("allows updating a vendor return derived from an order before its workflow row exists", async () => {
+    const repository = {
+      findReturnById: jest.fn().mockResolvedValue(null),
+      updateReturnRecord: jest.fn().mockResolvedValue({
+        id: 41,
+        orderId: 9802,
+        reason: "تم التواصل مع العميل للتسليم لكن لم يتم الرد",
+        status: 3,
+      }),
+    } as never;
+
+    const service = new ShipmentService(repository);
+    const payload = {
+      orderId: 9802,
+      reason: "تم التواصل مع العميل للتسليم لكن لم يتم الرد",
+      status: 3,
+    };
+
+    await expect(
+      service.updateVendorReturn(9802, payload, { id: 7, userType: "3" } as never),
+    ).resolves.toEqual({
+      data: expect.objectContaining({ orderId: 9802, reason: payload.reason, status: 3 }),
+      ok: true,
+    });
+    expect((repository as unknown as { updateReturnRecord: jest.Mock }).updateReturnRecord)
+      .toHaveBeenCalledWith(9802, 1, payload, 7);
   });
 
   it("blocks non-admin updates for forfeited vendor returns", async () => {

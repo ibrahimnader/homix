@@ -12,6 +12,8 @@ const binaryParser = (response: any, callback: (error: Error | null, body: any) 
   response.on("error", callback);
 };
 
+let mockAuthenticatedUser: Record<string, unknown> = { id: 1, userType: "1" };
+
 const orderModel = {
   count: jest.fn(),
   findAll: jest.fn(),
@@ -74,7 +76,7 @@ const mockReplaceManagedOptions = jest.fn(async (_group: string, options: Array<
 
 jest.mock("../../../app/middlewares/protectApi", () => {
   return (req: express.Request, _res: express.Response, next: express.NextFunction) => {
-    req.user = { id: 1, userType: "1" };
+    req.user = mockAuthenticatedUser as never;
     req.vendorId = null;
     next();
   };
@@ -230,6 +232,7 @@ const makeShipmentRecord = (overrides: Record<string, unknown> = {}) => {
 
 describe("shipmentRouter", () => {
   beforeEach(() => {
+    mockAuthenticatedUser = { id: 1, userType: "1" };
     jest.clearAllMocks();
     sequelizeQuery.mockResolvedValue([]);
     orderModel.count
@@ -718,6 +721,23 @@ describe("shipmentRouter", () => {
     );
   });
 
+  it("allows logistics users with shipment view access to export shipments", async () => {
+    mockAuthenticatedUser = {
+      id: 4,
+      permissions: { ship_view: true },
+      userType: "4",
+    };
+    legacyShipmentService.exportShipments.mockImplementation(async (res: express.Response) => {
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.status(200).end("ok");
+    });
+
+    const response = await request(app).get("/shipments/export");
+
+    expect(response.status).toBe(200);
+    expect(legacyShipmentService.exportShipments).toHaveBeenCalled();
+  });
+
   it("rejects invalid shipment export date filters", async () => {
     const response = await request(app).get("/shipments/export").query({
       startDate: "not-a-date",
@@ -986,7 +1006,8 @@ describe("shipmentRouter", () => {
     expect(response.status).toBe(201);
     expect(response.body.data).toEqual(
       expect.objectContaining({
-        id: 41,
+        id: 9802,
+        orderId: 9802,
         returnType: 1,
         status: 2,
         statusLabel: "تم إبلاغ المورد",
@@ -1011,31 +1032,24 @@ describe("shipmentRouter", () => {
   });
 
   it("updates vendor returns through persisted workflow storage", async () => {
-    const shipmentRecord = makeShipmentRecord({ id: 9802, shipmentStatus: 2 });
+    const shipmentRecord = makeShipmentRecord({ id: 9802, shipmentStatus: 8 });
     orderModel.findByPk.mockImplementation(async () => shipmentRecord);
-    const response = await request(app).put("/shipments/returns/vendor/41").send({
+    shipmentReturnModel.findOne.mockResolvedValue(await shipmentReturnModel.findByPk(41));
+    const response = await request(app).put("/shipments/returns/vendor/9802").send({
       status: 3,
     });
 
     expect(response.status).toBe(200);
     expect(response.body.data).toEqual(
       expect.objectContaining({
-        id: 41,
+        id: 9802,
+        orderId: 9802,
         returnType: 1,
         status: 3,
         statusLabel: "تم التسليم للمورد",
       }),
     );
-    expect(shipmentRecord.update).toHaveBeenCalledWith(
-      expect.objectContaining({ shipmentStatus: 8 }),
-    );
-    expect(logModel.create).toHaveBeenCalledWith(expect.objectContaining({
-      entityId: 9802,
-      field: "shipmentStatus",
-      from: "2",
-      to: "8",
-      userId: 1,
-    }));
+    expect(shipmentRecord.update).not.toHaveBeenCalled();
   });
 
   it("logs direct shipment status changes", async () => {
@@ -1051,6 +1065,53 @@ describe("shipmentRouter", () => {
       from: "2",
       to: "4",
       userId: 1,
+    }));
+  });
+
+  it("creates and updates a missing vendor-return row when the list exposed an order id", async () => {
+    const shipmentRecord = makeShipmentRecord({ id: 9802, shipmentStatus: 8 });
+    const returnState = {
+      completedAt: null as Date | null,
+      id: 9802,
+      orderId: 9802,
+      reason: "",
+      returnDate: "2026-08-25T00:00:00.000Z",
+      returnType: 1,
+      startedAt: "2026-08-25T00:00:00.000Z",
+      status: 2,
+    };
+    const updateReturn = jest.fn(async (payload: Record<string, unknown>) => {
+      Object.assign(returnState, payload);
+    });
+    shipmentReturnModel.findByPk.mockResolvedValue(null);
+    shipmentReturnModel.create.mockResolvedValue({
+      toJSON: () => ({ ...returnState }),
+      update: updateReturn,
+    });
+    orderModel.findByPk.mockResolvedValue(shipmentRecord);
+
+    const response = await request(app).put("/shipments/returns/vendor/9802").send({
+      orderId: 9802,
+      reason: "تم التواصل مع العميل للتسليم لكن لم يتم الرد",
+      returnDate: "2026-08-25T00:00:00.000Z",
+      status: 3,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual(expect.objectContaining({
+      id: 9802,
+      orderId: 9802,
+      reason: "تم التواصل مع العميل للتسليم لكن لم يتم الرد",
+      status: 3,
+      statusLabel: "تم التسليم للمورد",
+    }));
+    expect(shipmentReturnModel.create).toHaveBeenCalledWith(expect.objectContaining({
+      orderId: 9802,
+      returnType: 1,
+    }));
+    expect(updateReturn).toHaveBeenCalledWith(expect.objectContaining({
+      reason: "تم التواصل مع العميل للتسليم لكن لم يتم الرد",
+      status: 3,
     }));
   });
 
@@ -1084,7 +1145,7 @@ describe("shipmentRouter", () => {
     );
     expect(response.body.data.items[0]).toEqual(
       expect.objectContaining({
-        id: 77,
+        id: 9802,
         status: 4,
         statusLabel: "فورفيت",
       }),
@@ -1258,6 +1319,67 @@ describe("shipmentRouter", () => {
     );
   });
 
+  it("keeps an explicitly received amount of zero in delivery accounts", async () => {
+    orderModel.findAndCountAll.mockResolvedValueOnce({
+      count: 1,
+      rows: [makeShipment({ receivedAmount: 0, toBeCollected: 29998 })],
+    });
+
+    const response = await request(app)
+      .get("/shipments/accounts/deliveries")
+      .query({ page: 1, size: 20 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.items[0]).toEqual(expect.objectContaining({
+      accountingDate: null,
+      amountToCollect: 29998,
+      receivedAmount: 0,
+    }));
+  });
+
+  it("automatically stamps accountingDate when an account becomes settled", async () => {
+    const shipmentRecord = makeShipmentRecord({
+      accountingDate: null,
+      accountingStatus: 1,
+      id: 9802,
+      shipmentStatus: 4,
+    });
+    orderModel.findByPk.mockResolvedValue(shipmentRecord);
+
+    const beforeUpdate = Date.now();
+    const response = await request(app)
+      .put("/shipments/accounts/deliveries/9802")
+      .send({ accountingStatus: 2 });
+
+    expect(response.status).toBe(200);
+    expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      accountingDate: expect.any(Date),
+      accountingStatus: 2,
+    }));
+    const updatePayload = shipmentRecord.update.mock.calls[0]?.[0] as { accountingDate: Date };
+    expect(updatePayload.accountingDate.getTime()).toBeGreaterThanOrEqual(beforeUpdate);
+  });
+
+  it("allows manually editing the settlement accounting date", async () => {
+    const shipmentRecord = makeShipmentRecord({
+      accountingDate: "2026-08-24T00:00:00.000Z",
+      accountingStatus: 2,
+      id: 9802,
+      shipmentStatus: 4,
+    });
+    orderModel.findByPk.mockResolvedValue(shipmentRecord);
+
+    const response = await request(app)
+      .put("/shipments/accounts/deliveries/9802")
+      .send({ accountingDate: "2026-08-25T00:00:00.000Z", accountingStatus: 2 });
+
+    expect(response.status).toBe(200);
+    expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      accountingDate: new Date("2026-08-25T00:00:00.000Z"),
+      accountingStatus: 2,
+    }));
+  });
+
   it("exports delivery accounts as an Excel workbook", async () => {
     orderModel.findAndCountAll.mockResolvedValueOnce({
       count: 1,
@@ -1281,6 +1403,25 @@ describe("shipmentRouter", () => {
     expect(orderModel.findAndCountAll).toHaveBeenCalledWith(
       expect.objectContaining({ limit: 1_000_000 }),
     );
+  });
+
+  it("lets logistics upload a delivery-account reference without finance settlement access", async () => {
+    mockAuthenticatedUser = {
+      id: 4,
+      permissions: { ship_edit: true },
+      userType: "4",
+    };
+
+    // No file is intentional: reaching the controller's validation (400)
+    // proves the request passed permission checks; the old gate returned 403.
+    const response = await request(app)
+      .post("/shipments/accounts/deliveries/9802/reference");
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual(expect.objectContaining({
+      message: "No file uploaded",
+      status: false,
+    }));
   });
 
   it("exports expenses as an Excel workbook", async () => {

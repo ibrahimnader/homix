@@ -740,8 +740,11 @@ export class ShipmentRepository {
     return orderModel.findByPk(shipmentId);
   }
 
-  public async findReturnById(returnId: number): Promise<unknown | null> {
-    return shipmentReturnModel.findByPk(returnId);
+  public async findReturnById(orderId: number, returnType?: number): Promise<unknown | null> {
+    if (returnType !== undefined) {
+      return shipmentReturnModel.findOne({ where: { orderId, returnType } });
+    }
+    return shipmentReturnModel.findOne({ where: { orderId } });
   }
 
   public async findShippingCompanyById(shippingCompanyId: number): Promise<unknown | null> {
@@ -1150,7 +1153,9 @@ export class ShipmentRepository {
 
       return {
         daysCounter: getDaysBetween(startedAt, completedAt),
-        id: persistedReturn ? toNumber(persistedReturn.id) : toNumber(order.id),
+        // A return row is an order whose shipmentStatus is returned. Keep its
+        // public identity stable regardless of optional workflow metadata.
+        id: toNumber(order.id),
         orderId: toNumber(order.id),
         operationNumber: normalizeOperationCode(order.code),
         orderNumber: toText(order.orderNumber, toText(order.number, toText(order.name))),
@@ -1223,7 +1228,7 @@ export class ShipmentRepository {
 
     return {
       daysCounter: getDaysBetween(record.startedAt, record.completedAt),
-      id: toNumber(record.id),
+      id: toNumber(plainShipment.id),
       orderId: toNumber(plainShipment.id),
       operationNumber: normalizeOperationCode(plainShipment.code),
       orderNumber: toText(plainShipment.orderNumber, toText(plainShipment.number, toText(plainShipment.name))),
@@ -1237,56 +1242,35 @@ export class ShipmentRepository {
     };
   }
 
-  /**
-   * Creates the missing shipmentReturns row for an order that already carries a
-   * "returned" shipment status. Returns null when the id is not a matching order,
-   * so a genuinely unknown id still surfaces as not-found.
-   */
-  private async createReturnRecordForOrder(orderId: number, returnType: number): Promise<unknown | null> {
-    const order = await orderModel.findByPk(orderId);
-    if (!order) {
-      return null;
-    }
-
-    const plainOrder = toPlain(order);
-    if (toNumber(plainOrder.shipmentStatus) !== getShipmentStatusForReturnType(returnType)) {
-      return null;
-    }
-
-    const existingRecord = await shipmentReturnModel.findOne({
-      where: { orderId, returnType },
-    });
-    if (existingRecord) {
-      return existingRecord;
-    }
-
-    const startedAt = plainOrder.updatedAt ?? new Date();
-    return shipmentReturnModel.create({
-      completedAt: null,
-      orderId,
-      reason: "",
-      returnDate: startedAt,
-      returnType,
-      startedAt,
-      status: getFallbackReturnStatus(returnType),
-    });
-  }
-
   public async updateReturnRecord(
-    returnId: number,
+    orderId: number,
     returnType: number,
     payload: Partial<ReturnMutationInput>,
     userId?: number,
   ): Promise<ReturnItem | null> {
-    /* A shipment can be flipped to a "returned" status without a shipmentReturns
-       row ever being created; the list then falls back to exposing the order id.
-       So an id that matches no return row is treated as an order id and the
-       record is created on first edit, which is what gives those rows an
-       editable status and reason. */
-    const returnRecord = (await shipmentReturnModel.findByPk(returnId))
-      ?? (await this.createReturnRecordForOrder(returnId, returnType));
-    if (!returnRecord) {
+    const shipment = await orderModel.findByPk(orderId, { include: buildIncludes() });
+    if (!shipment) {
       return null;
+    }
+
+    const plainShipmentBeforeSync = toPlain(shipment);
+    const shipmentStatus = getShipmentStatusForReturnType(returnType);
+    if (toNumber(plainShipmentBeforeSync.shipmentStatus) !== shipmentStatus) {
+      return null;
+    }
+
+    let returnRecord = await shipmentReturnModel.findOne({ where: { orderId, returnType } });
+    if (!returnRecord) {
+      const startedAt = plainShipmentBeforeSync.updatedAt ?? new Date();
+      returnRecord = await shipmentReturnModel.create({
+        completedAt: null,
+        orderId,
+        reason: "",
+        returnDate: startedAt,
+        returnType,
+        startedAt,
+        status: getFallbackReturnStatus(returnType),
+      });
     }
 
     if (shouldAutoForfeitVendorReturn(returnRecord)) {
@@ -1299,25 +1283,6 @@ export class ShipmentRepository {
     const plainReturn = toPlain(returnRecord);
     if (toNumber(plainReturn.returnType) !== returnType) {
       return null;
-    }
-
-    const shipment = await orderModel.findByPk(toNumber(plainReturn.orderId), {
-      include: buildIncludes(),
-    });
-    if (!shipment) {
-      throw new NotFoundError("Shipment not found");
-    }
-
-    const shipmentStatus = getShipmentStatusForReturnType(returnType);
-    const plainShipmentBeforeSync = toPlain(shipment);
-    if (toNumber(plainShipmentBeforeSync.shipmentStatus) !== shipmentStatus) {
-      await shipment.update({ shipmentStatus });
-      await logOrderFieldChange(
-        toNumber(plainShipmentBeforeSync.id),
-        plainShipmentBeforeSync.shipmentStatus,
-        shipmentStatus,
-        userId,
-      );
     }
 
     const nextStatus = payload.status ?? toNumber(plainReturn.status);
@@ -1348,7 +1313,7 @@ export class ShipmentRepository {
 
     return {
       daysCounter: getDaysBetween(updated.startedAt, updated.completedAt),
-      id: toNumber(updated.id),
+      id: toNumber(plainShipment.id),
       orderId: toNumber(plainShipment.id),
       operationNumber: normalizeOperationCode(plainShipment.code),
       orderNumber: toText(plainShipment.orderNumber, toText(plainShipment.number, toText(plainShipment.name))),
@@ -1489,17 +1454,20 @@ export class ShipmentRepository {
       throw new NotFoundError("Delivery account not found");
     }
 
-    const nextStatus = payload.accountingStatus ?? toNumber(plainOrder.accountingStatus) ?? undefined;
+    const storedStatus = toNullableNumber(plainOrder.accountingStatus);
+    const isTransitioningToSettled = payload.accountingStatus === ACCOUNTING_STATUS.SETTLED
+      && storedStatus !== ACCOUNTING_STATUS.SETTLED;
     await order.update({
       ...(payload.accountingReference !== undefined ? { accountingReference: payload.accountingReference } : {}),
       ...(payload.accountingStatus !== undefined ? { accountingStatus: payload.accountingStatus } : {}),
-      // Settling stamps the date when the caller did not supply one; reverting clears it.
-      ...(payload.accountingDate !== undefined
-        ? { accountingDate: payload.accountingDate ? new Date(payload.accountingDate) : null }
-        : nextStatus === ACCOUNTING_STATUS.SETTLED && !plainOrder.accountingDate
-          ? { accountingDate: new Date() }
-          : nextStatus === ACCOUNTING_STATUS.PENDING
-            ? { accountingDate: null }
+      // Stamp the actual transition by default, while still allowing an
+      // explicitly edited date. Reverting to pending always clears the stamp.
+      ...(payload.accountingStatus === ACCOUNTING_STATUS.PENDING
+        ? { accountingDate: null }
+        : payload.accountingDate !== undefined
+          ? { accountingDate: payload.accountingDate ? new Date(payload.accountingDate) : null }
+          : isTransitioningToSettled
+            ? { accountingDate: new Date() }
             : {}),
       // Hides/unhides the row from the accounting ledger only — never touches
       // the order or shipment itself.
@@ -1572,10 +1540,12 @@ export class ShipmentRepository {
         ?? (paymentStatus === 2 ? ACCOUNTING_STATUS.SETTLED : ACCOUNTING_STATUS.PENDING);
       const deliveryBy = toNullableNumber(order.deliveryBy);
       const amountToCollect = toNumber(order.toBeCollected || order.totalPrice);
-      const storedReceivedAmount = toNumber(order.receivedAmount);
+      const storedReceivedAmount = order.receivedAmount == null
+        ? amountToCollect
+        : toNumber(order.receivedAmount);
 
       return {
-        accountingDate: toIsoString(order.accountingDate ?? order.updatedAt),
+        accountingDate: toIsoString(order.accountingDate),
         accountingStatus,
         accountingStatusLabel: ACCOUNT_STATUS_LABELS[accountingStatus] ?? String(accountingStatus),
         amountToCollect,
@@ -1586,8 +1556,9 @@ export class ShipmentRepository {
         paymentMethod: String(paymentStatus || ""),
         paymentMethodLabel: PAYMENT_STATUS_LABELS[paymentStatus] ?? "",
         productCode: toText(firstLine.sku),
-        // لسه محدش عدّل المبلغ المستلم فعليًا => افترض إنه اتحصّل بالكامل.
-        receivedAmount: storedReceivedAmount > 0 ? storedReceivedAmount : amountToCollect,
+        // الصفر قيمة محاسبية مقصودة؛ نستخدم المبلغ المطلوب فقط للسجلات القديمة
+        // التي لا تحتوي أي قيمة مستلمة أصلًا (null/undefined).
+        receivedAmount: storedReceivedAmount,
         reference: toText(order.accountingReference, toText(order.shopifyId)),
         sellerName: toText(vendor.name),
         sellingPrice: toNumber(firstLine.price) * Math.max(1, toNumber(firstLine.quantity)),

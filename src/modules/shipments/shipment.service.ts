@@ -114,19 +114,19 @@ export class ShipmentService {
     payload: Partial<ReturnMutationInput>,
     user: ShipmentRequestUser,
   ): Promise<Result<ReturnListResponse["items"][number]>> {
-    const existingReturn = await this.shipmentRepository.findReturnById(returnId);
-    if (!existingReturn) {
-      throw new NotFoundError("Return not found");
+    const existingReturn = await this.shipmentRepository.findReturnById(returnId, SHIPMENT_RETURN_TYPE.TO_VENDOR);
+    if (existingReturn) {
+      const plainReturn = "toJSON" in (existingReturn as Record<string, unknown>) && typeof (existingReturn as { toJSON?: () => Record<string, unknown> }).toJSON === "function"
+        ? (existingReturn as { toJSON: () => Record<string, unknown> }).toJSON()
+        : (existingReturn as Record<string, unknown>);
+
+      if (Number(plainReturn.status ?? 0) === RETURN_TO_VENDOR_STATUS.FORFEIT && user.userType !== "1") {
+        throw new UnauthorizedError("Only admins can modify forfeited vendor returns");
+      }
     }
 
-    const plainReturn = "toJSON" in (existingReturn as Record<string, unknown>) && typeof (existingReturn as { toJSON?: () => Record<string, unknown> }).toJSON === "function"
-      ? (existingReturn as { toJSON: () => Record<string, unknown> }).toJSON()
-      : (existingReturn as Record<string, unknown>);
-
-    if (Number(plainReturn.status ?? 0) === RETURN_TO_VENDOR_STATUS.FORFEIT && user.userType !== "1") {
-      throw new UnauthorizedError("Only admins can modify forfeited vendor returns");
-    }
-
+    // Return endpoints are addressed by order id; workflow storage is optional
+    // metadata and is created on first edit when missing.
     const returnRecord = await this.shipmentRepository.updateReturnRecord(returnId, SHIPMENT_RETURN_TYPE.TO_VENDOR, payload, user.id);
     if (!returnRecord) {
       throw new NotFoundError("Return not found");

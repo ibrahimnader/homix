@@ -93,6 +93,16 @@ const run = async (): Promise<void> => {
     allowNull: true,
     type: DataTypes.INTEGER,
   });
+  await ensureColumn("orders", "receivedAmountManuallySet", {
+    allowNull: false,
+    defaultValue: false,
+    type: DataTypes.BOOLEAN,
+  });
+  await sequelize.query(`
+    UPDATE orders
+    SET "receivedAmountManuallySet" = TRUE
+    WHERE COALESCE("receivedAmount", 0) > 0
+  `);
 
   await sequelize.query(`
     INSERT INTO "shippingCompanies" ("name", "createdAt", "updatedAt")

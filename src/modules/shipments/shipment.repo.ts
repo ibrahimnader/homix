@@ -1543,6 +1543,8 @@ export class ShipmentRepository {
       const storedReceivedAmount = order.receivedAmount == null
         ? amountToCollect
         : toNumber(order.receivedAmount);
+      const receivedAmountWasEdited = order.receivedAmountManuallySet === true
+        || toNumber(order.receivedAmount) > 0;
 
       return {
         accountingDate: toIsoString(order.accountingDate),
@@ -1556,9 +1558,10 @@ export class ShipmentRepository {
         paymentMethod: String(paymentStatus || ""),
         paymentMethodLabel: PAYMENT_STATUS_LABELS[paymentStatus] ?? "",
         productCode: toText(firstLine.sku),
-        // الصفر قيمة محاسبية مقصودة؛ نستخدم المبلغ المطلوب فقط للسجلات القديمة
-        // التي لا تحتوي أي قيمة مستلمة أصلًا (null/undefined).
-        receivedAmount: storedReceivedAmount,
+        // Creation initializes receivedAmount to zero. Until a user explicitly
+        // edits it, the ledger assumes the full collectible amount was received.
+        // The marker preserves an explicitly entered zero as a real value.
+        receivedAmount: receivedAmountWasEdited ? storedReceivedAmount : amountToCollect,
         reference: toText(order.accountingReference, toText(order.shopifyId)),
         sellerName: toText(vendor.name),
         sellingPrice: toNumber(firstLine.price) * Math.max(1, toNumber(firstLine.quantity)),
@@ -2154,6 +2157,9 @@ export class ShipmentRepository {
 
     const plainShipmentBeforeUpdate = toPlain(shipment);
     const nextPayload = await this.normalizeShippingCompanyPayload(payload);
+    if (Object.prototype.hasOwnProperty.call(nextPayload, "receivedAmount")) {
+      nextPayload.receivedAmountManuallySet = true;
+    }
     if (
       !Object.prototype.hasOwnProperty.call(nextPayload, "deliveryBy")
       && toNullableNumber(plainShipmentBeforeUpdate.deliveryBy) === null

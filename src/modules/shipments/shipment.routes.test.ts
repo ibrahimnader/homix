@@ -1068,6 +1068,23 @@ describe("shipmentRouter", () => {
     }));
   });
 
+  it("marks the received amount as manual even when the user enters zero", async () => {
+    const shipmentRecord = makeShipmentRecord({
+      id: 9802,
+      receivedAmount: 0,
+      receivedAmountManuallySet: false,
+    });
+    orderModel.findByPk.mockResolvedValue(shipmentRecord);
+
+    const response = await request(app).put("/shipments/9802").send({ receivedAmount: 0 });
+
+    expect(response.status).toBe(200);
+    expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      receivedAmount: 0,
+      receivedAmountManuallySet: true,
+    }));
+  });
+
   it("creates and updates a missing vendor-return row when the list exposed an order id", async () => {
     const shipmentRecord = makeShipmentRecord({ id: 9802, shipmentStatus: 8 });
     const returnState = {
@@ -1319,7 +1336,7 @@ describe("shipmentRouter", () => {
     );
   });
 
-  it("keeps an explicitly received amount of zero in delivery accounts", async () => {
+  it("uses the collectible amount while the creation-time received zero was never edited", async () => {
     orderModel.findAndCountAll.mockResolvedValueOnce({
       count: 1,
       rows: [makeShipment({ receivedAmount: 0, toBeCollected: 29998 })],
@@ -1332,6 +1349,27 @@ describe("shipmentRouter", () => {
     expect(response.status).toBe(200);
     expect(response.body.data.items[0]).toEqual(expect.objectContaining({
       accountingDate: null,
+      amountToCollect: 29998,
+      receivedAmount: 29998,
+    }));
+  });
+
+  it("keeps zero after a user explicitly edits the received amount to zero", async () => {
+    orderModel.findAndCountAll.mockResolvedValueOnce({
+      count: 1,
+      rows: [makeShipment({
+        receivedAmount: 0,
+        receivedAmountManuallySet: true,
+        toBeCollected: 29998,
+      })],
+    });
+
+    const response = await request(app)
+      .get("/shipments/accounts/deliveries")
+      .query({ page: 1, size: 20 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.items[0]).toEqual(expect.objectContaining({
       amountToCollect: 29998,
       receivedAmount: 0,
     }));

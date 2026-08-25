@@ -85,6 +85,13 @@ const Order = sequelize.define(
       allowNull: true,
       defaultValue: 0,
     },
+    // Distinguishes the creation-time zero from a value (including zero) that
+    // a user explicitly entered later in the shipment edit screen.
+    receivedAmountManuallySet: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
     paymentStatus: {
       type: DataTypes.INTEGER,
       allowNull: true,

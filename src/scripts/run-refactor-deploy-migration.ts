@@ -153,6 +153,16 @@ const ensureCoreColumns = async (): Promise<void> => {
     allowNull: true,
     type: DataTypes.STRING,
   });
+  await ensureColumn("orders", "receivedAmountManuallySet", {
+    allowNull: false,
+    defaultValue: false,
+    type: DataTypes.BOOLEAN,
+  });
+  await runSql(`
+    UPDATE orders
+    SET "receivedAmountManuallySet" = TRUE
+    WHERE COALESCE("receivedAmount", 0) > 0
+  `);
 
   await ensureColumn("vendors", "accountManagerUserId", {
     allowNull: true,

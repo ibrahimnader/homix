@@ -874,7 +874,10 @@ class ShipmentService {
           paymentStatus:
             PAYMENT_STATUS_LABELS[order.paymentStatus] || order.paymentStatus || "",
           receivedInWarehouseDate: formatExportDate(order.shippingReceiveDate),
-          scheduledDeliveryDate: formatExportDate(order.expectedDeliveryDate),
+          // موعد الجدولة is the manually scheduled date shown in the shipments
+          // table. expectedDeliveryDate is the manufacturing/delivery estimate
+          // and must not leak into this Excel column.
+          scheduledDeliveryDate: formatExportDate(order.scheduledDeliveryDate),
           scheduleStatus: SHIPMENT_SCHEDULE_STATUS_LABELS[order.scheduleStatus] || "",
           shipmentNumber: buildShipmentNumber(order),
           shipmentStatus: getShipmentStatusLabel(order.shipmentStatus),

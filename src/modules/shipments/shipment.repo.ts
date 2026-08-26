@@ -2157,10 +2157,12 @@ export class ShipmentRepository {
 
     const plainShipmentBeforeUpdate = toPlain(shipment);
     const nextPayload = await this.normalizeShippingCompanyPayload(payload);
-    if (
-      Object.prototype.hasOwnProperty.call(nextPayload, "receivedAmount")
-      && toNumber(nextPayload.receivedAmount) !== toNumber(plainShipmentBeforeUpdate.receivedAmount)
-    ) {
+    /* An update payload containing receivedAmount is an explicit user choice,
+       even when both the stored and submitted values are zero. Comparing the
+       numbers made `0 -> 0` look untouched, so the deliveries ledger fell back
+       to amountToCollect instead of preserving the user's zero. Creation uses
+       a separate path and therefore keeps its initial zero as non-manual. */
+    if (Object.prototype.hasOwnProperty.call(nextPayload, "receivedAmount")) {
       nextPayload.receivedAmountManuallySet = true;
     }
     if (

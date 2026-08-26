@@ -1085,7 +1085,7 @@ describe("shipmentRouter", () => {
     }));
   });
 
-  it("does not mark the creation-time zero as manual when it was not changed", async () => {
+  it("marks an explicitly submitted zero as manual even when the stored value is already zero", async () => {
     const shipmentRecord = makeShipmentRecord({
       id: 9802,
       receivedAmount: 0,
@@ -1101,10 +1101,8 @@ describe("shipmentRouter", () => {
     expect(response.status).toBe(200);
     expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({
       receivedAmount: 0,
-      shipmentType: "separate",
-    }));
-    expect(shipmentRecord.update).not.toHaveBeenCalledWith(expect.objectContaining({
       receivedAmountManuallySet: true,
+      shipmentType: "separate",
     }));
   });
 

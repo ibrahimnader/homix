@@ -184,6 +184,9 @@ export const USER_PERMISSION_TEMPLATES = {
     ship_delivery_accounts_view: true,
     ship_expenses_view: true,
     ship_performance_view: true,
+    /* بدونها كانت تظهر تسليمات الحسابات لكن كل حفظ (تعديل الحالة/التاريخ/المرجع،
+       bulk edit، الإخفاء) يرجع 403 — اللوجيستي هو مين بيمسك التسويات يوميًا. */
+    finance_settle: true,
     orders_view: true,
     /* logisticsRoutes على main كانت تشمل /products */
     products_view: true,

@@ -1534,10 +1534,13 @@ export class ShipmentRepository {
       const product = toPlain(firstLine.product);
       const vendor = toPlain(product.vendor);
       const paymentStatus = toNumber(order.paymentStatus);
-      // A user-set accounting status wins; otherwise fall back to the payment status.
+      // Whether the *customer* paid online has nothing to do with whether *we*
+      // have settled this delivery's accounting internally — those used to be
+      // conflated here (a paid order defaulted to "تم التصفية" with no admin
+      // ever having settled it). Only an explicit admin action counts; anything
+      // else starts "معلق", regardless of payment status.
       const storedAccountingStatus = toNullableNumber(order.accountingStatus);
-      const accountingStatus = storedAccountingStatus
-        ?? (paymentStatus === 2 ? ACCOUNTING_STATUS.SETTLED : ACCOUNTING_STATUS.PENDING);
+      const accountingStatus = storedAccountingStatus ?? ACCOUNTING_STATUS.PENDING;
       const deliveryBy = toNullableNumber(order.deliveryBy);
       const amountToCollect = getShipmentCollectionAmount(order);
       const storedReceivedAmount = order.receivedAmount == null

@@ -1539,7 +1539,7 @@ export class ShipmentRepository {
       const accountingStatus = storedAccountingStatus
         ?? (paymentStatus === 2 ? ACCOUNTING_STATUS.SETTLED : ACCOUNTING_STATUS.PENDING);
       const deliveryBy = toNullableNumber(order.deliveryBy);
-      const amountToCollect = toNumber(order.toBeCollected || order.totalPrice);
+      const amountToCollect = getShipmentCollectionAmount(order);
       const storedReceivedAmount = order.receivedAmount == null
         ? amountToCollect
         : toNumber(order.receivedAmount);

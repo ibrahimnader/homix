@@ -44,10 +44,27 @@ const verifyToken = require("../../../app/middlewares/protectApi");
 const isNotVendor = require("../../../app/middlewares/isNotVendor");
 const requirePermission = require("../../../app/middlewares/requirePermission");
 const fileUploadMiddleware = require("../../../config/fileUploadMiddleware");
+const { USER_TYPES } = require("../../../config/constants");
 
 const shipmentRepository = new ShipmentRepository();
 const shipmentService = new ShipmentService(shipmentRepository);
 const shipmentController = new ShipmentController(shipmentService);
+
+/**
+ * finance_settle (reference/date/hide) is shared by admin, finance and logistics,
+ * but changing the accounting status itself ("معلق"/"تم التصفية") is restricted
+ * further, to admins only — everyone else can still touch every other field in
+ * the same payload.
+ */
+const requireAdminForAccountingStatus = (request: any, response: any, next: any): void => {
+  const touchesStatus = request.body?.accountingStatus !== undefined
+    || request.body?.data?.accountingStatus !== undefined;
+  if (!touchesStatus || request.user?.userType === USER_TYPES.ADMIN) {
+    next();
+    return;
+  }
+  response.status(403).json({ status: false, message: "Only admins can change the accounting status" });
+};
 
 export const shipmentRouter = express.Router();
 
@@ -985,6 +1002,7 @@ shipmentRouter.put(
   "/accounts/deliveries/bulk-update",
   requirePermission("finance_settle"),
   validateRequest({ body: shipmentDeliveryAccountBulkMutationSchema }),
+  requireAdminForAccountingStatus,
   asyncHandler(shipmentController.bulkUpdateDeliveryAccounts),
 );
 
@@ -992,6 +1010,7 @@ shipmentRouter.put(
   "/accounts/deliveries/:orderId",
   requirePermission("finance_settle"),
   validateRequest({ body: shipmentDeliveryAccountMutationSchema, params: shipmentDeliveryAccountParamsSchema }),
+  requireAdminForAccountingStatus,
   asyncHandler(shipmentController.updateDeliveryAccount),
 );
 

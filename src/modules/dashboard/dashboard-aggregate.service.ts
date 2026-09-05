@@ -134,7 +134,7 @@ const orderModel = require("../../../app/modules/order/order.model") as OrderMod
 
 const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000;
 const AGGREGATE_LOG_OPERATION = "dashboard-aggregate";
-const AGGREGATE_ADVISORY_LOCK_ID = 1_104_202_026;
+const AGGREGATE_ADVISORY_LOCK_NAMESPACE = 1_104_202_026;
 const BULK_UPDATE_FIELDS = [
   "activeMakers",
   "activeProducts",
@@ -205,6 +205,19 @@ const getDateRange = (startDate: Date, endDate: Date): Date[] => {
   }
 
   return dates;
+};
+
+const getMonthLockKeys = (startDate: Date, endDate: Date): number[] => {
+  const keys: number[] = [];
+  const cursor = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1));
+  const lastMonth = Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), 1);
+
+  while (cursor.getTime() <= lastMonth) {
+    keys.push(cursor.getUTCFullYear() * 100 + cursor.getUTCMonth() + 1);
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+
+  return keys;
 };
 
 const getExpectedRowCount = (input: DashboardMetricsInput): number => {
@@ -475,11 +488,13 @@ export class DashboardAggregateService {
          webhook/read-repair refreshes from deleting and replacing the same
          aggregate range concurrently, while the transaction ensures readers
          see either the complete old snapshot or the complete new snapshot. */
-      await sequelize.query("SELECT pg_advisory_xact_lock(:lockId)", {
-        replacements: { lockId: AGGREGATE_ADVISORY_LOCK_ID },
-        transaction,
-        type: QueryTypes.SELECT,
-      });
+      for (const monthKey of getMonthLockKeys(bounds.startDate, bounds.endDate)) {
+        await sequelize.query("SELECT pg_advisory_xact_lock(:namespace, :monthKey)", {
+          replacements: { monthKey, namespace: AGGREGATE_ADVISORY_LOCK_NAMESPACE },
+          transaction,
+          type: QueryTypes.SELECT,
+        });
+      }
 
       const [adminRows, vendorRows, productRows, categoryRows, financeRows] = await Promise.all([
         this.getAdminAggregateRows(bounds.startDate, bounds.endDate, transaction),

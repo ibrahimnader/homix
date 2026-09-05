@@ -16,6 +16,7 @@ import type {
   DashboardRole,
   DashboardSalesDistributionItem,
   DateRangeInput,
+  FinanceAdjustmentItem,
   FinanceAutomaticMetrics,
   FinanceDashboardPayload,
   FinanceOpexItem,
@@ -62,12 +63,13 @@ export class DashboardService {
 
   public async getFinance(month: string): Promise<Result<FinanceDashboardPayload>> {
     const { endDate, startDate } = this.getMonthRange(month);
-    const [automatic, opex] = await Promise.all([
+    const [automatic, opex, adjustments] = await Promise.all([
       this.dashboardRepository.getFinanceAutomaticMetrics(startDate, endDate),
       this.dashboardRepository.getFinanceOpex(month),
+      this.dashboardRepository.getFinanceAdjustments(month),
     ]);
 
-    return success(this.buildFinancePayload(month, automatic, opex));
+    return success(this.buildFinancePayload(month, automatic, opex, adjustments));
   }
 
   public async saveFinanceOpex(
@@ -75,6 +77,14 @@ export class DashboardService {
     items: Array<{ amount: number; label: string }>,
   ): Promise<Result<FinanceDashboardPayload>> {
     await this.dashboardRepository.replaceFinanceOpex(month, items);
+    return this.getFinance(month);
+  }
+
+  public async saveFinanceAdjustments(
+    month: string,
+    items: Array<{ amount: number; label: string; type: "negative" | "positive" }>,
+  ): Promise<Result<FinanceDashboardPayload>> {
+    await this.dashboardRepository.replaceFinanceAdjustments(month, items);
     return this.getFinance(month);
   }
 
@@ -249,11 +259,19 @@ export class DashboardService {
     month: string,
     automatic: FinanceAutomaticMetrics,
     opex: FinanceOpexItem[],
+    adjustments: FinanceAdjustmentItem[],
   ): FinanceDashboardPayload {
     const round = (value: number): number => Math.round(value * 100) / 100;
     const ratio = (value: number, base: number): number => base === 0 ? 0 : round((value / base) * 100);
-    const gmv = automatic.gmvOnline + automatic.gmvShowroom;
-    const nmv = gmv - automatic.cancellations - automatic.discounts;
+    const positiveAdjustments = adjustments
+      .filter((item) => item.type === "positive")
+      .reduce((sum, item) => sum + item.amount, 0);
+    const negativeAdjustments = adjustments
+      .filter((item) => item.type === "negative")
+      .reduce((sum, item) => sum + item.amount, 0);
+    const automaticGmv = automatic.gmvOnline + automatic.gmvShowroom;
+    const gmv = automaticGmv + positiveAdjustments;
+    const nmv = gmv - automatic.cancellations - automatic.discounts - negativeAdjustments;
     const g2n = automatic.deliveredHomix + automatic.deliveredVendor;
     const grossMargin = nmv - automatic.cogsNmv;
     const totalOpex = opex.reduce((sum, item) => sum + item.amount, 0);
@@ -261,8 +279,16 @@ export class DashboardService {
 
     return {
       ...automatic,
+      adjustments,
       cancellationRate: ratio(automatic.cancellations, gmv),
+      cogsG2nRate: ratio(automatic.cogsG2n, g2n),
+      cogsGmvRate: ratio(automatic.cogsGmv, gmv),
+      cogsNmvRate: ratio(automatic.cogsNmv, nmv),
+      deliveredHomixRate: ratio(automatic.deliveredHomix, g2n),
+      deliveredVendorRate: ratio(automatic.deliveredVendor, g2n),
+      discountRate: ratio(automatic.discounts, gmv),
       ebitda: round(ebitda),
+      ebitdaRate: ratio(ebitda, nmv),
       g2n: round(g2n),
       g2nRate: ratio(g2n, nmv),
       gmv: round(gmv),
@@ -270,7 +296,11 @@ export class DashboardService {
       grossMarginRate: ratio(grossMargin, nmv),
       month,
       nmv: round(nmv),
+      nmvRate: ratio(nmv, gmv),
+      onlineRate: ratio(automatic.gmvOnline, automaticGmv),
       opex,
+      opexRate: ratio(totalOpex, nmv),
+      showroomRate: ratio(automatic.gmvShowroom, automaticGmv),
       totalOpex: round(totalOpex),
     };
   }

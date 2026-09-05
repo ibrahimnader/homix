@@ -41,9 +41,26 @@ module.exports = {
         name: "finance_opex_month_sort_idx",
       });
     }
+
+    if (!normalizedTables.includes("financeAdjustments")) {
+      await queryInterface.createTable("financeAdjustments", {
+        id: { allowNull: false, autoIncrement: true, primaryKey: true, type: Sequelize.INTEGER },
+        month: { allowNull: false, type: Sequelize.STRING(7) },
+        label: { allowNull: false, type: Sequelize.STRING(160) },
+        amount: { allowNull: false, defaultValue: 0, type: Sequelize.DECIMAL(16, 2) },
+        type: { allowNull: false, type: Sequelize.ENUM("positive", "negative") },
+        sortOrder: { allowNull: false, defaultValue: 0, type: Sequelize.INTEGER },
+        createdAt: { allowNull: false, type: Sequelize.DATE },
+        updatedAt: { allowNull: false, type: Sequelize.DATE },
+      });
+      await queryInterface.addIndex("financeAdjustments", ["month", "sortOrder"], {
+        name: "finance_adjustment_month_sort_idx",
+      });
+    }
   },
 
   async down(queryInterface) {
+    await queryInterface.dropTable("financeAdjustments");
     await queryInterface.dropTable("financeOpex");
     await queryInterface.dropTable("financeDailyMetrics");
   },

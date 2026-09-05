@@ -23,6 +23,7 @@ describe("DashboardService", () => {
         { amount: 100, id: 1, label: "Marketing", sortOrder: 0 },
         { amount: 50, id: 2, label: "Tools", sortOrder: 1 },
       ]),
+      getFinanceAdjustments: jest.fn().mockResolvedValue([]),
     } as never;
     const service = new DashboardService(repository);
 
@@ -49,6 +50,7 @@ describe("DashboardService", () => {
         gmvOnline: 0, gmvShowroom: 0,
       }),
       getFinanceOpex: jest.fn().mockResolvedValue([{ amount: 75, label: "Rent", sortOrder: 0 }]),
+      getFinanceAdjustments: jest.fn().mockResolvedValue([]),
       replaceFinanceOpex: jest.fn().mockResolvedValue(undefined),
     } as never;
     const service = new DashboardService(repository);
@@ -57,6 +59,32 @@ describe("DashboardService", () => {
 
     expect((repository as unknown as { replaceFinanceOpex: jest.Mock }).replaceFinanceOpex)
       .toHaveBeenCalledWith("2026-06", [{ amount: 75, label: "Rent" }]);
+  });
+
+  it("applies saved positive and negative revenue adjustments and returns all rates", async () => {
+    const repository = {
+      getFinanceAutomaticMetrics: jest.fn().mockResolvedValue({
+        cancellations: 100, cogsG2n: 200, cogsGmv: 600, cogsNmv: 450,
+        deliveredHomix: 600, deliveredVendor: 400, discounts: 50,
+        gmvOnline: 1200, gmvShowroom: 800,
+      }),
+      getFinanceOpex: jest.fn().mockResolvedValue([{ amount: 100, label: "Rent", sortOrder: 0 }]),
+      getFinanceAdjustments: jest.fn().mockResolvedValue([
+        { amount: 200, label: "Other revenue", sortOrder: 0, type: "positive" },
+        { amount: 50, label: "Correction", sortOrder: 1, type: "negative" },
+      ]),
+    } as never;
+
+    const result = await new DashboardService(repository).getFinance("2026-05");
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.gmv).toBe(2200);
+      expect(result.data.nmv).toBe(2000);
+      expect(result.data.nmvRate).toBe(90.91);
+      expect(result.data.cogsNmvRate).toBe(22.5);
+      expect(result.data.ebitdaRate).toBe(72.5);
+    }
   });
 
   it("returns admin cards with active makers", async () => {

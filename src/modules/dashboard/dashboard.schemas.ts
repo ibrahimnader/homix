@@ -46,3 +46,11 @@ export const financeOpexBodySchema = z.object({
     label: z.string().trim().min(1).max(160),
   })).max(100),
 });
+
+export const financeAdjustmentsBodySchema = z.object({
+  items: z.array(z.object({
+    amount: z.coerce.number().finite().min(0).max(999_999_999_999),
+    label: z.string().trim().min(1).max(160),
+    type: z.enum(["positive", "negative"]),
+  })).max(100),
+});

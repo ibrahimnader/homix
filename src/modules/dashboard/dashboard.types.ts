@@ -119,6 +119,14 @@ export interface FinanceOpexItem {
   sortOrder: number;
 }
 
+export interface FinanceAdjustmentItem {
+  amount: number;
+  id?: number;
+  label: string;
+  sortOrder: number;
+  type: "negative" | "positive";
+}
+
 export interface FinanceAutomaticMetrics {
   cancellations: number;
   cogsG2n: number;
@@ -132,8 +140,16 @@ export interface FinanceAutomaticMetrics {
 }
 
 export interface FinanceDashboardPayload extends FinanceAutomaticMetrics {
+  adjustments: FinanceAdjustmentItem[];
   cancellationRate: number;
+  cogsG2nRate: number;
+  cogsGmvRate: number;
+  cogsNmvRate: number;
+  deliveredHomixRate: number;
+  deliveredVendorRate: number;
+  discountRate: number;
   ebitda: number;
+  ebitdaRate: number;
   g2n: number;
   g2nRate: number;
   gmv: number;
@@ -141,6 +157,10 @@ export interface FinanceDashboardPayload extends FinanceAutomaticMetrics {
   grossMarginRate: number;
   month: string;
   nmv: number;
+  nmvRate: number;
+  onlineRate: number;
   opex: FinanceOpexItem[];
+  opexRate: number;
+  showroomRate: number;
   totalOpex: number;
 }

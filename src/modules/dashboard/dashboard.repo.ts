@@ -13,6 +13,7 @@ import type {
   DashboardMetricsInput,
   DashboardPerformancePoint,
   DashboardSalesDistributionItem,
+  FinanceAdjustmentItem,
   FinanceAutomaticMetrics,
   FinanceOpexItem,
 } from "./dashboard.types";
@@ -35,6 +36,7 @@ const customerModel = require("../../../app/modules/customer/customer.model");
 const vendorModel = require("../../../app/modules/vendor/vendor.model");
 const notificationModel = require("../../../app/modules/notification/notification.model") as LegacyModel;
 const financeOpexModel = require("./finance-opex.model") as LegacyModel;
+const financeAdjustmentModel = require("./finance-adjustment.model") as LegacyModel;
 
 const OPEN_ORDER_STATUSES = [
   ORDER_STATUS.PENDING,
@@ -195,6 +197,39 @@ export class DashboardRepository {
         sortOrder: Number(item.sortOrder ?? 0),
       };
     });
+  }
+
+  public async getFinanceAdjustments(month: string): Promise<FinanceAdjustmentItem[]> {
+    const rows = await financeAdjustmentModel.findAll<Plainable>({
+      order: [["sortOrder", "ASC"], ["id", "ASC"]],
+      where: { month },
+    });
+    return rows.map((row) => {
+      const item = toPlain(row);
+      return {
+        amount: parseNumber(item.amount),
+        id: Number(item.id),
+        label: getString(item.label),
+        sortOrder: Number(item.sortOrder ?? 0),
+        type: item.type === "negative" ? "negative" : "positive",
+      };
+    });
+  }
+
+  public async replaceFinanceAdjustments(
+    month: string,
+    items: Array<{ amount: number; label: string; type: "negative" | "positive" }>,
+  ): Promise<FinanceAdjustmentItem[]> {
+    await sequelize.transaction(async (transaction) => {
+      await financeAdjustmentModel.destroy!({ transaction, where: { month } });
+      if (items.length > 0) {
+        await financeAdjustmentModel.bulkCreate!(
+          items.map((item, sortOrder) => ({ ...item, month, sortOrder })),
+          { transaction },
+        );
+      }
+    });
+    return this.getFinanceAdjustments(month);
   }
 
   public async replaceFinanceOpex(month: string, items: Array<{ amount: number; label: string }>): Promise<FinanceOpexItem[]> {

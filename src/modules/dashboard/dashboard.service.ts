@@ -19,6 +19,7 @@ import type {
   FinanceAdjustmentItem,
   FinanceAutomaticMetrics,
   FinanceDashboardPayload,
+  FinanceHistoryPayload,
   FinanceOpexItem,
 } from "./dashboard.types";
 import { GOAL_CONFIGS, OTHER_DISTRIBUTION_ITEM, QUICK_ACTIONS } from "./dashboard.constants";
@@ -86,6 +87,24 @@ export class DashboardService {
   ): Promise<Result<FinanceDashboardPayload>> {
     await this.dashboardRepository.replaceFinanceAdjustments(month, items);
     return this.getFinance(month);
+  }
+
+  public async getFinanceHistory(endMonth: string, months: number): Promise<Result<FinanceHistoryPayload>> {
+    const [year, monthNumber] = endMonth.split("-").map(Number);
+    const monthKeys = Array.from({ length: months }, (_, index) => {
+      const date = new Date(Date.UTC(year!, monthNumber! - 1 - index, 1));
+      return date.toISOString().slice(0, 7);
+    }).reverse();
+    const results = await Promise.all(monthKeys.map((month) => this.getFinance(month)));
+
+    return success({
+      endMonth,
+      items: results.map((result) => {
+        if (!result.ok) throw result.error;
+        return result.data;
+      }),
+      months,
+    });
   }
 
   public async getSingleCard(

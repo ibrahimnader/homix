@@ -4,7 +4,7 @@ import { z } from "zod";
 import { asyncHandler, validateRequest } from "../../shared/http";
 import { DashboardController } from "./dashboard.controller";
 import { DashboardRepository } from "./dashboard.repo";
-import { dashboardDateRangeSchema, financeAdjustmentsBodySchema, financeMonthSchema, financeOpexBodySchema } from "./dashboard.schemas";
+import { dashboardDateRangeSchema, financeAdjustmentsBodySchema, financeHistorySchema, financeMonthSchema, financeOpexBodySchema } from "./dashboard.schemas";
 import { DashboardService } from "./dashboard.service";
 
 const verifyToken = require("../../../app/middlewares/protectApi");
@@ -34,6 +34,15 @@ dashboardRouter.get(
   requirePermission("finance_view"),
   validateRequest({ query: financeMonthSchema }),
   asyncHandler(dashboardController.getFinance),
+);
+
+dashboardRouter.get(
+  "/finance/history",
+  verifyToken,
+  isAdmin,
+  requirePermission("finance_view"),
+  validateRequest({ query: financeHistorySchema }),
+  asyncHandler(dashboardController.getFinanceHistory),
 );
 
 dashboardRouter.put(

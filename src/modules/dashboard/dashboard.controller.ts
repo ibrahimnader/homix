@@ -40,6 +40,14 @@ export class DashboardController {
     response.status(200).json({ data: unwrap(result), status: true });
   };
 
+  public getFinanceHistory = async (request: Request, response: Response): Promise<void> => {
+    const result = await this.dashboardService.getFinanceHistory(
+      String(request.query.endMonth),
+      Number(request.query.months),
+    );
+    response.status(200).json({ data: unwrap(result), status: true });
+  };
+
   public getSingleCard = async (request: Request, response: Response): Promise<void> => {
     const result = await this.dashboardService.getSingleCard(
       request.params.cardKey as

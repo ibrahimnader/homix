@@ -40,6 +40,11 @@ export const financeMonthSchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month must use YYYY-MM"),
 });
 
+export const financeHistorySchema = z.object({
+  endMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "endMonth must use YYYY-MM"),
+  months: z.coerce.number().int().min(1).max(24).default(12),
+});
+
 export const financeOpexBodySchema = z.object({
   items: z.array(z.object({
     amount: z.coerce.number().finite().min(0).max(999_999_999_999),

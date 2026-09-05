@@ -164,3 +164,9 @@ export interface FinanceDashboardPayload extends FinanceAutomaticMetrics {
   showroomRate: number;
   totalOpex: number;
 }
+
+export interface FinanceHistoryPayload {
+  endMonth: string;
+  items: FinanceDashboardPayload[];
+  months: number;
+}

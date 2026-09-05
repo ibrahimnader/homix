@@ -270,7 +270,7 @@ export class DashboardAggregateService {
 
   public async getFinanceMetrics(startDate: string, endDate: string): Promise<FinanceAutomaticMetrics | null> {
     let rows = await financeDailyMetricModel.findAll<FinanceAggregateRecord>({
-      where: { metricDate: { between: [startDate.slice(0, 10), endDate.slice(0, 10)] } },
+      where: { metricDate: { [Op.between]: [startDate.slice(0, 10), endDate.slice(0, 10)] } },
     });
 
     const [source] = await sequelize.query<{ orderCount: number | string; sourceUpdatedAt: Date | string | null }>(
@@ -301,7 +301,7 @@ export class DashboardAggregateService {
     if (!isFresh) {
       await this.refreshRange(startDate, endDate);
       rows = await financeDailyMetricModel.findAll<FinanceAggregateRecord>({
-        where: { metricDate: { between: [startDate.slice(0, 10), endDate.slice(0, 10)] } },
+        where: { metricDate: { [Op.between]: [startDate.slice(0, 10), endDate.slice(0, 10)] } },
       });
     }
 
@@ -347,7 +347,7 @@ export class DashboardAggregateService {
     const rows = await dashboardDailyMetricModel.findAll<AggregateRecord>({
       where: {
         metricDate: {
-          between: [input.startDate.slice(0, 10), input.endDate.slice(0, 10)],
+          [Op.between]: [input.startDate.slice(0, 10), input.endDate.slice(0, 10)],
         },
         role: input.role,
         scopeId: getScopeId(input),
@@ -383,7 +383,7 @@ export class DashboardAggregateService {
       order: [["metricDate", "ASC"]],
       where: {
         metricDate: {
-          between: [input.startDate.slice(0, 10), input.endDate.slice(0, 10)],
+          [Op.between]: [input.startDate.slice(0, 10), input.endDate.slice(0, 10)],
         },
         role: input.role,
         scopeId: getScopeId(input),
@@ -405,7 +405,7 @@ export class DashboardAggregateService {
     const rows = await dashboardDailyMetricModel.findAll<AggregateRecord>({
       where: {
         metricDate: {
-          between: [input.startDate.slice(0, 10), input.endDate.slice(0, 10)],
+          [Op.between]: [input.startDate.slice(0, 10), input.endDate.slice(0, 10)],
         },
         role: input.role,
         scopeId: getScopeId(input),
@@ -510,7 +510,7 @@ export class DashboardAggregateService {
         transaction,
         where: {
           metricDate: {
-            between: [toDateOnly(bounds.startDate), toDateOnly(bounds.endDate)],
+            [Op.between]: [toDateOnly(bounds.startDate), toDateOnly(bounds.endDate)],
           },
         },
       };
@@ -800,7 +800,7 @@ export class DashboardAggregateService {
       attributes: ["metricDate"],
       where: {
         metricDate: {
-          between: [input.startDate.slice(0, 10), input.endDate.slice(0, 10)],
+          [Op.between]: [input.startDate.slice(0, 10), input.endDate.slice(0, 10)],
         },
         role: input.role,
         scopeId: getScopeId(input),

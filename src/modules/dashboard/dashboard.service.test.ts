@@ -87,6 +87,25 @@ describe("DashboardService", () => {
     }
   });
 
+  it("returns chronological finance history ending at the requested month", async () => {
+    const repository = {
+      getFinanceAutomaticMetrics: jest.fn().mockResolvedValue({
+        cancellations: 0, cogsG2n: 0, cogsGmv: 0, cogsNmv: 0,
+        deliveredHomix: 0, deliveredVendor: 0, discounts: 0,
+        gmvOnline: 100, gmvShowroom: 0,
+      }),
+      getFinanceAdjustments: jest.fn().mockResolvedValue([]),
+      getFinanceOpex: jest.fn().mockResolvedValue([]),
+    } as never;
+
+    const result = await new DashboardService(repository).getFinanceHistory("2026-05", 3);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.items.map((item) => item.month)).toEqual(["2026-03", "2026-04", "2026-05"]);
+    }
+  });
+
   it("returns admin cards with active makers", async () => {
     const dashboardRepository = {
       getSnapshot: jest

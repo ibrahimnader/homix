@@ -20,6 +20,7 @@
     "start": "node dist/src/server.js",
     "dev": "tsx watch src/server.ts",
     "dashboard:backfill-aggregates": "tsx src/scripts/backfill-dashboard-aggregates.ts",
+    "db:migrate-finance-dashboard": "tsx src/scripts/migrate-finance-dashboard.ts",
     "monitor": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "jest --config jest.config.cjs --runInBand",

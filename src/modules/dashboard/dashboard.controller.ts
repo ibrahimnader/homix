@@ -19,6 +19,19 @@ export class DashboardController {
     });
   };
 
+  public getFinance = async (request: Request, response: Response): Promise<void> => {
+    const result = await this.dashboardService.getFinance(String(request.query.month));
+    response.status(200).json({ data: unwrap(result), status: true });
+  };
+
+  public saveFinanceOpex = async (request: Request, response: Response): Promise<void> => {
+    const result = await this.dashboardService.saveFinanceOpex(
+      String(request.query.month),
+      request.body.items as Array<{ amount: number; label: string }>,
+    );
+    response.status(200).json({ data: unwrap(result), status: true });
+  };
+
   public getSingleCard = async (request: Request, response: Response): Promise<void> => {
     const result = await this.dashboardService.getSingleCard(
       request.params.cardKey as

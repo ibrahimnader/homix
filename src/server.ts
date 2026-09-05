@@ -2,11 +2,14 @@ import http from "http";
 
 import cron from "node-cron";
 import { Server } from "socket.io";
+import { Op } from "sequelize";
 
 import { env } from "./config/env";
 import { createApp } from "./app";
 import { connectToDatabase } from "./infrastructure/database";
 import { navigationCountsEvents } from "./modules/navigation";
+import { DashboardAggregateService } from "./modules/dashboard/dashboard-aggregate.service";
+import type { DashboardMetricSnapshot } from "./modules/dashboard/dashboard.types";
 import { logger } from "./shared/logger/logger";
 
 const createDefaultData = require("../config/defaultData.seeder");
@@ -14,6 +17,7 @@ require("../config/shopify");
 
 const userModel = require("../app/modules/user/user.model");
 const orderService = require("../app/modules/order/order.service");
+const orderModel = require("../app/modules/order/order.model");
 import { runDailyJobIfDue, runIntervalJobIfDue } from "./shared/jobs/daily-job-runner";
 
 type LegacyUserRecord = {
@@ -100,9 +104,28 @@ const registerCronJobs = (): void => {
 const IMPORT_ORDERS_JOB = "saveMissingOrders";
 /** Matches the 2-hourly schedule, so a restart cannot re-import on every boot. */
 const IMPORT_ORDERS_INTERVAL_MINUTES = 120;
+const dashboardAggregateService = new DashboardAggregateService({
+  getDeliveredOrdersCountFromOrders: async () => 0,
+  getSnapshotFromOrders: async (): Promise<DashboardMetricSnapshot> => ({
+    activeMakers: 0, activeProducts: 0, pendingOrders: 0, totalOrders: 0, totalSales: 0,
+  }),
+});
 
 const runSaveMissingOrders = async (): Promise<void> => {
+  const importStartedAt = new Date();
   const result = await orderService.saveMissingOrders();
+  const changedOrders = await orderModel.findAll({
+    attributes: ["orderDate"],
+    where: { updatedAt: { [Op.gte]: importStartedAt } },
+  });
+  const changedDates = changedOrders
+    .map((order: { orderDate?: Date | string }) => new Date(order.orderDate ?? ""))
+    .filter((date: Date) => !Number.isNaN(date.getTime()))
+    .map((date: Date) => date.toISOString().slice(0, 10))
+    .sort();
+  if (changedDates.length > 0) {
+    await dashboardAggregateService.refreshRange(changedDates[0], changedDates[changedDates.length - 1]);
+  }
   logger.info(
     { message: result?.message, operationName: IMPORT_ORDERS_JOB },
     "Missing orders imported",

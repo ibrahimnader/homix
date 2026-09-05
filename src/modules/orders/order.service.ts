@@ -89,6 +89,7 @@ export class OrderService {
 
   public async importOrders(): Promise<Result<{ message: string }>> {
     await this.legacyGateway.importOrders();
+    await this.dashboardAggregateService.backfill();
     return success({ message: "Orders imported successfully" });
   }
 

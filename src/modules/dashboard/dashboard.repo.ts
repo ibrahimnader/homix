@@ -1,5 +1,7 @@
 import { Op } from "sequelize";
 
+import { sequelize } from "../../infrastructure/database";
+
 import { ORDER_STATUS } from "../../config/constants";
 import { DashboardAggregateService } from "./dashboard-aggregate.service";
 import { toStatusLabel, withRanks } from "./dashboard.helpers";
@@ -11,13 +13,17 @@ import type {
   DashboardMetricsInput,
   DashboardPerformancePoint,
   DashboardSalesDistributionItem,
+  FinanceAutomaticMetrics,
+  FinanceOpexItem,
 } from "./dashboard.types";
 
 type PlainRecord = Record<string, unknown>;
 type Plainable = PlainRecord | { toJSON: () => PlainRecord };
 
 type LegacyModel = {
+  bulkCreate?: <TRow = PlainRecord>(payloads: PlainRecord[], options?: PlainRecord) => Promise<TRow[]>;
   count: (options?: PlainRecord) => Promise<number>;
+  destroy?: (options?: PlainRecord) => Promise<number>;
   findAll: <TRow = PlainRecord>(options?: PlainRecord) => Promise<TRow[]>;
   findOne: <TRow = PlainRecord>(options?: PlainRecord) => Promise<TRow | null>;
 };
@@ -28,6 +34,7 @@ const productModel = require("../../../app/modules/product/product.model");
 const customerModel = require("../../../app/modules/customer/customer.model");
 const vendorModel = require("../../../app/modules/vendor/vendor.model");
 const notificationModel = require("../../../app/modules/notification/notification.model") as LegacyModel;
+const financeOpexModel = require("./finance-opex.model") as LegacyModel;
 
 const OPEN_ORDER_STATUSES = [
   ORDER_STATUS.PENDING,
@@ -164,6 +171,44 @@ export class DashboardRepository {
     }
 
     return this.getSnapshotFromOrders(input);
+  }
+
+  public async getFinanceAutomaticMetrics(startDate: string, endDate: string): Promise<FinanceAutomaticMetrics> {
+    const metrics = await this.dashboardAggregateService.getFinanceMetrics(startDate, endDate);
+    if (metrics) return metrics;
+
+    throw new Error("Finance aggregate could not be generated for the requested month");
+  }
+
+  public async getFinanceOpex(month: string): Promise<FinanceOpexItem[]> {
+    const rows = await financeOpexModel.findAll<Plainable>({
+      order: [["sortOrder", "ASC"], ["id", "ASC"]],
+      where: { month },
+    });
+
+    return rows.map((row) => {
+      const item = toPlain(row);
+      return {
+        amount: parseNumber(item.amount),
+        id: Number(item.id),
+        label: getString(item.label),
+        sortOrder: Number(item.sortOrder ?? 0),
+      };
+    });
+  }
+
+  public async replaceFinanceOpex(month: string, items: Array<{ amount: number; label: string }>): Promise<FinanceOpexItem[]> {
+    await sequelize.transaction(async (transaction) => {
+      await financeOpexModel.destroy!({ transaction, where: { month } });
+      if (items.length > 0) {
+        await financeOpexModel.bulkCreate!(
+          items.map((item, sortOrder) => ({ ...item, month, sortOrder })),
+          { transaction },
+        );
+      }
+    });
+
+    return this.getFinanceOpex(month);
   }
 
   public async getSnapshotFromOrders(input: DashboardMetricsInput): Promise<DashboardMetricSnapshot> {

@@ -31,11 +31,24 @@ import type {
 import type { ShipmentMutationPayload, ShipmentRequestUser } from "./shipment.internal-types";
 import { RETURN_TO_VENDOR_STATUS, SHIPMENT_RETURN_TYPE } from "./shipment.constants";
 import { DELIVERY_BY } from "../../../config/constants";
+import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
+import type { DashboardMetricSnapshot } from "../dashboard/dashboard.types";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
 const ExcelJS = require("exceljs");
 
 export class ShipmentService {
+  private readonly dashboardAggregateService = new DashboardAggregateService({
+    getDeliveredOrdersCountFromOrders: async () => 0,
+    getSnapshotFromOrders: async (): Promise<DashboardMetricSnapshot> => ({
+      activeMakers: 0,
+      activeProducts: 0,
+      pendingOrders: 0,
+      totalOrders: 0,
+      totalSales: 0,
+    }),
+  });
+
   public constructor(private readonly shipmentRepository: ShipmentRepository) {}
 
   public async createShipment(payload: ShipmentMutationPayload): Promise<Result<{ message: string }>> {
@@ -48,6 +61,7 @@ export class ShipmentService {
       deliveryBy: DELIVERY_BY.HOMIX,
       shippedFromInventory: true,
     });
+    await this.refreshAggregateForShipments([payload]);
     return success({ message: "Shipment created successfully" });
   }
 
@@ -403,11 +417,15 @@ export class ShipmentService {
   }
 
   public async updateShipment(shipmentId: number, payload: ShipmentMutationPayload, user: ShipmentRequestUser): Promise<Result<unknown>> {
+    const existingShipment = typeof this.shipmentRepository.findShipmentEntity === "function"
+      ? await this.shipmentRepository.findShipmentEntity(shipmentId)
+      : null;
     const shipment = await this.shipmentRepository.updateShipment(shipmentId, payload, user.id);
     if (!shipment) {
       throw new NotFoundError("Shipment not found");
     }
 
+    await this.refreshAggregateForShipments([existingShipment, shipment, payload]);
     return success(shipment);
   }
 
@@ -416,16 +434,24 @@ export class ShipmentService {
     payload: ShipmentMutationPayload,
     user: ShipmentRequestUser,
   ): Promise<Result<{ message: string; updatedCount: number }>> {
+    const existingShipments = typeof this.shipmentRepository.findShipmentEntity === "function"
+      ? await Promise.all(shipmentIds.map((shipmentId) => this.shipmentRepository.findShipmentEntity(shipmentId)))
+      : [];
     const updatedCount = await this.shipmentRepository.bulkUpdateShipments(shipmentIds, payload, user.id);
+    await this.refreshAggregateForShipments([...existingShipments, payload]);
     return success({ message: "Shipments updated successfully", updatedCount });
   }
 
   public async deleteShipment(shipmentId: number): Promise<Result<{ message: string }>> {
+    const existingShipment = typeof this.shipmentRepository.findShipmentEntity === "function"
+      ? await this.shipmentRepository.findShipmentEntity(shipmentId)
+      : null;
     const deleted = await this.shipmentRepository.deleteShipment(shipmentId);
     if (!deleted) {
       throw new NotFoundError("Shipment not found");
     }
 
+    await this.refreshAggregateForShipments([existingShipment]);
     return success({ message: "Shipment deleted successfully" });
   }
 
@@ -504,5 +530,26 @@ export class ShipmentService {
     }
 
     return success({ message: "Note deleted successfully" });
+  }
+
+  private async refreshAggregateForShipments(values: unknown[]): Promise<void> {
+    const dates = values.flatMap((value) => {
+      if (!value || typeof value !== "object") return [];
+      const plain = "toJSON" in value && typeof (value as { toJSON?: unknown }).toJSON === "function"
+        ? (value as { toJSON: () => Record<string, unknown> }).toJSON()
+        : value as Record<string, unknown>;
+      const rawDate = plain.orderDate;
+      if (!rawDate) return [];
+      const date = new Date(String(rawDate));
+      return Number.isNaN(date.getTime()) ? [] : [date.toISOString().slice(0, 10)];
+    });
+
+    const uniqueDates = [...new Set(dates)].sort();
+    if (uniqueDates.length > 0) {
+      await this.dashboardAggregateService.refreshRange(
+        uniqueDates[0]!,
+        uniqueDates[uniqueDates.length - 1]!,
+      );
+    }
   }
 }

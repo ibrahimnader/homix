@@ -6,6 +6,59 @@ describe("DashboardService", () => {
     startDate: "2026-05-01T00:00:00.000Z",
   };
 
+  it("builds finance totals from automatic aggregates and persisted OPEX", async () => {
+    const repository = {
+      getFinanceAutomaticMetrics: jest.fn().mockResolvedValue({
+        cancellations: 100,
+        cogsG2n: 300,
+        cogsGmv: 700,
+        cogsNmv: 500,
+        deliveredHomix: 800,
+        deliveredVendor: 200,
+        discounts: 50,
+        gmvOnline: 1500,
+        gmvShowroom: 500,
+      }),
+      getFinanceOpex: jest.fn().mockResolvedValue([
+        { amount: 100, id: 1, label: "Marketing", sortOrder: 0 },
+        { amount: 50, id: 2, label: "Tools", sortOrder: 1 },
+      ]),
+    } as never;
+    const service = new DashboardService(repository);
+
+    const result = await service.getFinance("2026-05");
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data).toEqual(expect.objectContaining({
+        ebitda: 1200,
+        g2n: 1000,
+        gmv: 2000,
+        grossMargin: 1350,
+        nmv: 1850,
+        totalOpex: 150,
+      }));
+    }
+  });
+
+  it("replaces a month's OPEX and returns recalculated finance data", async () => {
+    const repository = {
+      getFinanceAutomaticMetrics: jest.fn().mockResolvedValue({
+        cancellations: 0, cogsG2n: 0, cogsGmv: 0, cogsNmv: 0,
+        deliveredHomix: 0, deliveredVendor: 0, discounts: 0,
+        gmvOnline: 0, gmvShowroom: 0,
+      }),
+      getFinanceOpex: jest.fn().mockResolvedValue([{ amount: 75, label: "Rent", sortOrder: 0 }]),
+      replaceFinanceOpex: jest.fn().mockResolvedValue(undefined),
+    } as never;
+    const service = new DashboardService(repository);
+
+    await service.saveFinanceOpex("2026-06", [{ amount: 75, label: "Rent" }]);
+
+    expect((repository as unknown as { replaceFinanceOpex: jest.Mock }).replaceFinanceOpex)
+      .toHaveBeenCalledWith("2026-06", [{ amount: 75, label: "Rent" }]);
+  });
+
   it("returns admin cards with active makers", async () => {
     const dashboardRepository = {
       getSnapshot: jest

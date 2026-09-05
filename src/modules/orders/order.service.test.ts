@@ -4,6 +4,7 @@ import { OrderService, restrictVendorOrderPayload } from "./order.service";
 jest.mock("../dashboard/dashboard-aggregate.service", () => ({
   DashboardAggregateService: jest.fn().mockImplementation(() => ({
     refreshRange: jest.fn(),
+    backfill: jest.fn(),
   })),
 }));
 

@@ -3,6 +3,7 @@ import { Op, QueryTypes } from "sequelize";
 import { logger } from "../../shared/logger";
 import { sequelize } from "../../infrastructure/database";
 import type {
+  FinanceAutomaticMetrics,
   DashboardLeaderboardEntry,
   DashboardMetricSnapshot,
   DashboardMetricsInput,
@@ -48,6 +49,19 @@ type DashboardDailyCategorySaleModel = {
   bulkCreate: (payloads: CategoryAggregateRecord[], options?: Record<string, unknown>) => Promise<unknown>;
   destroy: (options?: Record<string, unknown>) => Promise<number>;
   sync: (options?: Record<string, unknown>) => Promise<unknown>;
+};
+
+type FinanceDailyMetricModel = {
+  bulkCreate: (payloads: FinanceAggregateRecord[], options?: Record<string, unknown>) => Promise<unknown>;
+  destroy: (options?: Record<string, unknown>) => Promise<number>;
+  findAll: <TRow = FinanceAggregateRecord>(options?: Record<string, unknown>) => Promise<TRow[]>;
+  sync: (options?: Record<string, unknown>) => Promise<unknown>;
+};
+
+type FinanceAggregateRecord = FinanceAutomaticMetrics & {
+  metricDate: string;
+  orderCount: number;
+  sourceUpdatedAt: string | Date | null;
 };
 
 type OrderRecord = {
@@ -115,6 +129,7 @@ type DistributionAggregateRow = {
 const dashboardDailyMetricModel = require("./dashboard-daily-metric.model") as DashboardDailyMetricModel;
 const dashboardDailyProductSaleModel = require("./dashboard-daily-product-sale.model") as DashboardDailyProductSaleModel;
 const dashboardDailyCategorySaleModel = require("./dashboard-daily-category-sale.model") as DashboardDailyCategorySaleModel;
+const financeDailyMetricModel = require("./finance-daily-metric.model") as FinanceDailyMetricModel;
 const orderModel = require("../../../app/modules/order/order.model") as OrderModel;
 
 const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000;
@@ -143,10 +158,28 @@ const BULK_CATEGORY_UPDATE_FIELDS = [
   "totalSales",
   "vendorId",
 ] as const;
+const BULK_FINANCE_UPDATE_FIELDS = [
+  "cancellations",
+  "cogsG2n",
+  "cogsGmv",
+  "cogsNmv",
+  "deliveredHomix",
+  "deliveredVendor",
+  "discounts",
+  "gmvOnline",
+  "gmvShowroom",
+  "orderCount",
+  "sourceUpdatedAt",
+] as const;
 const OPEN_STATUS_SQL = "1,2,3";
 const PENDING_STATUS_SQL = "1";
 const IN_PROGRESS_STATUS_SQL = "2";
 const DELIVERED_STATUS_SQL = "5";
+const CANCELED_STATUS_SQL = "4";
+const DELIVERY_BY_HOMIX_SQL = "1";
+const DELIVERY_BY_VENDOR_SQL = "2";
+const ORDER_SOURCE_SHOWROOM_SQL = "1";
+const ORDER_SOURCE_ONLINE_SQL = "2";
 const CANCELED_OR_REFUNDED_STATUS_SQL = "4,6,7";
 const UNCATEGORIZED_CATEGORY_ID = 0;
 const UNCATEGORIZED_CATEGORY_TITLE = "أخرى";
@@ -217,7 +250,81 @@ export class DashboardAggregateService {
       dashboardDailyMetricModel.sync(),
       dashboardDailyProductSaleModel.sync(),
       dashboardDailyCategorySaleModel.sync(),
+      financeDailyMetricModel.sync(),
     ]);
+  }
+
+  public async getFinanceMetrics(startDate: string, endDate: string): Promise<FinanceAutomaticMetrics | null> {
+    let rows = await financeDailyMetricModel.findAll<FinanceAggregateRecord>({
+      where: { metricDate: { between: [startDate.slice(0, 10), endDate.slice(0, 10)] } },
+    });
+
+    const [source] = await sequelize.query<{ orderCount: number | string; sourceUpdatedAt: Date | string | null }>(
+      `
+        SELECT COUNT(*)::int AS "orderCount", MAX("updatedAt") AS "sourceUpdatedAt"
+        FROM "orders"
+        WHERE "deletedAt" IS NULL
+          AND "orderDate" >= :startDate
+          AND "orderDate" < :exclusiveEndDate
+      `,
+      {
+        replacements: {
+          exclusiveEndDate: this.getExclusiveEndDate(new Date(endDate)),
+          startDate: new Date(startDate),
+        },
+        type: QueryTypes.SELECT,
+      },
+    );
+    const aggregateOrderCount = rows.reduce((sum, row) => sum + Number(row.orderCount ?? 0), 0);
+    const aggregateSourceUpdatedAt = rows.reduce<number>((latest, row) => {
+      const timestamp = row.sourceUpdatedAt ? new Date(row.sourceUpdatedAt).getTime() : 0;
+      return Math.max(latest, Number.isNaN(timestamp) ? 0 : timestamp);
+    }, 0);
+    const sourceUpdatedAt = source?.sourceUpdatedAt ? new Date(source.sourceUpdatedAt).getTime() : 0;
+    const isFresh = aggregateOrderCount === Number(source?.orderCount ?? 0)
+      && aggregateSourceUpdatedAt === (Number.isNaN(sourceUpdatedAt) ? 0 : sourceUpdatedAt);
+
+    if (!isFresh) {
+      await this.refreshRange(startDate, endDate);
+      rows = await financeDailyMetricModel.findAll<FinanceAggregateRecord>({
+        where: { metricDate: { between: [startDate.slice(0, 10), endDate.slice(0, 10)] } },
+      });
+    }
+
+    if (rows.length === 0) {
+      return Number(source?.orderCount ?? 0) === 0
+        ? {
+            cancellations: 0, cogsG2n: 0, cogsGmv: 0, cogsNmv: 0,
+            deliveredHomix: 0, deliveredVendor: 0, discounts: 0,
+            gmvOnline: 0, gmvShowroom: 0,
+          }
+        : null;
+    }
+
+    return rows.reduce<FinanceAutomaticMetrics>(
+      (summary, row) => ({
+        cancellations: summary.cancellations + Number(row.cancellations ?? 0),
+        cogsG2n: summary.cogsG2n + Number(row.cogsG2n ?? 0),
+        cogsGmv: summary.cogsGmv + Number(row.cogsGmv ?? 0),
+        cogsNmv: summary.cogsNmv + Number(row.cogsNmv ?? 0),
+        deliveredHomix: summary.deliveredHomix + Number(row.deliveredHomix ?? 0),
+        deliveredVendor: summary.deliveredVendor + Number(row.deliveredVendor ?? 0),
+        discounts: summary.discounts + Number(row.discounts ?? 0),
+        gmvOnline: summary.gmvOnline + Number(row.gmvOnline ?? 0),
+        gmvShowroom: summary.gmvShowroom + Number(row.gmvShowroom ?? 0),
+      }),
+      {
+        cancellations: 0,
+        cogsG2n: 0,
+        cogsGmv: 0,
+        cogsNmv: 0,
+        deliveredHomix: 0,
+        deliveredVendor: 0,
+        discounts: 0,
+        gmvOnline: 0,
+        gmvShowroom: 0,
+      },
+    );
   }
 
   public async getSnapshot(
@@ -362,11 +469,12 @@ export class DashboardAggregateService {
       return;
     }
 
-    const [adminRows, vendorRows, productRows, categoryRows] = await Promise.all([
+    const [adminRows, vendorRows, productRows, categoryRows, financeRows] = await Promise.all([
       this.getAdminAggregateRows(bounds.startDate, bounds.endDate),
       this.getVendorAggregateRows(bounds.startDate, bounds.endDate),
       this.getProductAggregateRows(bounds.startDate, bounds.endDate),
       this.getCategoryAggregateRows(bounds.startDate, bounds.endDate),
+      this.getFinanceAggregateRows(bounds.startDate, bounds.endDate),
     ]);
     const dedupedProductRows = this.dedupeProductAggregateRows(productRows);
     const dedupedCategoryRows = this.dedupeCategoryAggregateRows(categoryRows);
@@ -383,10 +491,11 @@ export class DashboardAggregateService {
       dashboardDailyMetricModel.destroy(destroyRange),
       dashboardDailyProductSaleModel.destroy(destroyRange),
       dashboardDailyCategorySaleModel.destroy(destroyRange),
+      financeDailyMetricModel.destroy(destroyRange),
     ]);
 
     const aggregateRows = [...adminRows, ...vendorRows];
-    if (aggregateRows.length === 0 && dedupedProductRows.length === 0 && dedupedCategoryRows.length === 0) {
+    if (aggregateRows.length === 0 && dedupedProductRows.length === 0 && dedupedCategoryRows.length === 0 && financeRows.length === 0) {
       logger.info(
         { operationName: AGGREGATE_LOG_OPERATION, startDate: bounds.startDate, endDate: bounds.endDate },
         "No aggregate rows generated for requested range",
@@ -406,6 +515,11 @@ export class DashboardAggregateService {
       dedupedCategoryRows.length > 0
         ? this.upsertCategoryRows(dedupedCategoryRows)
         : Promise.resolve(),
+      financeRows.length > 0
+        ? financeDailyMetricModel.bulkCreate(financeRows, {
+            updateOnDuplicate: [...BULK_FINANCE_UPDATE_FIELDS],
+          })
+        : Promise.resolve(),
     ]);
   }
 
@@ -417,6 +531,22 @@ export class DashboardAggregateService {
     startDate?: string,
     endDate?: string,
   ): Promise<{ endDate: Date; startDate: Date } | null> {
+    /* Explicit refreshes must keep their exact bounds, even when the mutation
+       deleted/moved the only order on an edge date. Clamping to the remaining
+       order history would leave the old daily row behind indefinitely. */
+    if (startDate && endDate) {
+      const normalizedStartDate = normalizeBoundary(startDate);
+      const normalizedEndDate = normalizeBoundary(endDate);
+      if (
+        Number.isNaN(normalizedStartDate.getTime())
+        || Number.isNaN(normalizedEndDate.getTime())
+        || normalizedStartDate > normalizedEndDate
+      ) {
+        return null;
+      }
+      return { endDate: normalizedEndDate, startDate: normalizedStartDate };
+    }
+
     const [firstOrder] = await orderModel.findAll<OrderRecord>({
       attributes: ["orderDate"],
       limit: 1,
@@ -443,22 +573,6 @@ export class DashboardAggregateService {
 
     const firstOrderDate = normalizeBoundary(firstDate);
     const lastOrderDate = normalizeBoundary(lastDate);
-
-    if (startDate && endDate) {
-      const normalizedStartDate = normalizeBoundary(startDate);
-      const normalizedEndDate = normalizeBoundary(endDate);
-      const clampedStartDate = normalizedStartDate < firstOrderDate ? firstOrderDate : normalizedStartDate;
-      const clampedEndDate = normalizedEndDate > lastOrderDate ? lastOrderDate : normalizedEndDate;
-
-      if (clampedStartDate > clampedEndDate) {
-        return null;
-      }
-
-      return {
-        endDate: clampedEndDate,
-        startDate: clampedStartDate,
-      };
-    }
 
     return {
       endDate: lastOrderDate,
@@ -532,6 +646,63 @@ export class DashboardAggregateService {
       totalOrders: Number(row.totalOrders ?? 0),
       totalSales: Number(row.totalSales ?? 0),
       vendorId: null,
+    }));
+  }
+
+  private async getFinanceAggregateRows(startDate: Date, endDate: Date): Promise<FinanceAggregateRecord[]> {
+    const rows = await sequelize.query<FinanceAggregateRecord>(
+      `
+        WITH order_finance AS (
+          SELECT
+            DATE("orderDate")::text AS "metricDate",
+            "status",
+            "deliveryBy",
+            "orderSource",
+            COALESCE("subTotalPrice", COALESCE("totalPrice", 0) + COALESCE("totalDiscounts", 0), 0)::numeric AS "grossValue",
+            COALESCE("totalDiscounts", 0)::numeric AS "discountValue",
+            COALESCE("totalCost", 0)::numeric AS "costValue",
+            "updatedAt" AS "sourceUpdatedAt"
+          FROM "orders"
+          WHERE "deletedAt" IS NULL
+            AND "orderDate" >= :startDate
+            AND "orderDate" < :exclusiveEndDate
+        )
+        SELECT
+          "metricDate",
+          COUNT(*)::int AS "orderCount",
+          MAX("sourceUpdatedAt") AS "sourceUpdatedAt",
+          COALESCE(SUM("grossValue") FILTER (WHERE COALESCE("orderSource", ${ORDER_SOURCE_ONLINE_SQL}) <> ${ORDER_SOURCE_SHOWROOM_SQL}), 0)::numeric AS "gmvOnline",
+          COALESCE(SUM("grossValue") FILTER (WHERE "orderSource" = ${ORDER_SOURCE_SHOWROOM_SQL}), 0)::numeric AS "gmvShowroom",
+          COALESCE(SUM("grossValue" - "discountValue") FILTER (WHERE "status" = ${CANCELED_STATUS_SQL}), 0)::numeric AS "cancellations",
+          COALESCE(SUM("discountValue"), 0)::numeric AS "discounts",
+          COALESCE(SUM("grossValue" - "discountValue") FILTER (WHERE "status" = ${DELIVERED_STATUS_SQL} AND "deliveryBy" = ${DELIVERY_BY_HOMIX_SQL}), 0)::numeric AS "deliveredHomix",
+          COALESCE(SUM("grossValue" - "discountValue") FILTER (WHERE "status" = ${DELIVERED_STATUS_SQL} AND "deliveryBy" = ${DELIVERY_BY_VENDOR_SQL}), 0)::numeric AS "deliveredVendor",
+          COALESCE(SUM("costValue"), 0)::numeric AS "cogsGmv",
+          COALESCE(SUM("costValue") FILTER (WHERE COALESCE("status", 0) <> ${CANCELED_STATUS_SQL}), 0)::numeric AS "cogsNmv",
+          COALESCE(SUM("costValue") FILTER (WHERE "status" = ${DELIVERED_STATUS_SQL}), 0)::numeric AS "cogsG2n"
+        FROM order_finance
+        GROUP BY "metricDate"
+        ORDER BY "metricDate" ASC
+      `,
+      {
+        replacements: { exclusiveEndDate: this.getExclusiveEndDate(endDate), startDate },
+        type: QueryTypes.SELECT,
+      },
+    );
+
+    return rows.map((row) => ({
+      cancellations: Number(row.cancellations ?? 0),
+      cogsG2n: Number(row.cogsG2n ?? 0),
+      cogsGmv: Number(row.cogsGmv ?? 0),
+      cogsNmv: Number(row.cogsNmv ?? 0),
+      deliveredHomix: Number(row.deliveredHomix ?? 0),
+      deliveredVendor: Number(row.deliveredVendor ?? 0),
+      discounts: Number(row.discounts ?? 0),
+      gmvOnline: Number(row.gmvOnline ?? 0),
+      gmvShowroom: Number(row.gmvShowroom ?? 0),
+      metricDate: row.metricDate,
+      orderCount: Number(row.orderCount ?? 0),
+      sourceUpdatedAt: row.sourceUpdatedAt,
     }));
   }
 

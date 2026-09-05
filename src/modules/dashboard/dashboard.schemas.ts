@@ -35,3 +35,14 @@ export const dashboardDateRangeSchema = z
       });
     }
   });
+
+export const financeMonthSchema = z.object({
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month must use YYYY-MM"),
+});
+
+export const financeOpexBodySchema = z.object({
+  items: z.array(z.object({
+    amount: z.coerce.number().finite().min(0).max(999_999_999_999),
+    label: z.string().trim().min(1).max(160),
+  })).max(100),
+});

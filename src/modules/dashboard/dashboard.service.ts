@@ -16,6 +16,9 @@ import type {
   DashboardRole,
   DashboardSalesDistributionItem,
   DateRangeInput,
+  FinanceAutomaticMetrics,
+  FinanceDashboardPayload,
+  FinanceOpexItem,
 } from "./dashboard.types";
 import { GOAL_CONFIGS, OTHER_DISTRIBUTION_ITEM, QUICK_ACTIONS } from "./dashboard.constants";
 import {
@@ -55,6 +58,24 @@ export class DashboardService {
       role,
       startDate: normalizedRange.startDate,
     });
+  }
+
+  public async getFinance(month: string): Promise<Result<FinanceDashboardPayload>> {
+    const { endDate, startDate } = this.getMonthRange(month);
+    const [automatic, opex] = await Promise.all([
+      this.dashboardRepository.getFinanceAutomaticMetrics(startDate, endDate),
+      this.dashboardRepository.getFinanceOpex(month),
+    ]);
+
+    return success(this.buildFinancePayload(month, automatic, opex));
+  }
+
+  public async saveFinanceOpex(
+    month: string,
+    items: Array<{ amount: number; label: string }>,
+  ): Promise<Result<FinanceDashboardPayload>> {
+    await this.dashboardRepository.replaceFinanceOpex(month, items);
+    return this.getFinance(month);
   }
 
   public async getSingleCard(
@@ -215,6 +236,43 @@ export class DashboardService {
       ...baseCards,
       buildCard("activeMakers", currentSnapshot.activeMakers, previousSnapshot.activeMakers),
     ];
+  }
+
+  private getMonthRange(month: string): DateRangeInput {
+    const [year, monthNumber] = month.split("-").map(Number);
+    const start = new Date(Date.UTC(year!, monthNumber! - 1, 1));
+    const end = new Date(Date.UTC(year!, monthNumber!, 1) - 1);
+    return { endDate: end.toISOString(), startDate: start.toISOString() };
+  }
+
+  private buildFinancePayload(
+    month: string,
+    automatic: FinanceAutomaticMetrics,
+    opex: FinanceOpexItem[],
+  ): FinanceDashboardPayload {
+    const round = (value: number): number => Math.round(value * 100) / 100;
+    const ratio = (value: number, base: number): number => base === 0 ? 0 : round((value / base) * 100);
+    const gmv = automatic.gmvOnline + automatic.gmvShowroom;
+    const nmv = gmv - automatic.cancellations - automatic.discounts;
+    const g2n = automatic.deliveredHomix + automatic.deliveredVendor;
+    const grossMargin = nmv - automatic.cogsNmv;
+    const totalOpex = opex.reduce((sum, item) => sum + item.amount, 0);
+    const ebitda = grossMargin - totalOpex;
+
+    return {
+      ...automatic,
+      cancellationRate: ratio(automatic.cancellations, gmv),
+      ebitda: round(ebitda),
+      g2n: round(g2n),
+      g2nRate: ratio(g2n, nmv),
+      gmv: round(gmv),
+      grossMargin: round(grossMargin),
+      grossMarginRate: ratio(grossMargin, nmv),
+      month,
+      nmv: round(nmv),
+      opex,
+      totalOpex: round(totalOpex),
+    };
   }
 
   private buildMetricsInput(

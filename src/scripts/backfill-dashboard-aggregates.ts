@@ -1,7 +1,4 @@
-import { connectToDb } from "../infrastructure/database/sequelize";
-import { logger } from "../shared/logger";
-import { DashboardAggregateService } from "../modules/dashboard/dashboard-aggregate.service";
-import { DashboardRepository } from "../modules/dashboard/dashboard.repo";
+import dotenv from "dotenv";
 
 const START_ARGUMENT_PREFIX = "--start=";
 const END_ARGUMENT_PREFIX = "--end=";
@@ -11,6 +8,24 @@ const getArgumentValue = (prefix: string): string | undefined => {
 };
 
 const run = async (): Promise<void> => {
+  dotenv.config();
+  /* This data script never authenticates users or seeds passwords. These
+     process-local sentinels only satisfy the shared server config while the
+     backfill runs; application startup remains strict. */
+  process.env.DEFAULT_PASSWORD ??= "dashboard-backfill-not-used";
+  process.env.JWT_SECRET ??= "dashboard-backfill-not-used";
+
+  const [database, loggerModule, aggregateModule, repositoryModule] = await Promise.all([
+    import("../infrastructure/database"),
+    import("../shared/logger"),
+    import("../modules/dashboard/dashboard-aggregate.service"),
+    import("../modules/dashboard/dashboard.repo"),
+  ]);
+  const { connectToDb, sequelize } = database;
+  const { logger } = loggerModule;
+  const { DashboardAggregateService } = aggregateModule;
+  const { DashboardRepository } = repositoryModule;
+
   await connectToDb();
   const dashboardRepository = new DashboardRepository();
   const dashboardAggregateService = new DashboardAggregateService(dashboardRepository);
@@ -28,9 +43,11 @@ const run = async (): Promise<void> => {
 
   await dashboardAggregateService.backfill(startDate, endDate);
   logger.info({ operationName: "dashboard-aggregate-backfill" }, "Dashboard aggregate backfill completed");
+  await sequelize.close();
 };
 
 void run().catch((error: unknown) => {
-  logger.error({ err: error, operationName: "dashboard-aggregate-backfill" }, "Dashboard aggregate backfill failed");
+  console.error("Dashboard aggregate backfill failed");
+  console.error(error);
   process.exitCode = 1;
 });

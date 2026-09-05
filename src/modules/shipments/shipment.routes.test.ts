@@ -126,6 +126,11 @@ jest.mock("../../../app/modules/logs/log.model", () => ({
 jest.mock("../../../app/modules/product/productType.model", () => ({}));
 jest.mock("../../../app/modules/shipments/shipment.service", () => legacyShipmentService);
 jest.mock("../../../app/modules/order/order.service", () => legacyOrderService);
+jest.mock("../dashboard/dashboard-aggregate.service", () => ({
+  DashboardAggregateService: jest.fn().mockImplementation(() => ({
+    refreshRange: jest.fn(),
+  })),
+}));
 jest.mock("../settings/managed-options", () => ({
   MANAGED_OPTION_GROUP: {
     EXPENSE_TYPE: "expense_type",

@@ -4,11 +4,12 @@ import { z } from "zod";
 import { asyncHandler, validateRequest } from "../../shared/http";
 import { DashboardController } from "./dashboard.controller";
 import { DashboardRepository } from "./dashboard.repo";
-import { dashboardDateRangeSchema } from "./dashboard.schemas";
+import { dashboardDateRangeSchema, financeMonthSchema, financeOpexBodySchema } from "./dashboard.schemas";
 import { DashboardService } from "./dashboard.service";
 
 const verifyToken = require("../../../app/middlewares/protectApi");
 const requirePermission = require("../../../app/middlewares/requirePermission");
+const isAdmin = require("../../../app/middlewares/isAdmin");
 
 const dashboardRepository = new DashboardRepository();
 const dashboardService = new DashboardService(dashboardRepository);
@@ -25,6 +26,24 @@ const dashboardCardParamSchema = z.object({
 });
 
 export const dashboardRouter = express.Router();
+
+dashboardRouter.get(
+  "/finance",
+  verifyToken,
+  isAdmin,
+  requirePermission("finance_view"),
+  validateRequest({ query: financeMonthSchema }),
+  asyncHandler(dashboardController.getFinance),
+);
+
+dashboardRouter.put(
+  "/finance/opex",
+  verifyToken,
+  isAdmin,
+  requirePermission("finance_view"),
+  validateRequest({ body: financeOpexBodySchema, query: financeMonthSchema }),
+  asyncHandler(dashboardController.saveFinanceOpex),
+);
 
 /**
  * @swagger

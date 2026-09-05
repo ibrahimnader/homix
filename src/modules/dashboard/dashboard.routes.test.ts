@@ -3,7 +3,7 @@ import request from "supertest";
 
 jest.mock("../../../app/middlewares/protectApi", () => {
   return (req: express.Request, _res: express.Response, next: express.NextFunction) => {
-    req.user = { id: 1, userType: "1" };
+    req.user = { id: 1, userType: String(req.header("x-test-user-type") ?? "1") };
     next();
   };
 });
@@ -89,6 +89,22 @@ describe("dashboardRouter", () => {
   const app = express();
   app.use("/dashboard", dashboardRouter);
   app.use(errorMiddleware);
+
+  it("rejects an invalid finance month before querying finance data", async () => {
+    const response = await request(app).get("/dashboard/finance").query({ month: "2026-13" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.status).toBe(false);
+  });
+
+  it("blocks non-admin users from the finance dashboard API", async () => {
+    const response = await request(app)
+      .get("/dashboard/finance")
+      .set("x-test-user-type", "2")
+      .query({ month: "2026-05" });
+
+    expect(response.body).toEqual({ message: "Unauthorized", status: false });
+  });
 
   it("returns dashboard cards", async () => {
     const response = await request(app).get("/dashboard/cards").query({

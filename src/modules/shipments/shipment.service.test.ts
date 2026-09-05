@@ -2,6 +2,12 @@ import { NotFoundError, UnauthorizedError } from "../../shared/errors";
 import { shipmentLegacyGateway } from "./shipment.legacy-gateway";
 import { ShipmentService } from "./shipment.service";
 
+jest.mock("../dashboard/dashboard-aggregate.service", () => ({
+  DashboardAggregateService: jest.fn().mockImplementation(() => ({
+    refreshRange: jest.fn(),
+  })),
+}));
+
 describe("ShipmentService", () => {
   it("throws not found when shipment details request misses", async () => {
     const repository = {

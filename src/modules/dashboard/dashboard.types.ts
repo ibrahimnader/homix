@@ -111,3 +111,36 @@ export interface DashboardListPayload<TItem> {
   items: TItem[];
   role: DashboardRole;
 }
+
+export interface FinanceOpexItem {
+  amount: number;
+  id?: number;
+  label: string;
+  sortOrder: number;
+}
+
+export interface FinanceAutomaticMetrics {
+  cancellations: number;
+  cogsG2n: number;
+  cogsGmv: number;
+  cogsNmv: number;
+  deliveredHomix: number;
+  deliveredVendor: number;
+  discounts: number;
+  gmvOnline: number;
+  gmvShowroom: number;
+}
+
+export interface FinanceDashboardPayload extends FinanceAutomaticMetrics {
+  cancellationRate: number;
+  ebitda: number;
+  g2n: number;
+  g2nRate: number;
+  gmv: number;
+  grossMargin: number;
+  grossMarginRate: number;
+  month: string;
+  nmv: number;
+  opex: FinanceOpexItem[];
+  totalOpex: number;
+}

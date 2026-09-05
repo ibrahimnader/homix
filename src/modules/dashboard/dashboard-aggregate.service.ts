@@ -1,4 +1,4 @@
-import { Op, QueryTypes } from "sequelize";
+import { Op, QueryTypes, type Transaction } from "sequelize";
 
 import { logger } from "../../shared/logger";
 import { sequelize } from "../../infrastructure/database";
@@ -134,6 +134,7 @@ const orderModel = require("../../../app/modules/order/order.model") as OrderMod
 
 const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000;
 const AGGREGATE_LOG_OPERATION = "dashboard-aggregate";
+const AGGREGATE_ADVISORY_LOCK_ID = 1_104_202_026;
 const BULK_UPDATE_FIELDS = [
   "activeMakers",
   "activeProducts",
@@ -469,58 +470,73 @@ export class DashboardAggregateService {
       return;
     }
 
-    const [adminRows, vendorRows, productRows, categoryRows, financeRows] = await Promise.all([
-      this.getAdminAggregateRows(bounds.startDate, bounds.endDate),
-      this.getVendorAggregateRows(bounds.startDate, bounds.endDate),
-      this.getProductAggregateRows(bounds.startDate, bounds.endDate),
-      this.getCategoryAggregateRows(bounds.startDate, bounds.endDate),
-      this.getFinanceAggregateRows(bounds.startDate, bounds.endDate),
-    ]);
-    const dedupedProductRows = this.dedupeProductAggregateRows(productRows);
-    const dedupedCategoryRows = this.dedupeCategoryAggregateRows(categoryRows);
+    await sequelize.transaction(async (transaction) => {
+      /* All workers share this PostgreSQL transaction lock. It prevents two
+         webhook/read-repair refreshes from deleting and replacing the same
+         aggregate range concurrently, while the transaction ensures readers
+         see either the complete old snapshot or the complete new snapshot. */
+      await sequelize.query("SELECT pg_advisory_xact_lock(:lockId)", {
+        replacements: { lockId: AGGREGATE_ADVISORY_LOCK_ID },
+        transaction,
+        type: QueryTypes.SELECT,
+      });
 
-    const destroyRange = {
-      where: {
-        metricDate: {
-          between: [toDateOnly(bounds.startDate), toDateOnly(bounds.endDate)],
+      const [adminRows, vendorRows, productRows, categoryRows, financeRows] = await Promise.all([
+        this.getAdminAggregateRows(bounds.startDate, bounds.endDate, transaction),
+        this.getVendorAggregateRows(bounds.startDate, bounds.endDate, transaction),
+        this.getProductAggregateRows(bounds.startDate, bounds.endDate, transaction),
+        this.getCategoryAggregateRows(bounds.startDate, bounds.endDate, transaction),
+        this.getFinanceAggregateRows(bounds.startDate, bounds.endDate, transaction),
+      ]);
+      const dedupedProductRows = this.dedupeProductAggregateRows(productRows);
+      const dedupedCategoryRows = this.dedupeCategoryAggregateRows(categoryRows);
+
+      const destroyRange = {
+        transaction,
+        where: {
+          metricDate: {
+            between: [toDateOnly(bounds.startDate), toDateOnly(bounds.endDate)],
+          },
         },
-      },
-    };
+      };
 
-    await Promise.all([
-      dashboardDailyMetricModel.destroy(destroyRange),
-      dashboardDailyProductSaleModel.destroy(destroyRange),
-      dashboardDailyCategorySaleModel.destroy(destroyRange),
-      financeDailyMetricModel.destroy(destroyRange),
-    ]);
+      await Promise.all([
+        dashboardDailyMetricModel.destroy(destroyRange),
+        dashboardDailyProductSaleModel.destroy(destroyRange),
+        dashboardDailyCategorySaleModel.destroy(destroyRange),
+        financeDailyMetricModel.destroy(destroyRange),
+      ]);
 
-    const aggregateRows = [...adminRows, ...vendorRows];
-    if (aggregateRows.length === 0 && dedupedProductRows.length === 0 && dedupedCategoryRows.length === 0 && financeRows.length === 0) {
-      logger.info(
-        { operationName: AGGREGATE_LOG_OPERATION, startDate: bounds.startDate, endDate: bounds.endDate },
-        "No aggregate rows generated for requested range",
-      );
-      return;
-    }
+      const aggregateRows = [...adminRows, ...vendorRows];
+      if (aggregateRows.length === 0 && dedupedProductRows.length === 0 && dedupedCategoryRows.length === 0 && financeRows.length === 0) {
+        logger.info(
+          { operationName: AGGREGATE_LOG_OPERATION, startDate: bounds.startDate, endDate: bounds.endDate },
+          "No aggregate rows generated for requested range",
+        );
+        return;
+      }
 
-    await Promise.all([
-      aggregateRows.length > 0
-        ? dashboardDailyMetricModel.bulkCreate(aggregateRows, {
-            updateOnDuplicate: [...BULK_UPDATE_FIELDS],
-          })
-        : Promise.resolve(),
-      dedupedProductRows.length > 0
-        ? this.upsertProductRows(dedupedProductRows)
-        : Promise.resolve(),
-      dedupedCategoryRows.length > 0
-        ? this.upsertCategoryRows(dedupedCategoryRows)
-        : Promise.resolve(),
-      financeRows.length > 0
-        ? financeDailyMetricModel.bulkCreate(financeRows, {
-            updateOnDuplicate: [...BULK_FINANCE_UPDATE_FIELDS],
-          })
-        : Promise.resolve(),
-    ]);
+      await Promise.all([
+        aggregateRows.length > 0
+          ? dashboardDailyMetricModel.bulkCreate(aggregateRows, {
+              transaction,
+              updateOnDuplicate: [...BULK_UPDATE_FIELDS],
+            })
+          : Promise.resolve(),
+        dedupedProductRows.length > 0
+          ? this.upsertProductRows(dedupedProductRows, transaction)
+          : Promise.resolve(),
+        dedupedCategoryRows.length > 0
+          ? this.upsertCategoryRows(dedupedCategoryRows, transaction)
+          : Promise.resolve(),
+        financeRows.length > 0
+          ? financeDailyMetricModel.bulkCreate(financeRows, {
+              transaction,
+              updateOnDuplicate: [...BULK_FINANCE_UPDATE_FIELDS],
+            })
+          : Promise.resolve(),
+      ]);
+    });
   }
 
   public async refreshRange(startDate: string, endDate: string): Promise<void> {
@@ -580,7 +596,7 @@ export class DashboardAggregateService {
     };
   }
 
-  private async getAdminAggregateRows(startDate: Date, endDate: Date): Promise<AggregateRecord[]> {
+  private async getAdminAggregateRows(startDate: Date, endDate: Date, transaction?: Transaction): Promise<AggregateRecord[]> {
     const rows = await sequelize.query<DailyAdminRow>(
       `
         WITH daily_orders AS (
@@ -629,6 +645,7 @@ export class DashboardAggregateService {
           exclusiveEndDate: this.getExclusiveEndDate(endDate),
           startDate,
         },
+        transaction,
         type: QueryTypes.SELECT,
       },
     );
@@ -649,7 +666,7 @@ export class DashboardAggregateService {
     }));
   }
 
-  private async getFinanceAggregateRows(startDate: Date, endDate: Date): Promise<FinanceAggregateRecord[]> {
+  private async getFinanceAggregateRows(startDate: Date, endDate: Date, transaction?: Transaction): Promise<FinanceAggregateRecord[]> {
     const rows = await sequelize.query<FinanceAggregateRecord>(
       `
         WITH order_finance AS (
@@ -686,6 +703,7 @@ export class DashboardAggregateService {
       `,
       {
         replacements: { exclusiveEndDate: this.getExclusiveEndDate(endDate), startDate },
+        transaction,
         type: QueryTypes.SELECT,
       },
     );
@@ -706,7 +724,7 @@ export class DashboardAggregateService {
     }));
   }
 
-  private async getVendorAggregateRows(startDate: Date, endDate: Date): Promise<AggregateRecord[]> {
+  private async getVendorAggregateRows(startDate: Date, endDate: Date, transaction?: Transaction): Promise<AggregateRecord[]> {
     const rows = await sequelize.query<DailyVendorRow>(
       `
         SELECT
@@ -734,6 +752,7 @@ export class DashboardAggregateService {
           exclusiveEndDate: this.getExclusiveEndDate(endDate),
           startDate,
         },
+        transaction,
         type: QueryTypes.SELECT,
       },
     );
@@ -854,7 +873,7 @@ export class DashboardAggregateService {
     );
   }
 
-  private async getProductAggregateRows(startDate: Date, endDate: Date): Promise<ProductAggregateRecord[]> {
+  private async getProductAggregateRows(startDate: Date, endDate: Date, transaction?: Transaction): Promise<ProductAggregateRecord[]> {
     const rows = await sequelize.query<ProductAggregateRecord>(
       `
         SELECT
@@ -880,6 +899,7 @@ export class DashboardAggregateService {
           exclusiveEndDate: this.getExclusiveEndDate(endDate),
           startDate,
         },
+        transaction,
         type: QueryTypes.SELECT,
       },
     );
@@ -963,17 +983,19 @@ export class DashboardAggregateService {
     return [...categoryMap.values()];
   }
 
-  private async upsertProductRows(rows: ProductAggregateRecord[]): Promise<void> {
+  private async upsertProductRows(rows: ProductAggregateRecord[], transaction?: Transaction): Promise<void> {
     for (const batch of this.chunkRows(rows, 250)) {
       await dashboardDailyProductSaleModel.bulkCreate(batch, {
+        transaction,
         updateOnDuplicate: [...BULK_PRODUCT_UPDATE_FIELDS],
       });
     }
   }
 
-  private async upsertCategoryRows(rows: CategoryAggregateRecord[]): Promise<void> {
+  private async upsertCategoryRows(rows: CategoryAggregateRecord[], transaction?: Transaction): Promise<void> {
     for (const batch of this.chunkRows(rows, 250)) {
       await dashboardDailyCategorySaleModel.bulkCreate(batch, {
+        transaction,
         updateOnDuplicate: [...BULK_CATEGORY_UPDATE_FIELDS],
       });
     }
@@ -989,7 +1011,7 @@ export class DashboardAggregateService {
     return chunks;
   }
 
-  private async getCategoryAggregateRows(startDate: Date, endDate: Date): Promise<CategoryAggregateRecord[]> {
+  private async getCategoryAggregateRows(startDate: Date, endDate: Date, transaction?: Transaction): Promise<CategoryAggregateRecord[]> {
     const rows = await sequelize.query<{
       categoryId: number | string;
       categoryTitle: string;
@@ -1024,6 +1046,7 @@ export class DashboardAggregateService {
           exclusiveEndDate: this.getExclusiveEndDate(endDate),
           startDate,
         },
+        transaction,
         type: QueryTypes.SELECT,
       },
     );

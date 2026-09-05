@@ -1509,11 +1509,52 @@ export class ShipmentRepository {
   }
 
   public async listDeliveryAccounts(filters: DeliveryAccountsListQuery, vendorId?: number | null): Promise<DeliveryAccountsListResponse> {
-    const whereClause: Record<PropertyKey, unknown> = {
-      ...buildHomixShipmentScope(),
-      shipmentStatus: SHIPMENT_STATUS.DELIVERED,
-      accountsHiddenAt: null,
-    };
+    // These used to be applied with .filter() on the already-paginated page of
+    // rows, so a search for an order outside that one page (e.g. sorted out by
+    // deliveryDate) came back empty even though the order existed — it never
+    // reached the filter. Pushing them into the SQL where-clause makes search
+    // look at every matching delivered order, same as the export does.
+    const andConditions: unknown[] = [
+      buildHomixShipmentScope(),
+      { shipmentStatus: SHIPMENT_STATUS.DELIVERED, accountsHiddenAt: null },
+    ];
+
+    if (vendorId) {
+      andConditions.push(where(col("orderLines.product.vendor.id"), { [Op.eq]: vendorId }));
+    }
+
+    if (filters.orderNumber) {
+      andConditions.push({
+        [Op.or]: [
+          where(fn("lower", col("Order.name")), { [Op.like]: `%${filters.orderNumber.toLowerCase()}%` }),
+          where(fn("lower", col("Order.number")), { [Op.like]: `%${filters.orderNumber.toLowerCase()}%` }),
+          where(fn("lower", col("Order.orderNumber")), { [Op.like]: `%${filters.orderNumber.toLowerCase()}%` }),
+        ],
+      });
+    }
+
+    if (filters.paymentMethod) {
+      andConditions.push(where(col("Order.paymentStatus"), { [Op.eq]: Number(filters.paymentMethod) }));
+    }
+
+    if (filters.accountingStatus) {
+      // A null accountingStatus displays as PENDING (see the mapper below), so
+      // a PENDING filter has to also catch the never-set rows, not just rows
+      // explicitly stored as PENDING.
+      andConditions.push(
+        filters.accountingStatus === ACCOUNTING_STATUS.PENDING
+          ? { [Op.or]: [{ accountingStatus: null }, { accountingStatus: ACCOUNTING_STATUS.PENDING }] }
+          : { accountingStatus: filters.accountingStatus },
+      );
+    }
+
+    if (filters.settledDate) {
+      const startOfDay = toDateRangeBoundary(filters.settledDate, "start");
+      const endOfDay = toDateRangeBoundary(filters.settledDate, "end");
+      if (startOfDay && endOfDay) {
+        andConditions.push(where(col("Order.accountingDate"), { [Op.gte]: startOfDay, [Op.lte]: endOfDay }));
+      }
+    }
 
     const result = await orderModel.findAndCountAll({
       distinct: true,
@@ -1522,10 +1563,7 @@ export class ShipmentRepository {
       offset: (filters.page - 1) * filters.size,
       order: [["deliveryDate", "DESC"]],
       subQuery: false,
-      where: {
-        ...whereClause,
-        ...(vendorId ? { "$orderLines.product.vendor.id$": vendorId } : {}),
-      },
+      where: { [Op.and]: andConditions },
     });
 
     const items = result.rows.map((row: unknown) => {
@@ -1571,32 +1609,16 @@ export class ShipmentRepository {
         shippingCompanyName: toText(toPlain(order.shippingCompanyRecord).name, toText(order.shippingCompany))
           || (deliveryBy ? DELIVERY_BY_LABELS[deliveryBy] ?? String(deliveryBy) : ""),
       } satisfies DeliveryAccountItem;
-    }).filter((item: DeliveryAccountItem) => {
-      if (filters.orderNumber && !item.orderNumber.toLowerCase().includes(filters.orderNumber.toLowerCase())) {
-        return false;
-      }
-      if (filters.paymentMethod && item.paymentMethod !== filters.paymentMethod) {
-        return false;
-      }
-      if (filters.accountingStatus && item.accountingStatus !== filters.accountingStatus) {
-        return false;
-      }
-      if (filters.settledDate) {
-        const requestedDate = toIsoString(filters.settledDate)?.slice(0, 10);
-        if (!requestedDate || item.accountingDate?.slice(0, 10) !== requestedDate) {
-          return false;
-        }
-      }
-      return true;
     });
 
     return {
       items,
       page: filters.page,
       size: filters.size,
-      totalCount: filters.accountingStatus || filters.orderNumber || filters.paymentMethod || filters.settledDate
-        ? items.length
-        : toNumber(result.count),
+      // All filters now run in the SQL where-clause above, so result.count is
+      // already the filtered total — no more approximating it from this page's
+      // item count.
+      totalCount: toNumber(result.count),
     };
   }
 

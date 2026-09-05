@@ -1172,6 +1172,7 @@ class OrderService {
       { header: "حالة الدفع", key: "paymentStatus" },
       { header: "سعر التكلفة", key: "cost" },
       { header: "سعر البيع", key: "price" },
+      { header: "الخصم", key: "discount" },
       { header: "المبلغ المطلوب تحصيله", key: "amountToCollect" },
       { header: "التوصيل بواسطة", key: "deliveryBy" },
       { header: "حالة التأخير", key: "lateStatus" },
@@ -1257,6 +1258,9 @@ class OrderService {
                 subTotalPrice: order.subTotalPrice,
                 totalDiscounts: order.totalDiscounts,
               });
+        // Order-level total, same as amountToCollect above — repeated on every
+        // line row of the order, since discounts aren't split per line.
+        const discount = normalizeNumber(order.totalDiscounts) || 0;
         const lateStatus = resolveDeliveryStatus(
           order.deliveryStatus,
           order.expectedDeliveryDate,
@@ -1282,6 +1286,7 @@ class OrderService {
             cost: line.cost,
             daysCounter: daysCounter ?? "",
             deliveryBy: DELIVERY_BY_ARABIC[order.deliveryBy] || "",
+            discount,
             itemType: line.product.type?.name || "",
             lateStatus: DELIVERY_STATUS_ARABIC[lateStatus] || "",
             orderDate: formatExportDate(order.orderDate),

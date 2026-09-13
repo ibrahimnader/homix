@@ -94,6 +94,7 @@ const productModel = require("../../../app/modules/product/product.model");
 const vendorModel = require("../../../app/modules/vendor/vendor.model");
 const customerModel = require("../../../app/modules/customer/customer.model");
 const noteModel = require("../../../app/modules/notes/notes.model");
+const attachmentModel = require("../../../app/modules/attachments/attachment.model");
 const userModel = require("../../../app/modules/user/user.model");
 const logModel = require("../../../app/modules/logs/log.model");
 const productTypeModel = require("../../../app/modules/product/productType.model");
@@ -466,6 +467,11 @@ const buildIncludes = () => [
         model: userModel,
         required: false,
       },
+      {
+        as: "attachments",
+        model: attachmentModel,
+        required: false,
+      },
     ],
     model: noteModel,
     required: false,
@@ -635,6 +641,16 @@ const buildShipmentSort = (sortEntries: ShipmentSortEntry[]): Array<[string, "AS
 const mapShipmentNote = (noteValue: unknown) => {
   const note = toPlain(noteValue);
   return {
+    attachments: Array.isArray(note.attachments) ? note.attachments.map((attachmentValue: unknown) => {
+      const attachment = toPlain(attachmentValue);
+      return {
+        createdAt: toIsoString(attachment.createdAt) ?? "",
+        description: toText(attachment.description),
+        id: toNumber(attachment.id),
+        name: toText(attachment.name),
+        url: toText(attachment.url),
+      };
+    }) : [],
     createdAt: toIsoString(note.createdAt) ?? "",
     id: toNumber(note.id),
     text: toText(note.text),
@@ -2362,5 +2378,22 @@ export class ShipmentRepository {
 
     await note.destroy();
     return true;
+  }
+
+  public async createShipmentNoteAttachments(
+    noteId: number,
+    filePaths: string[],
+    fileNames: string[],
+    descriptions: string[],
+  ): Promise<void> {
+    for (let index = 0; index < filePaths.length; index += 1) {
+      await attachmentModel.create({
+        description: descriptions[index] || "",
+        modelId: noteId,
+        modelType: "Note",
+        name: fileNames[index],
+        url: filePaths[index],
+      });
+    }
   }
 }

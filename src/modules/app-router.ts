@@ -1962,15 +1962,27 @@ const swaggerOptions = {
           },
           required: ["data", "status"],
         },
+        ShipmentAttachment: {
+          type: "object",
+          properties: {
+            createdAt: { example: "2026-05-15T11:00:00.000Z", format: "date-time", type: "string" },
+            description: { example: "invoice", type: "string" },
+            id: { example: 9, type: "integer" },
+            name: { example: "invoice.pdf", type: "string" },
+            url: { example: "/uploads/note/invoice.pdf", type: "string" },
+          },
+          required: ["id", "name", "url", "createdAt"],
+        },
         ShipmentNote: {
           type: "object",
           properties: {
+            attachments: { items: { $ref: "#/components/schemas/ShipmentAttachment" }, type: "array" },
             createdAt: { example: "2026-05-15T11:00:00.000Z", type: "string", format: "date-time" },
             id: { example: 18, type: "integer" },
             text: { example: "الشحنة متأخرة عن الموعد المحدد", type: "string" },
             userName: { example: "Ahmed Hesham", type: "string" },
           },
-          required: ["createdAt", "id", "text", "userName"],
+          required: ["createdAt", "id", "text", "userName", "attachments"],
         },
         ShipmentNoteRequest: {
           type: "object",

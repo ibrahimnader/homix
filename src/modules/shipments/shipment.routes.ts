@@ -1630,3 +1630,54 @@ shipmentRouter.delete(
   validateRequest({ params: shipmentNoteParamsSchema }),
   asyncHandler(shipmentController.deleteNote),
 );
+
+/**
+ * @swagger
+ * /shipments/{shipmentId}/notes/{noteId}/upload:
+ *   post:
+ *     security:
+ *       - bearerAuth: []
+ *     tags: [Shipments]
+ *     summary: Attach files to a shipment note
+ *     parameters:
+ *       - in: path
+ *         name: shipmentId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: noteId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               files:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *               descriptions:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Files uploaded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/GenericMessageResponse'
+ */
+shipmentRouter.post(
+  "/:shipmentId/notes/:noteId/upload",
+  requirePermission("ship_edit"),
+  validateRequest({ params: shipmentNoteParamsSchema }),
+  fileUploadMiddleware("note"),
+  asyncHandler(shipmentController.uploadNoteFiles),
+);

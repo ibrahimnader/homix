@@ -235,4 +235,16 @@ export class ShipmentController {
   public deleteNote = async (request: Request, response: Response): Promise<void> => {
     response.status(200).json({ ...unwrap(await this.shipmentService.deleteNote(Number(request.params.shipmentId), Number(request.params.noteId), request.user ?? { id: 0 })), status: true });
   };
+
+  public uploadNoteFiles = async (request: Request, response: Response): Promise<void> => {
+    const result = unwrap(
+      await this.shipmentService.uploadNoteFiles(
+        Number(request.params.noteId),
+        request.filePaths ?? [],
+        request.fileNames ?? [],
+        request.descriptions ?? [],
+      ),
+    );
+    response.status(200).json({ ...result, status: true });
+  };
 }

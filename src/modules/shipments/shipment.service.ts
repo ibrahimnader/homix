@@ -533,6 +533,21 @@ export class ShipmentService {
     return success({ message: "Note deleted successfully" });
   }
 
+  public async uploadNoteFiles(
+    noteId: number,
+    filePaths: string[],
+    fileNames: string[],
+    descriptions: string[],
+  ): Promise<Result<{ message: string }>> {
+    const note = await this.shipmentRepository.findNoteById(noteId);
+    if (!note) {
+      throw new NotFoundError("Note not found");
+    }
+
+    await this.shipmentRepository.createShipmentNoteAttachments(noteId, filePaths, fileNames, descriptions);
+    return success({ message: "Files uploaded!" });
+  }
+
   private async refreshAggregateForShipments(values: unknown[]): Promise<void> {
     const dates = values.flatMap((value) => {
       if (!value || typeof value !== "object") return [];

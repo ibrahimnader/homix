@@ -182,7 +182,16 @@ export type ShipmentListResponse = {
   totalCount: number;
 };
 
+export type ShipmentNoteAttachment = {
+  createdAt: string;
+  description: string;
+  id: number;
+  name: string;
+  url: string;
+};
+
 export type ShipmentNote = {
+  attachments: ShipmentNoteAttachment[];
   createdAt: string;
   id: number;
   text: string;

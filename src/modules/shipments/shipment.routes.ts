@@ -910,6 +910,11 @@ shipmentRouter.delete(
  *         schema:
  *           type: string
  *           format: date
+ *       - in: query
+ *         name: deliveryDate
+ *         schema:
+ *           type: string
+ *           format: date
  *     responses:
  *       200:
  *         description: Delivery accounting rows

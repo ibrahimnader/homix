@@ -212,6 +212,7 @@ export const shipmentInventoryMutationSchema = z.object({
 
 export const shipmentDeliveryAccountsQuerySchema = z.object({
   accountingStatus: z.coerce.number().int().positive().optional(),
+  deliveryDate: dateString.optional(),
   orderNumber: z.string().trim().optional(),
   page: z.coerce.number().int().min(1).default(DEFAULT_PAGE_NUMBER),
   paymentMethod: z.string().trim().optional(),

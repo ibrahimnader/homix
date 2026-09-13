@@ -1556,6 +1556,14 @@ export class ShipmentRepository {
       }
     }
 
+    if (filters.deliveryDate) {
+      const startOfDay = toDateRangeBoundary(filters.deliveryDate, "start");
+      const endOfDay = toDateRangeBoundary(filters.deliveryDate, "end");
+      if (startOfDay && endOfDay) {
+        andConditions.push(where(col("Order.deliveryDate"), { [Op.gte]: startOfDay, [Op.lte]: endOfDay }));
+      }
+    }
+
     const result = await orderModel.findAndCountAll({
       distinct: true,
       include: buildIncludes(),
@@ -1592,6 +1600,10 @@ export class ShipmentRepository {
         accountingStatus,
         accountingStatusLabel: ACCOUNT_STATUS_LABELS[accountingStatus] ?? String(accountingStatus),
         amountToCollect,
+        // orderLine.cost is already the line's total cost (unit cost * quantity
+        // at order-creation time), unlike price which is per-unit — see
+        // order.service.js's Shopify-import mapping. Don't multiply again.
+        costPrice: toNumber(firstLine.cost),
         deliveryDate: toIsoString(order.deliveryDate),
         id: toNumber(order.id),
         operationNumber: normalizeOperationCode(order.code),

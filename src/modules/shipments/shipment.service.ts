@@ -259,6 +259,7 @@ export class ShipmentService {
       { header: "رقم الطلب", key: "orderNumber", width: 18 },
       { header: "البائع", key: "sellerName", width: 24 },
       { header: "كود المنتج", key: "productCode", width: 18 },
+      { header: "سعر التكلفة", key: "costPrice", width: 18 },
       { header: "شركة الشحن", key: "shippingCompanyName", width: 22 },
       { header: "تاريخ التسليم الفعلي", key: "deliveryDate", width: 22 },
       { header: "طريقة الدفع", key: "paymentMethodLabel", width: 20 },

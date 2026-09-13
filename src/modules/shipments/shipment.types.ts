@@ -68,6 +68,7 @@ export type InventoryMutationInput = {
 
 export type DeliveryAccountsListQuery = {
   accountingStatus?: number;
+  deliveryDate?: string;
   orderNumber?: string;
   page: number;
   paymentMethod?: string;
@@ -294,6 +295,7 @@ export type DeliveryAccountItem = {
   accountingStatus: number;
   accountingStatusLabel: string;
   amountToCollect: number;
+  costPrice: number;
   deliveryDate: string | null;
   operationNumber: string;
   orderNumber: string;

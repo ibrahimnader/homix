@@ -10,6 +10,7 @@ import {
   mapUserSummary,
   normalizeAccountStatus,
   normalizeEmail,
+  normalizePermissions,
   sanitizeUserPayload,
   toPlainRecord,
   toText,
@@ -442,6 +443,7 @@ class UserService {
       return User.create({
         email: `${vendorName}1@${env.SHOPIFY_STORE}.com`,
         firstName: vendor.name,
+        permissions: normalizePermissions(undefined, USER_TYPES.VENDOR),
         password,
         userType: USER_TYPES.VENDOR,
         vendorId: vendor.id,
@@ -536,6 +538,7 @@ class UserService {
           await User.create({
             email: `${vendor.name.toLowerCase()}@${env.SHOPIFY_STORE}.com`,
             firstName: vendor.name,
+            permissions: normalizePermissions(undefined, USER_TYPES.VENDOR),
             password: await bcrypt.hash(
               `${UserService.capitalizeFirstLetter(vendor.name.toLowerCase())}#${env.DEFAULT_PASSWORD}`,
               10,

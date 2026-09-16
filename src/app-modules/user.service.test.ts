@@ -6,6 +6,36 @@ const ROOT = process.cwd();
 const USER_SERVICE_PATH = path.join(ROOT, "app/modules/user/user.service.ts");
 
 describe("UserService", () => {
+  it.each(["import", "activation"])("grants vendor access on %s account creation without internal privileges", async (path) => {
+    const create = jest.fn().mockResolvedValue({ id: 20 });
+    const transaction = { commit: jest.fn(), rollback: jest.fn() };
+    const service = loadModuleWithMocks<typeof import("../../app/modules/user/user.service")>(
+      USER_SERVICE_PATH,
+      {
+        "../logs/log.model": {},
+        "../vendor/vendor.model": {
+          findOne: jest.fn().mockResolvedValue({ id: 10, name: "Example" }),
+          sequelize: { transaction: jest.fn().mockResolvedValue(transaction) },
+        },
+        "./user.model": { create, findOne: jest.fn().mockResolvedValue(null) },
+      },
+    );
+    if (path === "import") {
+      await service.saveUsersForVendors([{ id: 10, name: "Example" }]);
+    } else {
+      await service.changeActiveStatus("10");
+    }
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0][0]).toEqual(expect.objectContaining({
+      vendorId: 10,
+      userType: "2",
+      permissions: expect.objectContaining({
+        orders_view: true, orders_edit: true, products_view: true,
+        dashboard_view: true, finance_settle: false, users_manage: false,
+      }),
+    }));
+  });
+
   it("returns 400 when login credentials are missing", async () => {
     const service = loadModuleWithMocks<typeof import("../../app/modules/user/user.service")>(
       USER_SERVICE_PATH,

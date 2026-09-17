@@ -1,3 +1,5 @@
+import moment from "moment-timezone";
+
 import {
   SHIPMENT_PRIORITY_KEYS,
   SHIPMENT_FINAL_STATUSES,
@@ -81,14 +83,16 @@ export const toDateRangeBoundary = (value: unknown, boundary: "start" | "end"): 
     return null;
   }
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedValue)) {
-    const timeSuffix = boundary === "start" ? "T00:00:00.000Z" : "T23:59:59.999Z";
-    const date = new Date(`${normalizedValue}${timeSuffix}`);
-    return Number.isNaN(date.getTime()) ? null : date;
+  // Shipment filters describe business calendar days in Egypt, not exact
+  // instants. Convert ISO timestamps back to Cairo before choosing the day;
+  // truncating their UTC date would move local midnight to the previous day.
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(normalizedValue)
+    ? moment.tz(normalizedValue, "YYYY-MM-DD", true, "Africa/Cairo")
+    : moment(new Date(normalizedValue)).tz("Africa/Cairo");
+  if (!date.isValid()) {
+    return null;
   }
-
-  const date = new Date(normalizedValue);
-  return Number.isNaN(date.getTime()) ? null : date;
+  return (boundary === "start" ? date.startOf("day") : date.endOf("day")).toDate();
 };
 
 export const getShipmentStatusLabel = (value: unknown): string => {

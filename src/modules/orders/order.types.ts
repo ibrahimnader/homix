@@ -53,6 +53,8 @@ export type OrderListItem = {
   deliveryByLabel: string;
   expectedDeliveryDate: string | null;
   fine: number;
+  /** اسم المحافظة للعرض — تُستنتج من العنوان عند إنشاء الطلب. */
+  governorate: string;
   id: number;
   manufactureStatus: number | null;
   manufactureStatusLabel: string;

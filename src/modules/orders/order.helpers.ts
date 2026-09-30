@@ -392,11 +392,23 @@ export const normalizeOrderMutationPayload = (
   const nextStatus = toNumber(payload.status ?? existing.status);
 
   const explicitDeliveryBy = toNumber(payload.deliveryBy);
-  payload.deliveryBy = explicitDeliveryBy
+  const resolvedDeliveryBy = explicitDeliveryBy
     || (shipmentType === "warehouse" ? DELIVERY_BY.HOMIX : 0)
-    || toNumber(existing.deliveryBy)
-    || DELIVERY_BY.VENDOR;
-  payload.shippedFromInventory = payload.deliveryBy === DELIVERY_BY.HOMIX;
+    || toNumber(existing.deliveryBy);
+
+  if (resolvedDeliveryBy) {
+    payload.deliveryBy = resolvedDeliveryBy;
+    payload.shippedFromInventory = payload.deliveryBy === DELIVERY_BY.HOMIX;
+  } else if (existingValue) {
+    /* تعديل طلب قائم بلا اختيار صريح — يبقى السلوك السابق: «بائع» افتراضاً. */
+    payload.deliveryBy = DELIVERY_BY.VENDOR;
+    payload.shippedFromInventory = false;
+  } else {
+    /* إنشاء بلا اختيار صريح — تُترك للقاعدة التلقائية في saveImportedOrders
+       (عدد الأصناف + المحافظة + وحدة البائع). حذفها هنا شرط لعملها. */
+    Reflect.deleteProperty(payload, "deliveryBy");
+    Reflect.deleteProperty(payload, "shippedFromInventory");
+  }
 
   if (nextStatus === ORDER_STATUS.DELIVERED) {
     const currentDeliveryDate = toIsoString(payload.deliveryDate) ?? toIsoString(existing.deliveryDate);

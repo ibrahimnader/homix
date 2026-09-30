@@ -93,6 +93,22 @@ export class ShipmentController {
     });
   };
 
+  public bulkUpdateInventoryItems = async (request: Request, response: Response): Promise<void> => {
+    const { data, inventoryItemIds } = request.body as { data: never; inventoryItemIds: number[] };
+    response.status(200).json({
+      ...unwrap(await this.shipmentService.bulkUpdateInventoryItems(inventoryItemIds, data)),
+      status: true,
+    });
+  };
+
+  public bulkDeleteInventoryItems = async (request: Request, response: Response): Promise<void> => {
+    const { inventoryItemIds } = request.body as { inventoryItemIds: number[] };
+    response.status(200).json({
+      ...unwrap(await this.shipmentService.bulkDeleteInventoryItems(inventoryItemIds)),
+      status: true,
+    });
+  };
+
   public deleteInventoryItem = async (request: Request, response: Response): Promise<void> => {
     response.status(200).json({ ...unwrap(await this.shipmentService.deleteInventoryItem(Number(request.params.inventoryItemId))), status: true });
   };

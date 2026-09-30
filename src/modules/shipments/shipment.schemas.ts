@@ -140,13 +140,16 @@ export const shipmentCreateSchema = z.object({
 
 export const shipmentMutationSchema = z.record(z.string(), z.unknown());
 
-/* Bulk edit only ever exposes these five fields in the UI, so — unlike the
+/* Bulk edit only ever exposes these fields in the UI, so — unlike the
    single-shipment edit, which is a free-form passthrough — this is an explicit
-   allow-list: touching many rows at once deserves tighter validation. */
+   allow-list: touching many rows at once deserves tighter validation.
+   `scheduledDeliveryDate` accepts "" so a bulk edit can also clear a date. */
 export const shipmentBulkUpdateSchema = z.object({
   data: z.object({
     deliveryBy: z.coerce.number().int().positive().optional(),
     governorate: z.string().trim().optional(),
+    scheduledDeliveryDate: z.union([dateString, z.literal("")]).optional().nullable(),
+    scheduleStatus: z.coerce.number().int().positive().optional(),
     shipmentStatus: z.coerce.number().int().positive().optional(),
     shipmentType: z.string().trim().optional(),
     userId: z.coerce.number().int().positive().optional(),
@@ -210,6 +213,23 @@ export const shipmentInventoryMutationSchema = z.object({
   status: z.coerce.number().int().positive().optional(),
 });
 
+/* التعديل الجماعي للمخزون: الحقول المشتركة فقط — `productId`/`productCode`
+   تخصّ صفاً بعينه فلا معنى لتطبيقها على دفعة. */
+export const shipmentInventoryBulkMutationSchema = z.object({
+  data: z.object({
+    color: z.string().trim().optional(),
+    costPrice: z.coerce.number().min(0).optional(),
+    quantity: z.coerce.number().int().min(0).optional(),
+    size: z.string().trim().optional(),
+    status: z.coerce.number().int().positive().optional(),
+  }).refine((value) => Object.keys(value).length > 0, "No fields to update"),
+  inventoryItemIds: z.array(z.coerce.number().int().positive()).min(1),
+});
+
+export const shipmentInventoryBulkDeleteSchema = z.object({
+  inventoryItemIds: z.array(z.coerce.number().int().positive()).min(1),
+});
+
 export const shipmentDeliveryAccountsQuerySchema = z.object({
   accountingStatus: z.coerce.number().int().positive().optional(),
   deliveryDate: dateString.optional(),
@@ -229,16 +249,27 @@ export const shipmentDeliveryAccountParamsSchema = z.object({
   orderId: z.coerce.number().int().positive(),
 });
 
-export const shipmentDeliveryAccountMutationSchema = z.object({
+const shipmentDeliveryAccountFields = z.object({
   accountingDate: dateString.optional().nullable(),
   accountingReference: z.string().trim().optional(),
   accountingStatus: z.coerce.number().int().positive().optional(),
+  /** سعر التكلفة — يُكتب على بنود الطلب ويُجمَع في `totalCost`. */
+  costPrice: z.coerce.number().min(0).optional(),
   /** يخفي السجل عن تبويب الحسابات فقط — لا يمسّ الطلب/الشحنة نفسها. */
   hidden: z.boolean().optional(),
-}).refine((value) => Object.keys(value).length > 0, "No fields to update");
+  /** المبلغ المستلم فعلياً — صفر صريح قيمة مقبولة، لا «غير محدَّد». */
+  receivedAmount: z.coerce.number().min(0).optional(),
+});
 
+export const shipmentDeliveryAccountMutationSchema = shipmentDeliveryAccountFields
+  .refine((value) => Object.keys(value).length > 0, "No fields to update");
+
+/* التعديل الجماعي لا يحمل المبلغ المستلم ولا سعر التكلفة — كلاهما رقم يخصّ
+   صفاً بعينه، وتطبيقه على دفعة كاملة يطمس أرقاماً صحيحة. */
 export const shipmentDeliveryAccountBulkMutationSchema = z.object({
-  data: shipmentDeliveryAccountMutationSchema,
+  data: shipmentDeliveryAccountFields
+    .omit({ costPrice: true, receivedAmount: true })
+    .refine((value) => Object.keys(value).length > 0, "No fields to update"),
   orderIds: z.array(z.coerce.number().int().positive()).min(1),
 });
 

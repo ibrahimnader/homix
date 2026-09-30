@@ -38,6 +38,15 @@ const {
 const {
   splitImportedOrderByUnit,
 } = require("../../../src/modules/orders/order-discounts");
+const {
+  buildAddressText,
+  resolveDeliveryBy,
+  resolveOrderGovernorate,
+} = require("../../../src/modules/orders/order-delivery-routing");
+const {
+  applyCostPriceToLines,
+  parseCostPriceInput,
+} = require("../../../src/modules/orders/order-cost-price");
 const moment = require("moment-timezone");
 const Attachment = require("../attachments/attachment.model");
 const ProductType = require("../product/productType.model");
@@ -261,6 +270,8 @@ class OrderService {
     // Get last custom code number or default to 0
     let lastCustomNumber = lastCustomOrder ? lastCustomOrder.number : 0;
 
+    let deliveryGroupSequence = 0;
+
     ordersFromShopify.forEach((order) => {
       /* A manual order has no natural shared id the way a Shopify order does,
          so one number/orderNumber/name is assigned here — once per order, not
@@ -299,12 +310,21 @@ class OrderService {
         ? distributeAmountByWeight(order.totalDiscounts ?? order.discount, weights)
         : null;
 
+      /* Every split of the same parent order shares one routing decision —
+         «أكتر من ايتم» and «نفس البائع» are properties of the order the customer
+         placed, not of the one-unit rows we store. Tag each split with its
+         parent so the vendor set can be gathered once the products are loaded. */
+      const deliveryGroupKey = `${order.id ?? order.number ?? deliveryGroupSequence}#${deliveryGroupSequence}`;
+      deliveryGroupSequence += 1;
+
       splits.forEach((split, index) => {
         split.__shippingShare = shippingShares[index];
         split.__downPaymentShare = downPaymentShares[index];
         if (discountShares) {
           split.__discountShare = discountShares[index];
         }
+        split.__deliveryGroupKey = deliveryGroupKey;
+        split.__deliveryUnitCount = splits.length;
       });
 
       orders.push(...splits);
@@ -347,6 +367,31 @@ class OrderService {
     ]);
 
     const lines = [];
+
+    /* One pass over every split to collect, per parent order, the vendors its
+       items came from — needed by the «توصيل بائع» rule, which only applies when
+       the whole order belongs to a single vendor. */
+    const vendorIdsByDeliveryGroup = new Map();
+    for (const order of orders) {
+      const groupKey = order.__deliveryGroupKey;
+      if (!groupKey) {
+        continue;
+      }
+
+      if (!vendorIdsByDeliveryGroup.has(groupKey)) {
+        vendorIdsByDeliveryGroup.set(groupKey, new Set());
+      }
+      const groupVendorIds = vendorIdsByDeliveryGroup.get(groupKey);
+
+      for (const line of order.line_items) {
+        const lineProduct = line.product_id
+          ? productsMap[line.product_id]
+          : productsMap["custom"];
+        if (lineProduct?.vendorId !== undefined && lineProduct?.vendorId !== null) {
+          groupVendorIds.add(String(lineProduct.vendorId));
+        }
+      }
+    }
 
     orders = orders
       .filter((order) => order.customer)
@@ -444,12 +489,24 @@ class OrderService {
           expectedDeliveryDate: order.expectedDeliveryDate,
           orderDate,
         });
+        /* المحافظة تُقرأ من العنوان حين لا تُرسل صراحةً — العناوين تأتي بخط اليد
+           فالمطابقة تتحمل اختلاف حرف أو حرفين (governorate.resolver). */
+        const governorate = resolveOrderGovernorate(order.governorate, order.customer);
         const requestedDeliveryBy = Number(order.deliveryBy);
+        /* An explicit choice always wins — «تلقائي عند الإنشاء + تعديل يدوي مسموح».
+           Only when nothing was picked does the rule decide. */
         const deliveryBy = isShipment
           ? DELIVERY_BY.HOMIX
           : [DELIVERY_BY.HOMIX, DELIVERY_BY.VENDOR].includes(requestedDeliveryBy)
             ? requestedDeliveryBy
-            : null;
+            : resolveDeliveryBy({
+                addressText: buildAddressText(order.customer),
+                governorate,
+                unitCount: order.__deliveryUnitCount ?? 1,
+                vendorIds: [
+                  ...(vendorIdsByDeliveryGroup.get(order.__deliveryGroupKey) ?? new Set([product.vendorId])),
+                ],
+              });
         let obj = {
           shopifyId: order.id ? String(order.id) : null,
           name,
@@ -468,7 +525,7 @@ class OrderService {
           shippingReceiveDate: order.shippingReceiveDate || null,
           shippingCompany: order.shippingCompany || null,
           deliveryDate: order.deliveryDate || null,
-          governorate: order.governorate || null,
+          governorate,
           shipmentStatus: order.shipmentStatus || null,
           scheduleStatus: order.scheduleStatus || null,
           shipmentType: order.shipmentType || "separate",
@@ -1182,6 +1239,8 @@ class OrderService {
       { header: "عداد الأيام", key: "daysCounter" },
       { header: "المسؤول", key: "assignee" },
       { header: "النوع", key: "itemType" },
+      /* أُضيف بعد الأعمدة الثابتة عمداً — ترتيب ما قبله محسوم بمواصفة العمل. */
+      { header: "حالة التصنيع", key: "manufactureStatus" },
     ].map((column) => ({
       ...column,
       style: { alignment: { horizontal: "right" } },
@@ -1289,6 +1348,7 @@ class OrderService {
             discount,
             itemType: line.product.type?.name || "",
             lateStatus: DELIVERY_STATUS_ARABIC[lateStatus] || "",
+            manufactureStatus: MANUFACTURE_STATUS_ARABIC[order.manufactureStatus] || "",
             orderDate: formatExportDate(order.orderDate),
             orderNumber: order.orderNumber,
             orderSource: ORDER_SOURCE_ARABIC[order.orderSource] || "",
@@ -1668,6 +1728,25 @@ class OrderService {
         });
       }
       Reflect.deleteProperty(orderData, "vendorId");
+    }
+
+    /* «سعر التكلفة» ليس عموداً على الطلب — يُكتب على بنوده ثم يُجمَع في
+       totalCost، وإلا اختلف الرقمان اللذان تقرأهما القوائم والتقرير المالي. */
+    const requestedCostPrice = parseCostPriceInput(orderData.costPrice);
+    Reflect.deleteProperty(orderData, "costPrice");
+    if (requestedCostPrice !== null) {
+      const costLines = order.orderLines ?? [];
+      const appliedCost = await applyCostPriceToLines(requestedCostPrice, costLines);
+      logs.push({
+        action: "update",
+        entityType: "order",
+        entityId: order.id,
+        userId: user.id,
+        field: "totalCost",
+        from: order.totalCost,
+        to: appliedCost,
+      });
+      orderData.totalCost = appliedCost;
     }
 
     Object.keys(orderData).forEach((key) => {

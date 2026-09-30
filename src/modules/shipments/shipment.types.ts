@@ -158,6 +158,8 @@ export type ShipmentListItem = {
   orderNumber: string;
   paymentStatus: number | null;
   paymentStatusLabel: string;
+  /** كود المنتج (SKU) لأول بند في الشحنة. */
+  productSku: string;
   receivedInWarehouseDate: string | null;
   scheduledDeliveryDate: string | null;
   scheduleStatus: number | null;
@@ -173,6 +175,19 @@ export type ShipmentListItem = {
   shippingCost: number;
   id: number;
   governorate: string;
+  /* مجموعة التوصيل المجمع: كل الطلبات الناتجة عن تقسيم أوردر واحد تتشارك
+     `orderNumber`، فحالة اكتمال المجموعة بالمخزن تُحسب عبرها. */
+  groupedShipment: GroupedShipmentInfo | null;
+};
+
+/** ملخّص مجموعة التوصيل المجمع الظاهر كأيقونة بجوار الشحنة. */
+export type GroupedShipmentInfo = {
+  /** عدد الطلبات المرتبطة بنفس رقم الأوردر (متضمناً هذا الطلب). */
+  relatedCount: number;
+  /** كم منها وصل المخزن بالفعل. */
+  inWarehouseCount: number;
+  /** `true` حين تكون كل الطلبات المرتبطة في المخزن. */
+  complete: boolean;
 };
 
 export type ShipmentListResponse = {
@@ -213,6 +228,8 @@ export type ShipmentDetailsResponse = {
   };
   financial: {
     amountToCollect: number;
+    /** مجموع تكلفة بنود الطلب. */
+    costPrice: number;
     discount: number;
     downPayment: number;
     receivedAmount: number;

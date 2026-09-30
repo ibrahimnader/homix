@@ -124,24 +124,33 @@ const SHIPMENTS_STATUS = {
   SCHEDULED: 11,
   OUT_FOR_DELIVERY: 12,
 };
+/* الأرقام ثابتة لأن الطلبات المخزَّنة تحملها — أي إعادة ترقيم تغيّر حالة صفوف
+   قائمة بالفعل. المحاولتان الثانية والثالثة أُضيفتا برقمين جديدين (8 و9)
+   بدل تقسيم الرقم 2، فتبقى الصفوف القديمة على «المحاولة الأولى». */
 const SHIPMENT_SCHEDULE_STATUS = {
   SCHEDULED: 1,
-  NO_RESPONSE: 2,
+  NO_RESPONSE_FIRST_ATTEMPT: 2,
   POSTPONED: 3,
   CANCELED_DELIVERY_DELAY: 4,
   CANCELED_CHANGED_MIND: 5,
   CANCELED_NO_RESPONSE: 6,
   CALL_LATER: 7,
+  NO_RESPONSE_SECOND_ATTEMPT: 8,
+  NO_RESPONSE_THIRD_ATTEMPT: 9,
 };
 const SHIPMENT_SCHEDULE_STATUS_ARABIC = {
   1: "مجدول",
-  2: "لا يوجد رد",
+  2: "لا يوجد رد (محاولة أولى)",
   3: "مؤجل",
-  4: "الغاء تأخير في التوصيل",
-  5: "الغاء تغيير رأي",
-  6: "الغاء لا يوجد رد",
-  7: "إعادة الاتصال لاحقا",
+  4: "ملغي تأخير في التوصيل",
+  5: "ملغي تغيير رأي",
+  6: "ملغي لا يوجد رد",
+  7: "إعادة الإتصال لاحقاً",
+  8: "لا يوجد رد (محاولة ثانية)",
+  9: "لا يوجد رد (محاولة ثالثة)",
 };
+/* ترتيب العرض في القوائم المنسدلة — يتبع تسلسل العمل لا ترتيب الأرقام. */
+const SHIPMENT_SCHEDULE_STATUS_ORDER = [1, 3, 2, 8, 9, 6, 5, 4, 7];
 const SHIPMENT_TYPE = {
   COLLECTED_SHIPMENT: 1,
   GOVERNORATES_SHIPMENT: 2,
@@ -214,6 +223,7 @@ module.exports = {
   SHIPMENTS_STATUS,
   SHIPMENT_SCHEDULE_STATUS,
   SHIPMENT_SCHEDULE_STATUS_ARABIC,
+  SHIPMENT_SCHEDULE_STATUS_ORDER,
   SHIPMENT_TYPE,
   GOVERNORATES,
   MANUFACTURE_STATUS,

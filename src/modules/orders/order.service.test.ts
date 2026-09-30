@@ -94,7 +94,7 @@ describe("OrderService", () => {
     expect(getFinancialReport).toHaveBeenCalledWith({ billingDay: 13, vendorId: 3 }, 7);
   });
 
-  it("defaults deliveryBy to vendor and recalculates amount to collect on create", async () => {
+  it("leaves deliveryBy unset on create so the routing rule decides, and recalculates amount to collect", async () => {
     const legacyGateway = {
       saveImportedOrders: jest.fn().mockResolvedValue(undefined),
     };
@@ -108,11 +108,31 @@ describe("OrderService", () => {
 
     expect(legacyGateway.saveImportedOrders).toHaveBeenCalledWith([
       expect.objectContaining({
-        deliveryBy: 2,
         priority: 1,
-        shippedFromInventory: false,
         toBeCollected: 1850,
       }),
+    ], false, undefined);
+
+    /* «توصيل هوميكس/بائع» تُحسب في saveImportedOrders من عدد الأصناف والمحافظة
+       ووحدة البائع — إرسالها من هنا كان يسبق القاعدة ويجعلها بلا أثر. */
+    const [[sentOrders]] = legacyGateway.saveImportedOrders.mock.calls;
+    expect(sentOrders[0]).not.toHaveProperty("deliveryBy");
+    expect(sentOrders[0]).not.toHaveProperty("shippedFromInventory");
+  });
+
+  it("keeps an explicitly chosen deliveryBy on create", async () => {
+    const legacyGateway = {
+      saveImportedOrders: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new OrderService({} as never, legacyGateway as never);
+
+    await service.createOrder({
+      deliveryBy: 1,
+      line_items: [{ price: 1000, quantity: 1 }],
+    });
+
+    expect(legacyGateway.saveImportedOrders).toHaveBeenCalledWith([
+      expect.objectContaining({ deliveryBy: 1, shippedFromInventory: true }),
     ], false, undefined);
   });
 

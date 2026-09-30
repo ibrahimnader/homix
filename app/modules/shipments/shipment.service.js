@@ -763,6 +763,7 @@ class ShipmentService {
     worksheet.columns = [
       { header: "رقم العملية", key: "code" },
       { header: "رقم الشحنة", key: "shipmentNumber" },
+      { header: "كود المنتج", key: "productSku" },
       { header: "اسم العميل", key: "customerName" },
       { header: "البائع", key: "vendorName" },
       { header: "المحافظة", key: "governorate" },
@@ -871,6 +872,9 @@ class ShipmentService {
           deliveryBy: DELIVERY_BY_LABELS[order.deliveryBy] || "",
           governorate: resolveGovernorateLabel(order.governorate),
           notes: order.notes || "",
+          /* One row per shipment, so the SKU shown is the first line's — the
+             same one the shipments table displays. */
+          productSku: order.orderLines?.[0]?.sku || "",
           paymentStatus:
             PAYMENT_STATUS_LABELS[order.paymentStatus] || order.paymentStatus || "",
           receivedInWarehouseDate: formatExportDate(order.shippingReceiveDate),

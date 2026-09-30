@@ -21,6 +21,8 @@ import {
   shipmentIdParamsSchema,
   shipmentInventoryItemParamsSchema,
   shipmentInventoryMutationSchema,
+  shipmentInventoryBulkDeleteSchema,
+  shipmentInventoryBulkMutationSchema,
   shipmentInventoryExportQuerySchema,
   shipmentInventoryQuerySchema,
   shipmentListQuerySchema,
@@ -812,6 +814,61 @@ shipmentRouter.post(
   requirePermission("ship_edit"),
   validateRequest({ body: shipmentInventoryMutationSchema }),
   asyncHandler(shipmentController.createInventoryItem),
+);
+
+/**
+ * @swagger
+ * /shipments/inventory/bulk-update:
+ *   put:
+ *     security:
+ *       - bearerAuth: []
+ *     tags: [Shipments]
+ *     summary: Update several manual inventory rows at once
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               inventoryItemIds:
+ *                 type: array
+ *                 items: { type: integer }
+ *               data:
+ *                 type: object
+ *                 properties:
+ *                   color: { type: string }
+ *                   costPrice: { type: number }
+ *                   quantity: { type: integer }
+ *                   size: { type: string }
+ *                   status: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Inventory rows updated
+ * /shipments/inventory/bulk-delete:
+ *   post:
+ *     security:
+ *       - bearerAuth: []
+ *     tags: [Shipments]
+ *     summary: Delete several manual inventory rows at once
+ *     responses:
+ *       200:
+ *         description: Inventory rows deleted
+ */
+/* هذان المساران قبل `/inventory/:inventoryItemId` عمداً — وإلا التقط المسار
+   ذو المعامل الكلمة «bulk-update» وردّ بخطأ تحقّق. */
+shipmentRouter.put(
+  "/inventory/bulk-update",
+  requirePermission("ship_edit"),
+  validateRequest({ body: shipmentInventoryBulkMutationSchema }),
+  asyncHandler(shipmentController.bulkUpdateInventoryItems),
+);
+
+shipmentRouter.post(
+  "/inventory/bulk-delete",
+  requirePermission("ship_edit"),
+  validateRequest({ body: shipmentInventoryBulkDeleteSchema }),
+  asyncHandler(shipmentController.bulkDeleteInventoryItems),
 );
 
 /**

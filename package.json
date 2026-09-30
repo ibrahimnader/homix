@@ -11,6 +11,7 @@
     "db:add-ticket-fks": "tsx src/scripts/add-ticket-foreign-keys.ts",
     "db:recalculate-order-fines": "tsx src/scripts/recalculate-order-fines.ts",
     "db:backfill-manual-orders": "tsx src/scripts/backfill-manual-order-data.ts",
+    "db:backfill-order-governorate": "tsx src/scripts/backfill-order-governorate.ts",
     "db:backfill-user-permissions": "tsx src/scripts/backfill-user-permissions.ts",
     "db:migrate-shipping-companies": "tsx src/scripts/migrate-shipping-companies.ts",
     "db:deploy-refactor": "tsx src/scripts/run-refactor-deploy-migration.ts",

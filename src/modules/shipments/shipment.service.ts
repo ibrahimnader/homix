@@ -220,6 +220,26 @@ export class ShipmentService {
     return success(inventoryItem);
   }
 
+  public async bulkUpdateInventoryItems(
+    inventoryItemIds: number[],
+    payload: Partial<InventoryMutationInput>,
+  ): Promise<Result<{ message: string; missingIds: number[]; updatedCount: number }>> {
+    const { missingIds, updatedCount } = await this.shipmentRepository.bulkUpdateInventoryItems(
+      inventoryItemIds,
+      payload,
+    );
+
+    return success({ message: "Inventory items updated successfully", missingIds, updatedCount });
+  }
+
+  public async bulkDeleteInventoryItems(
+    inventoryItemIds: number[],
+  ): Promise<Result<{ deletedCount: number; message: string; missingIds: number[] }>> {
+    const { deletedCount, missingIds } = await this.shipmentRepository.bulkDeleteInventoryItems(inventoryItemIds);
+
+    return success({ deletedCount, message: "Inventory items deleted successfully", missingIds });
+  }
+
   public async deleteInventoryItem(inventoryItemId: number): Promise<Result<{ message: string }>> {
     const deleted = await this.shipmentRepository.deleteInventoryItem(inventoryItemId);
     if (!deleted) {

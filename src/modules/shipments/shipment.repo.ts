@@ -11,6 +11,7 @@ import {
   type ManagedOptionValue,
 } from "../settings/managed-options";
 import { DELIVERY_BY, ORDER_SOURCE_ARABIC, ORDER_SOURCE, ORDER_STATUS, PAYMENT_STATUS, SHIPMENT_SCHEDULE_STATUS_ARABIC, USER_TYPES } from "../../../config/constants";
+import { applyCostPriceToLines, parseCostPriceInput } from "../orders/order-cost-price";
 import {
   ACCOUNTING_STATUS,
   ACCOUNT_STATUS_LABELS,
@@ -28,7 +29,7 @@ import {
   RETURN_TO_VENDOR_FINAL_STATUSES,
   RETURN_TO_VENDOR_STATUS,
   RETURN_TO_VENDOR_STATUS_LABELS,
-  SHIPMENT_SCHEDULE_STATUS_LABELS,
+  SHIPMENT_SCHEDULE_STATUS_OPTIONS,
   SHIPMENT_PRIORITY_LABELS,
   CUSTOMER_RETURN_STATUS_LABELS,
   SHIPMENT_STATUS,
@@ -106,6 +107,31 @@ const shippingCompanyModel = require("../../../app/modules/shipments/shippingCom
 const ORDER_SOURCE_LABELS = ORDER_SOURCE_ARABIC as Record<number, string>;
 const SHIPMENT_SCHEDULE_LABELS = SHIPMENT_SCHEDULE_STATUS_ARABIC as Record<number, string>;
 const SHIPMENT_SORTABLE_FIELDS = ["orderDate", "priority", "subTotalPrice", "totalPrice"] as const;
+
+/* One Shopify order is split into one Homix order per unit, and every split
+   keeps the parent's `orderNumber` — so «الطلبات المرتبطة» of a shipment are
+   simply the other orders carrying the same orderNumber. */
+const GROUPED_SHIPMENT_TYPES = new Set(["collected", "grouped", "warehouse"]);
+
+/* «اكتمل بالمخزن» means the unit physically reached the warehouse. Everything
+   downstream of that (جاهزة للشحن، مجدولة، خرجت للتوصيل، تم التسليم) has passed
+   through it too; cancelled/rejected/returned rows never did. */
+const WAREHOUSE_REACHED_SHIPMENT_STATUSES = new Set<number>([
+  SHIPMENT_STATUS.IN_WAREHOUSE,
+  SHIPMENT_STATUS.READY_FOR_SHIPPING,
+  SHIPMENT_STATUS.SCHEDULED,
+  SHIPMENT_STATUS.OUT_FOR_DELIVERY,
+  SHIPMENT_STATUS.DELIVERED,
+]);
+
+const hasReachedWarehouse = (order: Record<string, unknown>): boolean => {
+  if (WAREHOUSE_REACHED_SHIPMENT_STATUSES.has(toNumber(order.shipmentStatus))) {
+    return true;
+  }
+
+  return toNumber(order.status) === ORDER_STATUS.IN_INVENTORY;
+};
+
 
 /** governorate is stored as free text on newer rows but as the numeric id on
  * older ones (and on rows written by the bulk-edit filter, which needs the id
@@ -548,6 +574,7 @@ const mapShipmentListItem = (orderValue: unknown): ShipmentListItem => {
     orderNumber: toText(order.orderNumber, toText(order.number, toText(order.name))),
     paymentStatus: toNullableNumber(order.paymentStatus),
     paymentStatusLabel: PAYMENT_STATUS_LABELS[toNumber(order.paymentStatus)] ?? "",
+    productSku: toText(firstLine.sku),
     receivedInWarehouseDate: toIsoString(order.shippingReceiveDate),
     scheduledDeliveryDate: toIsoString(order.scheduledDeliveryDate),
     scheduleStatus: toNullableNumber(order.scheduleStatus),
@@ -561,6 +588,9 @@ const mapShipmentListItem = (orderValue: unknown): ShipmentListItem => {
     shipmentType: toText(order.shipmentType),
     shipmentTypeLabel: getShipmentTypeLabel(order.shipmentType),
     shippingCost: toNumber(order.shippingFees),
+    /* يُملأ لاحقاً بـ `attachGroupedShipmentInfo` — يحتاج استعلاماً عبر الصفحة
+       كلها، فلا يمكن حسابه من صف واحد. */
+    groupedShipment: null,
   };
 };
 
@@ -851,7 +881,8 @@ export class ShipmentRepository {
       orderSources: Object.entries(ORDER_SOURCE).map(([, id]) => ({ id: Number(id), label: ORDER_SOURCE_LABELS[Number(id)] ?? String(id) })),
       paymentStatuses: Object.entries(PAYMENT_STATUS_LABELS).map(([id, label]) => ({ id: Number(id), label })),
       priorities: Object.entries(SHIPMENT_PRIORITY_LABELS).map(([id, label]) => ({ id: Number(id), label })),
-      scheduleStatuses: Object.entries(SHIPMENT_SCHEDULE_STATUS_LABELS).map(([id, label]) => ({ id: Number(id), label })),
+      /* ترتيب مقصود من `SHIPMENT_SCHEDULE_STATUS_OPTIONS` لا ترتيب المعرّفات. */
+      scheduleStatuses: SHIPMENT_SCHEDULE_STATUS_OPTIONS.map(({ id, label }) => ({ id, label })),
       shippingCompanies: shippingCompanies.map((company: unknown) => ({ id: toNumber(toPlain(company).id), label: toText(toPlain(company).name) })),
       shipmentStatuses: Object.entries(SHIPMENT_STATUS_LABELS).map(([id, label]) => ({ id: Number(id), label })),
       shipmentTypes: [
@@ -980,12 +1011,69 @@ export class ShipmentRepository {
       where: whereClause,
     });
 
+    const items = await this.attachGroupedShipmentInfo(
+      result.rows.map((row: unknown) => mapShipmentListItem(row)),
+    );
+
     return {
-      items: result.rows.map((row: unknown) => mapShipmentListItem(row)),
+      items,
       page: filters.page ?? DEFAULT_PAGE_NUMBER,
       size: filters.size ?? DEFAULT_PAGE_SIZE,
       totalCount: result.count,
     };
+  }
+
+  /**
+   * Fills in `groupedShipment` for the rows that belong to a grouped delivery.
+   *
+   * The related orders are the other splits of the same parent order, found by
+   * `orderNumber`. One query covers the whole page, so the icon costs a single
+   * extra round trip no matter how many grouped rows are on screen.
+   */
+  private async attachGroupedShipmentInfo(items: ShipmentListItem[]): Promise<ShipmentListItem[]> {
+    const groupedOrderNumbers = [...new Set(
+      items
+        .filter((item) => GROUPED_SHIPMENT_TYPES.has(item.shipmentType))
+        .map((item) => item.orderNumber)
+        .filter((orderNumber) => orderNumber !== ""),
+    )];
+
+    if (groupedOrderNumbers.length === 0) {
+      return items;
+    }
+
+    const relatedOrders = await orderModel.findAll({
+      attributes: ["id", "orderNumber", "shipmentStatus", "status"],
+      raw: true,
+      where: { orderNumber: { [Op.in]: groupedOrderNumbers } },
+    });
+
+    const summaryByOrderNumber = new Map<string, { inWarehouseCount: number; relatedCount: number }>();
+    for (const relatedOrder of relatedOrders as Array<Record<string, unknown>>) {
+      const orderNumber = toText(relatedOrder.orderNumber);
+      const summary = summaryByOrderNumber.get(orderNumber) ?? { inWarehouseCount: 0, relatedCount: 0 };
+      summary.relatedCount += 1;
+      if (hasReachedWarehouse(relatedOrder)) {
+        summary.inWarehouseCount += 1;
+      }
+      summaryByOrderNumber.set(orderNumber, summary);
+    }
+
+    return items.map((item) => {
+      const summary = summaryByOrderNumber.get(item.orderNumber);
+      if (!summary || !GROUPED_SHIPMENT_TYPES.has(item.shipmentType)) {
+        return item;
+      }
+
+      return {
+        ...item,
+        groupedShipment: {
+          complete: summary.relatedCount > 0 && summary.inWarehouseCount === summary.relatedCount,
+          inWarehouseCount: summary.inWarehouseCount,
+          relatedCount: summary.relatedCount,
+        },
+      };
+    });
   }
 
   public async getShipmentById(shipmentId: number, vendorId?: number | null): Promise<ShipmentDetailsResponse | null> {
@@ -1053,6 +1141,8 @@ export class ShipmentRepository {
       },
       financial: {
         amountToCollect: getShipmentCollectionAmount(order),
+        /* مجموع تكلفة بنود الطلب — نفس ما يُعرض في «سعر التكلفة» بالطلبات. */
+        costPrice: toNumber(order.totalCost),
         discount: toNumber(order.totalDiscounts),
         downPayment: toNumber(order.downPayment),
         receivedAmount: toNumber(order.receivedAmount),
@@ -1442,6 +1532,48 @@ export class ShipmentRepository {
     return buildInventoryItem(inventoryItem);
   }
 
+  /**
+   * Applies one set of field changes to several inventory rows. Rows that no
+   * longer exist are reported back instead of aborting the batch, so a stale
+   * selection in the UI still updates everything it can.
+   */
+  public async bulkUpdateInventoryItems(
+    inventoryItemIds: number[],
+    payload: Partial<InventoryMutationInput>,
+  ): Promise<{ missingIds: number[]; updatedCount: number }> {
+    const missingIds: number[] = [];
+    let updatedCount = 0;
+
+    for (const inventoryItemId of inventoryItemIds) {
+      const updated = await this.updateInventoryItem(inventoryItemId, payload);
+      if (updated) {
+        updatedCount += 1;
+      } else {
+        missingIds.push(inventoryItemId);
+      }
+    }
+
+    return { missingIds, updatedCount };
+  }
+
+  public async bulkDeleteInventoryItems(
+    inventoryItemIds: number[],
+  ): Promise<{ deletedCount: number; missingIds: number[] }> {
+    const missingIds: number[] = [];
+    let deletedCount = 0;
+
+    for (const inventoryItemId of inventoryItemIds) {
+      const deleted = await this.deleteInventoryItem(inventoryItemId);
+      if (deleted) {
+        deletedCount += 1;
+      } else {
+        missingIds.push(inventoryItemId);
+      }
+    }
+
+    return { deletedCount, missingIds };
+  }
+
   public async deleteInventoryItem(inventoryItemId: number): Promise<boolean> {
     const inventoryItem = await shipmentInventoryModel.findByPk(inventoryItemId);
     if (!inventoryItem) {
@@ -1458,7 +1590,14 @@ export class ShipmentRepository {
    */
   public async updateDeliveryAccount(
     orderId: number,
-    payload: { accountingDate?: string | null; accountingReference?: string; accountingStatus?: number; hidden?: boolean },
+    payload: {
+      accountingDate?: string | null;
+      accountingReference?: string;
+      accountingStatus?: number;
+      costPrice?: number;
+      hidden?: boolean;
+      receivedAmount?: number;
+    },
   ): Promise<boolean> {
     const order = await orderModel.findByPk(orderId);
     if (!order) {
@@ -1473,6 +1612,11 @@ export class ShipmentRepository {
     const storedStatus = toNullableNumber(plainOrder.accountingStatus);
     const isTransitioningToSettled = payload.accountingStatus === ACCOUNTING_STATUS.SETTLED
       && storedStatus !== ACCOUNTING_STATUS.SETTLED;
+    /* Cost lives on the order's lines; the column only mirrors their sum. */
+    const requestedCostPrice = parseCostPriceInput(payload.costPrice);
+    const costPriceTotal = requestedCostPrice === null
+      ? null
+      : await this.applyCostPrice(orderId, requestedCostPrice);
     await order.update({
       ...(payload.accountingReference !== undefined ? { accountingReference: payload.accountingReference } : {}),
       ...(payload.accountingStatus !== undefined ? { accountingStatus: payload.accountingStatus } : {}),
@@ -1488,6 +1632,12 @@ export class ShipmentRepository {
       // Hides/unhides the row from the accounting ledger only — never touches
       // the order or shipment itself.
       ...(payload.hidden !== undefined ? { accountsHiddenAt: payload.hidden ? new Date() : null } : {}),
+      /* An explicit zero is a real figure here, not «لم يُحدَّد» — the marker is
+         what stops the ledger falling back to amountToCollect for it. */
+      ...(payload.receivedAmount !== undefined
+        ? { receivedAmount: payload.receivedAmount, receivedAmountManuallySet: true }
+        : {}),
+      ...(costPriceTotal !== null ? { totalCost: costPriceTotal } : {}),
     });
 
     return true;
@@ -2202,6 +2352,15 @@ export class ShipmentRepository {
     };
   }
 
+  /**
+   * Writes a new cost price onto an order's lines and returns the resulting
+   * total, so callers can store it on `Order.totalCost` in the same update.
+   */
+  public async applyCostPrice(orderId: number, costPrice: number): Promise<number> {
+    const lines = await orderLineModel.findAll({ where: { orderId } });
+    return applyCostPriceToLines(costPrice, lines as never);
+  }
+
   public async updateShipment(shipmentId: number, payload: Record<string, unknown>, userId?: number): Promise<unknown | null> {
     const shipment = await orderModel.findByPk(shipmentId);
     if (!shipment) {
@@ -2210,6 +2369,13 @@ export class ShipmentRepository {
 
     const plainShipmentBeforeUpdate = toPlain(shipment);
     const nextPayload = await this.normalizeShippingCompanyPayload(payload);
+    /* «سعر التكلفة» يُكتب على بنود الطلب ثم يُجمَع في totalCost — نفس المسار
+       الذي يسلكه تعديل الطلب، حتى لا يختلف الرقمان. */
+    const requestedCostPrice = parseCostPriceInput(nextPayload.costPrice);
+    Reflect.deleteProperty(nextPayload, "costPrice");
+    if (requestedCostPrice !== null) {
+      nextPayload.totalCost = await this.applyCostPrice(shipmentId, requestedCostPrice);
+    }
     /* An update payload containing receivedAmount is an explicit user choice,
        even when both the stored and submitted values are zero. Comparing the
        numbers made `0 -> 0` look untouched, so the deliveries ledger fell back

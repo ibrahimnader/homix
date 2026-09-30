@@ -1,6 +1,8 @@
 import moment from "moment-timezone";
 import { col, fn, literal, Op } from "sequelize";
 
+import { governorateDisplayLabel } from "../../shared/governorate/governorate.resolver";
+
 import {
   DELIVERY_BY,
   DELIVERY_BY_ARABIC,
@@ -515,6 +517,7 @@ const mapOrderSummary = (value: unknown): OrderListItem => {
     priorityLabel: getDeliveryPriorityLabel(priority),
     expectedDeliveryDate: toIsoString(order.expectedDeliveryDate),
     fine: toNumber(order.fine),
+    governorate: governorateDisplayLabel(order.governorate),
     id: toNumber(order.id),
     /** تاريخ التصنيع — يُختم فقط عند تحويل حالة الطلب إلى «قيد التصنيع» (order.service.js). */
     poDate: toIsoString(order.PoDate),

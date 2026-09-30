@@ -264,7 +264,6 @@ describe("orderRouter", () => {
     expect(response.status).toBe(200);
     expect(legacyOrderService.saveImportedOrders).toHaveBeenCalledWith(
       [expect.objectContaining({
-        deliveryBy: 2,
         priority: 1,
         subTotalPrice: 16999,
         toBeCollected: 16999,

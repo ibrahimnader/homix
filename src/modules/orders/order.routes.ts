@@ -13,7 +13,10 @@ import {
   orderMutationSchema,
   orderNoteParamsSchema,
   orderNoteSchema,
+  orderSellerChatMessageSchema,
+  orderSellerChatParamsSchema,
   orderSummaryQuerySchema,
+  sellerChatQuickRepliesSchema,
 } from "./order.schemas";
 import { OrderService } from "./order.service";
 
@@ -850,3 +853,19 @@ orderRouter.delete("/:orderId/notes/:noteId", verifyToken, requirePermission("or
  *               $ref: '#/components/schemas/GenericMessageResponse'
  */
 orderRouter.post("/:orderId/notes/:noteId/upload", verifyToken, requirePermission("orders_edit"), validateRequest({ params: orderNoteParamsSchema }), fileUploadMiddleware("note"), asyncHandler(orderController.uploadFiles));
+
+/**
+ * "محادثة السيلر مع مسؤول الحساب" — a separate, HOMIX-team-only chat thread from
+ * the order notes above. isNotVendor is required explicitly here: unlike notes,
+ * vendors must never see or post in this thread even though they already hold
+ * orders_view/orders_edit.
+ */
+orderRouter.get("/:orderId/seller-chat", verifyToken, isNotVendor, requirePermission("orders_view"), validateRequest({ params: orderIdParamsSchema }), asyncHandler(orderController.listSellerChatMessages));
+
+orderRouter.post("/:orderId/seller-chat", verifyToken, isNotVendor, requirePermission("orders_edit"), validateRequest({ body: orderSellerChatMessageSchema, params: orderIdParamsSchema }), asyncHandler(orderController.addSellerChatMessage));
+
+orderRouter.post("/:orderId/seller-chat/:messageId/upload", verifyToken, isNotVendor, requirePermission("orders_edit"), validateRequest({ params: orderSellerChatParamsSchema }), fileUploadMiddleware("note"), asyncHandler(orderController.uploadSellerChatFiles));
+
+orderRouter.get("/seller-chat/quick-replies", verifyToken, isNotVendor, requirePermission("orders_view"), asyncHandler(orderController.getSellerChatQuickReplies));
+
+orderRouter.put("/seller-chat/quick-replies", verifyToken, isNotVendor, requirePermission("orders_edit"), validateRequest({ body: sellerChatQuickRepliesSchema }), asyncHandler(orderController.updateSellerChatQuickReplies));

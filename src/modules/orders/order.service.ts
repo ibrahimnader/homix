@@ -209,6 +209,40 @@ export class OrderService {
     return success({ message: "Files uploaded!" });
   }
 
+  public async listSellerChatMessages(orderId: number): Promise<Result<unknown[]>> {
+    const order = await this.orderRepository.findOrderEntity(orderId);
+    if (!order) throw new NotFoundError("Order not found");
+    return success(await this.orderRepository.getSellerChatMessages(orderId));
+  }
+
+  public async addSellerChatMessage(orderId: number, text: string, user: OrderRequestUser): Promise<Result<unknown>> {
+    const order = await this.orderRepository.findOrderEntity(orderId);
+    if (!order) throw new NotFoundError("Order not found");
+    return success(await this.orderRepository.createSellerChatMessage(orderId, Number(user.id), text));
+  }
+
+  public async uploadSellerChatFiles(
+    messageId: number,
+    filePaths: string[],
+    fileNames: string[],
+    descriptions: string[],
+  ): Promise<Result<{ message: string }>> {
+    const message = await this.orderRepository.findSellerChatMessageById(messageId);
+    if (!message) throw new NotFoundError("Message not found");
+    await this.orderRepository.createNoteAttachments(messageId, filePaths, fileNames, descriptions);
+    return success({ message: "Files uploaded!" });
+  }
+
+  public async getSellerChatQuickReplies(): Promise<Result<Array<{ id: number; label: string }>>> {
+    return success(await this.orderRepository.getSellerChatQuickReplies());
+  }
+
+  public async updateSellerChatQuickReplies(
+    options: Array<{ id?: number; label: string }>,
+  ): Promise<Result<Array<{ id: number; label: string }>>> {
+    return success(await this.orderRepository.replaceSellerChatQuickReplies(options));
+  }
+
   public async exportOrders(response: unknown, payload: OrderMutationPayload): Promise<void> {
     await this.legacyGateway.exportOrders(response, payload);
   }

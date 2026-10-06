@@ -185,6 +185,22 @@ export type OrderMetaResponse = {
   vendors: OrderMetaOption[];
 };
 
+export type SellerChatAttachment = {
+  createdAt: string;
+  description: string;
+  id: number;
+  name: string;
+  url: string;
+};
+
+export type SellerChatMessage = {
+  attachments: SellerChatAttachment[];
+  createdAt: string;
+  id: number;
+  text: string;
+  userName: string;
+};
+
 export type OrderAttachment = {
   createdAt: string;
   description: string;

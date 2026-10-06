@@ -399,3 +399,79 @@ describe("restrictVendorOrderPayload", () => {
     expect(restrictVendorOrderPayload(fullPayload, adminUser)).toEqual(fullPayload);
   });
 });
+
+describe("seller chat", () => {
+  it("throws not found when listing messages for a missing order", async () => {
+    const repository = { findOrderEntity: jest.fn().mockResolvedValue(null) } as never;
+    const service = new OrderService(repository, {} as never);
+
+    await expect(service.listSellerChatMessages(7)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("lists seller chat messages through the typed repository path", async () => {
+    const repository = {
+      findOrderEntity: jest.fn().mockResolvedValue({ id: 7 }),
+      getSellerChatMessages: jest.fn().mockResolvedValue([{ id: 1, text: "جاهز للشحن" }]),
+    } as never;
+    const service = new OrderService(repository, {} as never);
+
+    await expect(service.listSellerChatMessages(7)).resolves.toEqual({
+      data: [{ id: 1, text: "جاهز للشحن" }],
+      ok: true,
+    });
+  });
+
+  it("throws not found when posting to a missing order", async () => {
+    const repository = { findOrderEntity: jest.fn().mockResolvedValue(null) } as never;
+    const service = new OrderService(repository, {} as never);
+
+    await expect(
+      service.addSellerChatMessage(7, "هيتأخر يوم", { id: 1 } as never),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("attributes a new seller chat message to the authenticated user", async () => {
+    const repository = {
+      findOrderEntity: jest.fn().mockResolvedValue({ id: 7 }),
+      createSellerChatMessage: jest.fn().mockResolvedValue({ id: 3 }),
+    };
+    const service = new OrderService(repository as never, {} as never);
+
+    await service.addSellerChatMessage(7, "هيتأخر يوم", { id: 42 } as never);
+
+    expect(repository.createSellerChatMessage).toHaveBeenCalledWith(7, 42, "هيتأخر يوم");
+  });
+
+  it("rejects uploading attachments to a message that does not exist", async () => {
+    const repository = { findSellerChatMessageById: jest.fn().mockResolvedValue(null) } as never;
+    const service = new OrderService(repository, {} as never);
+
+    await expect(
+      service.uploadSellerChatFiles(9, ["uploads/note/x.png"], ["x.png"], [""]),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("uploads seller chat attachments through the typed repository path", async () => {
+    const repository = {
+      findSellerChatMessageById: jest.fn().mockResolvedValue({ id: 9 }),
+      createNoteAttachments: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new OrderService(repository as never, {} as never);
+
+    await expect(
+      service.uploadSellerChatFiles(9, ["uploads/note/x.png"], ["x.png"], [""]),
+    ).resolves.toEqual({ data: { message: "Files uploaded!" }, ok: true });
+    expect(repository.createNoteAttachments).toHaveBeenCalledWith(9, ["uploads/note/x.png"], ["x.png"], [""]);
+  });
+
+  it("replaces the shared quick-reply list through the typed repository path", async () => {
+    const repository = {
+      replaceSellerChatQuickReplies: jest.fn().mockResolvedValue([{ id: 1, label: "جاهز للشحن" }]),
+    } as never;
+    const service = new OrderService(repository, {} as never);
+
+    await expect(
+      service.updateSellerChatQuickReplies([{ label: "جاهز للشحن" }]),
+    ).resolves.toEqual({ data: [{ id: 1, label: "جاهز للشحن" }], ok: true });
+  });
+});

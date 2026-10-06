@@ -84,3 +84,18 @@ export const orderBulkDeleteSchema = z.object({
 export const orderNoteSchema = z.object({
   text: z.string().optional().default(""),
 });
+
+export const orderSellerChatParamsSchema = orderIdParamsSchema.extend({
+  messageId: z.coerce.number().int().positive(),
+});
+
+export const orderSellerChatMessageSchema = z.object({
+  text: z.string().optional().default(""),
+});
+
+export const sellerChatQuickRepliesSchema = z.object({
+  quickReplies: z.array(z.object({
+    id: z.coerce.number().int().positive().optional(),
+    label: z.string().trim().min(1),
+  })).max(20),
+});

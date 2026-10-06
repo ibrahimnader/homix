@@ -37,6 +37,7 @@ import {
 } from "./order.helpers";
 import type { OrderDetailsResponse, OrderDetailsView, OrderFinancialReportQuery, OrderFinancialReportResponse, OrderFinancialReportSection, OrderFinancialReportSectionSummary, OrderFinancialReportVendorRow, OrderListItem, OrderListQuery, OrderListResponse, OrderMetaResponse, OrderStatusHistoryItem, OrderSummaryResponse, OrderTimelineItem } from "./order.types";
 import { calculateVendorDeliverySettlement } from "./order-financial-settlement";
+import { listManagedOptions, MANAGED_OPTION_GROUP, replaceManagedOptions } from "../settings/managed-options";
 
 const { sequelize } = require("../../infrastructure/database");
 const orderModel = require("../../../app/modules/order/order.model");
@@ -1273,5 +1274,64 @@ export class OrderRepository {
         url: filePaths[index],
       });
     }
+  }
+
+  /**
+   * "محادثة السيلر مع مسؤول الحساب" — reuses the same Notes/Attachments tables
+   * as order notes, tagged with a distinct entityType so it never mixes with
+   * "الملاحظات والتواصل". Kept HOMIX-team-only at the route layer (isNotVendor),
+   * not here — the stored rows themselves carry no visibility flag.
+   */
+  public async getSellerChatMessages(orderId: number): Promise<unknown[]> {
+    const rows = await noteModel.findAll({
+      include: [
+        { as: "user", attributes: ["firstName", "lastName"], model: userModel, required: false },
+        { as: "attachments", model: attachmentModel, required: false },
+      ],
+      order: [["createdAt", "ASC"]],
+      where: { entityId: orderId, entityType: "order_seller_chat" },
+    });
+    return rows.map((row: unknown) => {
+      const plainNote = toPlain(row);
+      return {
+        attachments: Array.isArray(plainNote.attachments) ? plainNote.attachments.map((attachment: unknown) => {
+          const plainAttachment = toPlain(attachment);
+          return {
+            createdAt: toIsoString(plainAttachment.createdAt) ?? "",
+            description: toText(plainAttachment.description),
+            id: toNumber(plainAttachment.id),
+            name: toText(plainAttachment.name),
+            url: toText(plainAttachment.url),
+          };
+        }) : [],
+        createdAt: toIsoString(plainNote.createdAt) ?? "",
+        id: toNumber(plainNote.id),
+        text: toText(plainNote.text),
+        userName: `${toText(toPlain(plainNote.user).firstName)} ${toText(toPlain(plainNote.user).lastName)}`.trim(),
+      };
+    });
+  }
+
+  public async createSellerChatMessage(orderId: number, userId: number, text: string): Promise<unknown> {
+    return noteModel.create({
+      entityId: orderId,
+      entityType: "order_seller_chat",
+      text,
+      userId,
+    });
+  }
+
+  public async findSellerChatMessageById(messageId: number): Promise<unknown | null> {
+    return noteModel.findOne({ where: { entityType: "order_seller_chat", id: messageId } });
+  }
+
+  public async getSellerChatQuickReplies(): Promise<Array<{ id: number; label: string }>> {
+    return listManagedOptions(MANAGED_OPTION_GROUP.SELLER_CHAT_QUICK_REPLY);
+  }
+
+  public async replaceSellerChatQuickReplies(
+    options: Array<{ id?: number; label: string }>,
+  ): Promise<Array<{ id: number; label: string }>> {
+    return replaceManagedOptions(MANAGED_OPTION_GROUP.SELLER_CHAT_QUICK_REPLY, options);
   }
 }

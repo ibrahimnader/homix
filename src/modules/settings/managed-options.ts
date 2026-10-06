@@ -6,6 +6,7 @@ const managedOptionModel = require("../../../app/modules/settings/managedOption.
 
 export const MANAGED_OPTION_GROUP = {
   EXPENSE_TYPE: "expense_type",
+  SELLER_CHAT_QUICK_REPLY: "seller_chat_quick_reply",
   TICKET_QUICK_REPLY: "ticket_quick_reply",
   TICKET_TYPE: "ticket_type",
 } as const;

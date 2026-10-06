@@ -84,6 +84,34 @@ export class OrderController {
     response.status(200).json({ ...result, status: true });
   };
 
+  public listSellerChatMessages = async (request: Request, response: Response): Promise<void> => {
+    response.status(200).json({ data: unwrap(await this.orderService.listSellerChatMessages(Number(request.params.orderId))), status: true });
+  };
+
+  public addSellerChatMessage = async (request: Request, response: Response): Promise<void> => {
+    response.status(200).json({ data: unwrap(await this.orderService.addSellerChatMessage(Number(request.params.orderId), request.body.text ?? "", request.user ?? { id: 0 })), status: true });
+  };
+
+  public uploadSellerChatFiles = async (request: Request, response: Response): Promise<void> => {
+    const result = unwrap(
+      await this.orderService.uploadSellerChatFiles(
+        Number(request.params.messageId),
+        request.filePaths ?? [],
+        request.fileNames ?? [],
+        request.descriptions ?? [],
+      ),
+    );
+    response.status(200).json({ ...result, status: true });
+  };
+
+  public getSellerChatQuickReplies = async (_request: Request, response: Response): Promise<void> => {
+    response.status(200).json({ data: unwrap(await this.orderService.getSellerChatQuickReplies()), status: true });
+  };
+
+  public updateSellerChatQuickReplies = async (request: Request, response: Response): Promise<void> => {
+    response.status(200).json({ data: unwrap(await this.orderService.updateSellerChatQuickReplies(request.body.quickReplies ?? [])), status: true });
+  };
+
   public exportOrders = async (request: Request, response: Response): Promise<void> => {
     const payload = request.vendorId ? { ...request.query, vendorId: String(request.vendorId), vendorUser: true } : request.query;
     await this.orderService.exportOrders(response, payload);

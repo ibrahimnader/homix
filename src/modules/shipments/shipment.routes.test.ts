@@ -491,14 +491,14 @@ describe("shipmentRouter", () => {
     ]);
     expect(response.body.data.scheduleStatuses).toEqual([
       { id: 1, label: "مجدول" },
-      { id: 2, label: "لا يوجد رد (محاولة أولى)" },
       { id: 3, label: "مؤجل" },
-      { id: 4, label: "ملغي تأخير في التوصيل" },
-      { id: 5, label: "ملغي تغيير رأي" },
-      { id: 6, label: "ملغي لا يوجد رد" },
-      { id: 7, label: "إعادة الإتصال لاحقاً" },
+      { id: 2, label: "لا يوجد رد (محاولة أولى)" },
       { id: 8, label: "لا يوجد رد (محاولة ثانية)" },
       { id: 9, label: "لا يوجد رد (محاولة ثالثة)" },
+      { id: 6, label: "ملغي لا يوجد رد" },
+      { id: 5, label: "ملغي تغيير رأي" },
+      { id: 4, label: "ملغي تأخير في التوصيل" },
+      { id: 7, label: "إعادة الإتصال لاحقاً" },
     ]);
     expect(response.body.data.orderSources).toEqual([
       { id: 1, label: "شو رووم" },

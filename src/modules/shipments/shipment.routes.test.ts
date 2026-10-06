@@ -109,6 +109,9 @@ jest.mock("../../../app/modules/notes/notes.model", () => ({
   create: jest.fn(),
   findByPk: jest.fn(),
 }));
+jest.mock("../../../app/modules/attachments/attachment.model", () => ({
+  create: jest.fn(),
+}));
 jest.mock("../../../app/modules/user/user.model", () => ({
   findAll: jest.fn(),
 }));

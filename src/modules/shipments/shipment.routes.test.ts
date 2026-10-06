@@ -1468,7 +1468,7 @@ describe("shipmentRouter", () => {
     expect(response.body.subarray(0, 2).toString()).toBe("PK");
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(response.body);
-    expect(workbook.getWorksheet("deliveries").getCell("K2").value).toBe("2026-05-18");
+    expect(workbook.getWorksheet("deliveries").getCell("L2").value).toBe("2026-05-18");
     expect(orderModel.findAndCountAll).toHaveBeenCalledWith(
       expect.objectContaining({ limit: 1_000_000 }),
     );

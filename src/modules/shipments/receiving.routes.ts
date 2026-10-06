@@ -12,7 +12,7 @@ const requirePermission = require("../../../app/middlewares/requirePermission");
 const service = new ReceivingService();
 export const receivingRouter = Router();
 // Parent shipment router already enforces authentication and excludes vendors.
-receivingRouter.use(requirePermission("ship_inventory_view"));
+receivingRouter.use(requirePermission("ship_receipts_view"));
 receivingRouter.get(
   "/candidates",
   validateRequest({ query: receivingListSchema }),

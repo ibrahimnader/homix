@@ -82,6 +82,11 @@ const noteModel = {
 
 jest.mock("../../../app/modules/notes/notes.model", () => noteModel);
 jest.mock("../../../app/modules/attachments/attachment.model", () => ({}));
+jest.mock("../../../app/modules/settings/managedOption.model", () => ({
+  create: jest.fn(),
+  findAll: jest.fn().mockResolvedValue([]),
+  update: jest.fn(),
+}));
 jest.mock("../../../app/modules/product/productType.model", () => ({}));
 jest.mock("../../../app/modules/logs/log.model", () => ({
   findAll: jest.fn().mockResolvedValue([

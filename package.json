@@ -26,7 +26,8 @@
     "typecheck": "tsc --noEmit",
     "test": "jest --config jest.config.cjs --runInBand",
     "test:coverage": "jest --config jest.config.cjs --coverage --runInBand",
-    "db:backfill-shopify-shipping": "tsx src/scripts/backfill-shopify-shipping.ts"
+    "db:backfill-shopify-shipping": "tsx src/scripts/backfill-shopify-shipping.ts",
+    "db:setup-warehouse-receipts": "tsx src/scripts/setup-warehouse-receipts.ts"
   },
   "author": "",
   "license": "ISC",

@@ -272,6 +272,34 @@ const Order = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    // Warehouse receiving (الاستلامات). Null means "not received yet". orders
+    // are always 1:1 with orderLines (splitImportedOrderByUnit splits every
+    // order down to one unit per row), so these live here rather than on
+    // orderLines — there is never a case of one order needing several
+    // independent receipts.
+    warehouseReceivedBy: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    warehouseSenderName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    warehouseReceiptNotes: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    // Set only when a receipt slip is printed for this order — separate from
+    // warehouseReceivedBy, which is set the moment the item is received.
+    // Null means "لسه ما اتطبعش". Re-printing/combining re-stamps this.
+    warehouseReceiptNumber: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    warehouseReceiptIssuedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     hooks: {

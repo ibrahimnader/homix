@@ -1,4 +1,5 @@
 import express from "express";
+import { receivingRouter } from "./receiving.routes";
 
 import { asyncHandler, validateRequest } from "../../shared/http";
 import { ShipmentController } from "./shipment.controller";
@@ -71,6 +72,7 @@ const requireAdminForAccountingStatus = (request: any, response: any, next: any)
 export const shipmentRouter = express.Router();
 
 shipmentRouter.use(verifyToken, isNotVendor);
+shipmentRouter.use("/receipts", receivingRouter);
 
 /**
  * @swagger

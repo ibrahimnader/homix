@@ -138,3 +138,7 @@ export const MANUFACTURE_STATUS_ARABIC = {
   5: "فشل في التوصيل",
   6: "تم التوصيل",
 } as const;
+
+// القيم لسه متحددتش — تتضاف هنا لاحقًا بدون أي تعديل كود تاني.
+export const CONFIRMATION_STATUS = {} as const;
+export const CONFIRMATION_STATUS_ARABIC: Record<number, string> = {};

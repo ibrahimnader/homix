@@ -4,6 +4,7 @@ import { col, fn, literal, Op } from "sequelize";
 import { governorateDisplayLabel } from "../../shared/governorate/governorate.resolver";
 
 import {
+  CONFIRMATION_STATUS_ARABIC,
   DELIVERY_BY,
   DELIVERY_BY_ARABIC,
   DELIVERY_STATUS,
@@ -26,6 +27,7 @@ import {
   getHistoryActorLabel,
   resolveOrderPriority,
   getStatusLabel,
+  getConfirmationLabel,
   getManufactureLabel,
   getPaymentLabel,
   toIsoString,
@@ -56,6 +58,7 @@ type OrderSortDirection = 1 | -1;
 type OrderSortEntry = [OrderSortField, OrderSortDirection];
 
 const SUMMARY_AGGREGATE_UNSUPPORTED_FILTERS: Array<keyof OrderListQuery> = [
+  "confirmationStatus",
   "customerName",
   "deliveryBy",
   "deliveryStatus",
@@ -126,6 +129,9 @@ const buildFilters = (filters: OrderListQuery, vendorId?: number | null): Record
   }
   if (filters.manufactureStatus) {
     andConditions.push(sequelize.where(sequelize.col("Order.manufactureStatus"), { [Op.in]: filters.manufactureStatus.split(",").map(Number) }));
+  }
+  if (filters.confirmationStatus) {
+    andConditions.push(sequelize.where(sequelize.col("Order.confirmationStatus"), { [Op.in]: filters.confirmationStatus.split(",").map(Number) }));
   }
   if (filters.paymentStatus) {
     andConditions.push(sequelize.where(sequelize.col("Order.paymentStatus"), { [Op.in]: filters.paymentStatus.split(",").map(Number) }));
@@ -506,6 +512,8 @@ const mapOrderSummary = (value: unknown): OrderListItem => {
   return {
     assigneeId: toNumber(order.userId) || null,
     code: toText(order.code),
+    confirmationStatus: toNumber(order.confirmationStatus) || null,
+    confirmationStatusLabel: getConfirmationLabel(order.confirmationStatus),
     customerName: `${toText(toPlain(order.customer).firstName)} ${toText(toPlain(order.customer).lastName)}`.trim(),
     daysSinceOrder: getDaysSince(order.orderDate),
     deliveryBy: toNumber(order.deliveryBy) || null,
@@ -979,6 +987,7 @@ export class OrderRepository {
     ]);
     return {
       assignees: assignees.map((user: unknown) => ({ id: toNumber(toPlain(user).id), label: `${toText(toPlain(user).firstName)} ${toText(toPlain(user).lastName)}`.trim() })),
+      confirmationStatuses: Object.entries(CONFIRMATION_STATUS_ARABIC).map(([id, label]) => ({ id: Number(id), label: String(label) })),
       deliveryByOptions: Object.entries(DELIVERY_BY).map(([, id]) => ({ id: Number(id), label: DELIVERY_BY_ARABIC[id as keyof typeof DELIVERY_BY_ARABIC] ?? String(id) })),
       manufactureStatuses: Object.entries(MANUFACTURE_STATUS_ARABIC).map(([id, label]) => ({ id: Number(id), label: String(label) })),
       orderSources: Object.entries(ORDER_SOURCE).map(([, id]) => ({ id: Number(id), label: ORDER_SOURCE_LABELS[Number(id)] ?? String(id) })),

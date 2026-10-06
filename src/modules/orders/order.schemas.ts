@@ -27,6 +27,7 @@ export const orderNoteParamsSchema = orderIdParamsSchema.extend({
 });
 
 export const orderListQuerySchema = z.object({
+  confirmationStatus: csvNumberString.optional(),
   customerName: z.string().trim().optional(),
   deliveryBy: csvNumberString.optional(),
   deliveryStatus: csvNumberString.optional(),

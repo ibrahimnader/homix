@@ -272,6 +272,12 @@ const Order = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    // حالة التأكيد — القيم لسه متحددتش، قائمة فاضية مؤقتًا (CONFIRMATION_STATUS
+    // في config/constants). إضافة قيم لاحقًا تعديل بيانات بس، بدون migration جديدة.
+    confirmationStatus: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
     // Warehouse receiving (الاستلامات). Null means "not received yet". orders
     // are always 1:1 with orderLines (splitImportedOrderByUnit splits every
     // order down to one unit per row), so these live here rather than on

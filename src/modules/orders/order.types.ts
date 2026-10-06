@@ -8,6 +8,7 @@ export type OrderRequestUser = NonNullable<Request["user"]>;
 export type OrderPriorityKey = (typeof ORDER_PRIORITY_KEYS)[number];
 
 export type OrderListQuery = {
+  confirmationStatus?: string;
   customerName?: string;
   deliveryBy?: string;
   deliveryStatus?: string;
@@ -42,6 +43,8 @@ export type OrderFinancialReportQuery = {
 export type OrderListItem = {
   assigneeId: number | null;
   code: string;
+  confirmationStatus: number | null;
+  confirmationStatusLabel: string;
   customerName: string;
   daysSinceOrder: number | null;
   deliveryPriority: OrderPriorityKey | null;
@@ -172,6 +175,7 @@ export type OrderMetaOption = {
 
 export type OrderMetaResponse = {
   assignees: OrderMetaOption[];
+  confirmationStatuses: OrderMetaOption[];
   deliveryByOptions: OrderMetaOption[];
   manufactureStatuses: OrderMetaOption[];
   orderSources: OrderMetaOption[];

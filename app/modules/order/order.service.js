@@ -25,6 +25,7 @@ const {
   DELIVERY_BY_ARABIC,
   ORDER_SOURCE_ARABIC,
   MANUFACTURE_STATUS_ARABIC,
+  CONFIRMATION_STATUS_ARABIC,
 } = require("../../../config/constants");
 const {
   applyOrderLinesToInventory,
@@ -996,6 +997,7 @@ class OrderService {
       customerName,
       productCode,
       manufactureStatus,
+      confirmationStatus,
       priority,
       deliveryBy,
       orderSource,
@@ -1035,6 +1037,13 @@ class OrderService {
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("Order.manufactureStatus"), {
           [Op.in]: manufactureStatus.split(",").map(Number),
+        }),
+      );
+    }
+    if (confirmationStatus) {
+      whereClause[Op.and].push(
+        sequelize.where(sequelize.col("Order.confirmationStatus"), {
+          [Op.in]: confirmationStatus.split(",").map(Number),
         }),
       );
     }
@@ -1241,6 +1250,7 @@ class OrderService {
       { header: "النوع", key: "itemType" },
       /* أُضيف بعد الأعمدة الثابتة عمداً — ترتيب ما قبله محسوم بمواصفة العمل. */
       { header: "حالة التصنيع", key: "manufactureStatus" },
+      { header: "حالة التأكيد", key: "confirmationStatus" },
     ].map((column) => ({
       ...column,
       style: { alignment: { horizontal: "right" } },
@@ -1342,6 +1352,7 @@ class OrderService {
             amountToCollect,
             assignee,
             code: order.code,
+            confirmationStatus: CONFIRMATION_STATUS_ARABIC[order.confirmationStatus] || "",
             cost: line.cost,
             daysCounter: daysCounter ?? "",
             deliveryBy: DELIVERY_BY_ARABIC[order.deliveryBy] || "",

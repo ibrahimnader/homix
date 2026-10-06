@@ -1,4 +1,5 @@
 import {
+  CONFIRMATION_STATUS_ARABIC,
   DELIVERY_BY,
   DELIVERY_BY_ARABIC,
   DELIVERY_STATUS,
@@ -9,6 +10,7 @@ import {
   PAYMENT_STATUS_ARABIC,
 } from "../../../config/constants";
 import {
+  CONFIRMATION_STATUS_LABELS,
   DELIVERY_STATUS_PRIORITY_MAP,
   MANUFACTURE_STATUS_LABELS,
   ORDER_PRIORITY,
@@ -177,7 +179,12 @@ export const getManufactureLabel = (value: unknown): string => {
   return MANUFACTURE_STATUS_LABELS[toNumber(value)] ?? "";
 };
 
+export const getConfirmationLabel = (value: unknown): string => {
+  return CONFIRMATION_STATUS_LABELS[toNumber(value)] ?? "";
+};
+
 const FIELD_LABELS: Record<string, string> = {
+  confirmationStatus: "حالة التأكيد",
   deliveryBy: "التوصيل بواسطة",
   deliveryDate: "تاريخ التسليم",
   deliveryStatus: "حالة التسليم",
@@ -256,6 +263,10 @@ const getMappedLogValue = (
 
   if (field === "manufactureStatus") {
     return MANUFACTURE_STATUS_ARABIC[numericValue as keyof typeof MANUFACTURE_STATUS_ARABIC] ?? rawText;
+  }
+
+  if (field === "confirmationStatus") {
+    return CONFIRMATION_STATUS_ARABIC[numericValue as keyof typeof CONFIRMATION_STATUS_ARABIC] ?? rawText;
   }
 
   if (field === "orderSource") {

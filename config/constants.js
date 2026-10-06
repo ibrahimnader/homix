@@ -204,6 +204,9 @@ const MANUFACTURE_STATUS_ARABIC = {
   5: "فشل في التوصيل",
   6: "تم التوصيل"
 };
+// القيم لسه متحددتش — تتضاف هنا لاحقًا بدون أي تعديل كود تاني.
+const CONFIRMATION_STATUS = {};
+const CONFIRMATION_STATUS_ARABIC = {};
 module.exports = {
   USER_TYPES,
   ORDER_STATUS,
@@ -231,5 +234,7 @@ module.exports = {
   ORDER_STATUS_Arabic,
   ORDER_SOURCE_ARABIC,
   PAYMENT_STATUS_ARABIC,
-  MANUFACTURE_STATUS_ARABIC
+  MANUFACTURE_STATUS_ARABIC,
+  CONFIRMATION_STATUS,
+  CONFIRMATION_STATUS_ARABIC
 };

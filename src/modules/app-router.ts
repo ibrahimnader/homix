@@ -906,6 +906,7 @@ const swaggerOptions = {
               type: "object",
               properties: {
                 assignees: { items: { $ref: "#/components/schemas/OrderMetaUserOption" }, type: "array" },
+                confirmationStatuses: { items: { $ref: "#/components/schemas/OrderMetaStatusOption" }, type: "array" },
                 deliveryByOptions: { items: { $ref: "#/components/schemas/OrderMetaStatusOption" }, type: "array" },
                 manufactureStatuses: { items: { $ref: "#/components/schemas/OrderMetaStatusOption" }, type: "array" },
                 orderSources: { items: { $ref: "#/components/schemas/OrderMetaStatusOption" }, type: "array" },
@@ -914,12 +915,13 @@ const swaggerOptions = {
                 statuses: { items: { $ref: "#/components/schemas/OrderMetaStatusOption" }, type: "array" },
                 vendors: { items: { $ref: "#/components/schemas/OrderMetaVendorOption" }, type: "array" },
               },
-              required: ["assignees", "deliveryByOptions", "manufactureStatuses", "orderSources", "paymentStatuses", "priorities", "statuses", "vendors"],
+              required: ["assignees", "confirmationStatuses", "deliveryByOptions", "manufactureStatuses", "orderSources", "paymentStatuses", "priorities", "statuses", "vendors"],
               example: {
                 assignees: [
                   { id: 1, label: "Sara Mohamed" },
                   { id: 5, label: "Ahmed Hesham" },
                 ],
+                confirmationStatuses: [],
                 deliveryByOptions: [
                   { id: 1, label: "هوميكس" },
                   { id: 2, label: "بائع" },
@@ -1010,6 +1012,8 @@ const swaggerOptions = {
               type: "number",
             },
             id: { example: 7, type: "integer" },
+            confirmationStatus: { example: null, nullable: true, type: "integer" },
+            confirmationStatusLabel: { example: "", type: "string" },
             manufactureStatus: { example: 2, nullable: true, type: "integer" },
             manufactureStatusLabel: { example: "في مدة التصنيع", type: "string" },
             operationNumber: { example: "3001", type: "string" },

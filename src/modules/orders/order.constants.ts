@@ -1,4 +1,5 @@
 import {
+  CONFIRMATION_STATUS_ARABIC,
   DELIVERY_STATUS,
   MANUFACTURE_STATUS_ARABIC,
   ORDER_STATUS,
@@ -28,6 +29,8 @@ export const ACTIVE_VENDOR_ORDER_STATUSES = [
 export const ORDER_STATUS_LABELS = ORDER_STATUS_Arabic as Record<number, string>;
 export const PAYMENT_STATUS_LABELS = PAYMENT_STATUS_ARABIC as Record<number, string>;
 export const MANUFACTURE_STATUS_LABELS = MANUFACTURE_STATUS_ARABIC as Record<number, string>;
+// القيم لسه متحددتش — انظر config/constants.js::CONFIRMATION_STATUS_ARABIC.
+export const CONFIRMATION_STATUS_LABELS = CONFIRMATION_STATUS_ARABIC as Record<number, string>;
 
 export const ORDER_SUMMARY_CARD_KEYS = [
   "totalOrders",

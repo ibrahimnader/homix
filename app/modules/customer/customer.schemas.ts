@@ -32,3 +32,26 @@ export const customerUpdateSchema = z.object({
 );
 
 export type CustomerUpdateInput = z.infer<typeof customerUpdateSchema>;
+
+export const customerListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  search: z.string().trim().optional(),
+  size: z.coerce.number().int().min(1).max(200).default(50),
+  sort: z.enum(["recent", "spend", "orders"]).default("recent"),
+});
+
+export const customerExportQuerySchema = customerListQuerySchema.omit({
+  page: true,
+  size: true,
+});
+
+export const customerCreateSchema = z.object({
+  address: z.string().trim().optional().default(""),
+  email: z.string().trim().optional().default(""),
+  firstName: z.string().trim().min(1, "الاسم الأول مطلوب"),
+  lastName: z.string().trim().optional().default(""),
+  phoneNumber: z.string().trim().min(1, "رقم الموبايل مطلوب"),
+});
+
+export type CustomerCreateInput = z.infer<typeof customerCreateSchema>;
+export type CustomerListQuery = z.infer<typeof customerListQuerySchema>;

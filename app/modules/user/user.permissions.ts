@@ -75,6 +75,7 @@ export const USER_PERMISSION_GROUPS = [
     permissions: [
       { key: "customers_view", label: "عرض العملاء" },
       { key: "customers_edit", label: "تعديل العملاء" },
+      { key: "customers_create", label: "إضافة عميل يدويًا" },
     ],
   },
   {
@@ -153,6 +154,7 @@ export const USER_PERMISSION_TEMPLATES = {
     employees_delete: true,
     customers_view: true,
     customers_edit: true,
+    customers_create: true,
     ship_view: true,
     ship_edit: true,
     ship_inventory_view: true,
@@ -207,6 +209,7 @@ export const USER_PERMISSION_TEMPLATES = {
     vendors_view: true,
     customers_view: true,
     customers_edit: true,
+    customers_create: true,
     ship_view: true,
     ship_inventory_view: true,
     ship_receipts_view: true,

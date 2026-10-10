@@ -230,6 +230,10 @@ class OrderService {
             },
           },
           attributes: ["name"],
+          // A soft-deleted order must still count as "already imported" — otherwise
+          // the next Shopify sync no longer sees it (paranoid models hide deleted
+          // rows by default) and re-creates it as a new duplicate row.
+          paranoid: false,
         })
       : [];
     const existingOrdersSet = new Set(

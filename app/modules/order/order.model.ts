@@ -8,6 +8,7 @@ const {
   ORDER_SOURCE,
   SHIPMENT_SCHEDULE_STATUS,
   SHIPMENTS_STATUS,
+  CONFIRMATION_STATUS,
 } = require("../../../config/constants");
 const { ORDER_PRIORITY } = require("../../../src/modules/orders/order.constants");
 const OrderLine = require("../orderLines/orderline.model");
@@ -272,11 +273,12 @@ const Order = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
-    // حالة التأكيد — القيم لسه متحددتش، قائمة فاضية مؤقتًا (CONFIRMATION_STATUS
-    // في config/constants). إضافة قيم لاحقًا تعديل بيانات بس، بدون migration جديدة.
     confirmationStatus: {
       type: DataTypes.INTEGER,
       allowNull: true,
+      validate: {
+        isIn: [Object.values(CONFIRMATION_STATUS)],
+      },
     },
     // Warehouse receiving (الاستلامات). Null means "not received yet". orders
     // are always 1:1 with orderLines (splitImportedOrderByUnit splits every

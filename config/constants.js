@@ -204,9 +204,33 @@ const MANUFACTURE_STATUS_ARABIC = {
   5: "فشل في التوصيل",
   6: "تم التوصيل"
 };
-// القيم لسه متحددتش — تتضاف هنا لاحقًا بدون أي تعديل كود تاني.
-const CONFIRMATION_STATUS = {};
-const CONFIRMATION_STATUS_ARABIC = {};
+const CONFIRMATION_STATUS = {
+  PENDING: 1,
+  CONFIRMED: 2,
+  NO_ANSWER_FIRST_ATTEMPT: 3,
+  NO_ANSWER_SECOND_ATTEMPT: 4,
+  NO_ANSWER_THIRD_ATTEMPT: 5,
+  CALL_BACK_LATER: 6,
+  CANCELED_NO_CUSTOMER_RESPONSE: 7,
+  CANCELED_FAKE_ORDER: 8,
+  CANCELED_DUPLICATE_ORDER: 9,
+  CANCELED_SPECIAL_CIRCUMSTANCES: 10,
+  CANCELED_CHANGED_MIND: 11,
+};
+
+const CONFIRMATION_STATUS_ARABIC = {
+  1: "معلق",
+  2: "مؤكد",
+  3: "لا يوجد رد (محاولة الأولى)",
+  4: "لا يوجد رد (محاولة الثانية)",
+  5: "لا يوجد رد (محاولة الثالثة)",
+  6: "إعادة الاتصال لاحقًا",
+  7: "ملغي (لا يوجد رد من العميل)",
+  8: "ملغي (طلب وهمي)",
+  9: "ملغي (تكرار الطلب)",
+  10: "ملغي (ظروف خاصة)",
+  11: "ملغي (تغيير رأي)",
+};
 module.exports = {
   USER_TYPES,
   ORDER_STATUS,

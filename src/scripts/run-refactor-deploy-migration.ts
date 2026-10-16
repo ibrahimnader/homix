@@ -1141,7 +1141,7 @@ const main = async (): Promise<void> => {
   await repairRolePermissions();
   await backfillHistoricalManualOrderData();
   // await recalculateOrderCollectionAmounts();
-  await recalculateOrderFines();
+  // Fine rules are configured separately; deployment must not apply legacy fixed rates.
   await backfillDashboardAggregates();
 
   // eslint-disable-next-line no-console

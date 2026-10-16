@@ -458,6 +458,34 @@ describe("orderRouter", () => {
     expect(conditions).toContainEqual(expect.objectContaining({ [Op.eq]: 5 }));
   });
 
+  it("uses the product line cost when an old seller order stored collection in totalCost", async () => {
+    orderModel.findAll.mockResolvedValue([makeOrder({
+      deliveryBy: 2,
+      deliveryDate: "2026-07-12T00:00:00.000Z",
+      status: 5,
+      totalCost: "2099",
+      toBeCollected: "2099",
+      orderLines: [{
+        cost: "1200",
+        quantity: 1,
+        sku: "RKA-001",
+        product: { id: 812, vendor: { id: 3, name: "ركنة للأثاث", shippingCost: 200 } },
+      }],
+    })]);
+
+    const response = await request(app).get("/orders/financialReport").query({
+      billingDay: 13,
+      referenceDate: "2026-07-16",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.vendorDeliveries.items[0].orders[0]).toEqual(expect.objectContaining({
+      collectionTotal: 2099,
+      warehouseCost: 1200,
+      companyDue: 699,
+    }));
+  });
+
   it("resolves billingDay 28 to the July 14, 2026 through July 28, 2026 cycle for a July 26, 2026 reference date", async () => {
     orderModel.findAll.mockResolvedValue([]);
 

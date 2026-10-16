@@ -4,6 +4,8 @@ import request from "supertest";
 const customerModel = {
   create: jest.fn(),
   findByPk: jest.fn(),
+  findAll: jest.fn(),
+  bulkCreate: jest.fn(),
 };
 
 const sequelizeMock = {
@@ -16,11 +18,29 @@ jest.mock("../../../app/middlewares/requirePermission", () => () => (_req: expre
 
 import { errorMiddleware } from "../../shared/http";
 import CustomerRouter = require("../../../app/modules/customer/customer.routes");
+import CustomerService = require("../../../app/modules/customer/customer.service");
 
 const app = express();
 app.use(express.json());
 app.use("/customers", CustomerRouter);
 app.use(errorMiddleware);
+
+describe("manual order customer reuse", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("maps an explicitly selected customer without creating a duplicate", async () => {
+    customerModel.findAll
+      .mockResolvedValueOnce([{ id: 5, firstName: "سارة", phoneNumber: "01000000000" }])
+      .mockResolvedValueOnce([]);
+
+    const mapped = await CustomerService.getCustomersMappedByNames([
+      { existingCustomerId: 5, firstName: "سارة", phone: "01000000000" },
+    ]);
+
+    expect(mapped).toEqual({ "local:5": 5 });
+    expect(customerModel.bulkCreate).not.toHaveBeenCalled();
+  });
+});
 
 describe("customerRouter", () => {
   beforeEach(() => {
@@ -139,13 +159,14 @@ describe("customerRouter list/summary/create", () => {
 
   it("returns the customers KPI summary", async () => {
     sequelizeMock.query
-      .mockResolvedValueOnce([{ totalCustomers: 50, totalSpend: 403442 }])
+      .mockResolvedValueOnce([{ customersWithoutOrders: 10, totalCustomers: 50, totalSpend: 403442 }])
       .mockResolvedValueOnce([{ firstName: "سمير", lastName: "حافظ", totalSpend: 66840 }]);
 
     const response = await request(app).get("/customers/summary");
 
     expect(response.status).toBe(200);
     expect(response.body.data).toEqual({
+      customersWithoutOrders: 10,
       topSpender: { name: "سمير حافظ", totalSpend: 66840 },
       totalCustomers: 50,
       totalSpend: 403442,

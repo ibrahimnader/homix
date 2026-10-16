@@ -14,6 +14,7 @@ jest.mock("../../../app/modules/order/order.model", () => ({
 }));
 jest.mock("../../../app/modules/logs/log.model", () => ({
   bulkCreate: jest.fn(),
+  create: jest.fn(),
 }));
 const Order = require("../../../app/modules/order/order.model");
 const Log = require("../../../app/modules/logs/log.model");
@@ -44,6 +45,8 @@ beforeEach(() => {
     update,
   }));
   db.mockImplementation(async (sql: string, options: any) => {
+    if (sql.includes('SELECT "productId", sku, quantity, cost FROM "orderLines"')) return [{ productId: 33, sku: "SKU33", quantity: 1, cost: 1200 }];
+    if (sql.includes('SELECT id, quantity FROM "shipmentInventoryItems"')) return [{ id: 55, quantity: 2 }];
     if (sql.includes('"warehouseReceivedBy" IS NOT NULL')) {
       // printDocument's eligibility + lock query
       return eligible.map((orderId) => ({ orderId }));
@@ -104,6 +107,7 @@ describe("warehouse receiving", () => {
       ]),
       { transaction }
     );
+    expect(db).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO warehouse_receipt_movements'), expect.objectContaining({ transaction }));
     for (const [, options] of db.mock.calls) {
       if (options?.transaction) expect(options.transaction).toBe(transaction);
     }
@@ -130,6 +134,26 @@ describe("warehouse receiving", () => {
     await expect(new ReceivingService().receive(input, 999)).rejects.toMatchObject({
       statusCode: 404,
     });
+  });
+  it("cancels a receipt by restoring saved states and subtracting its stock", async () => {
+    db.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id, status, "shipmentStatus", "warehouseReceivedBy" FROM orders')) return [{ id: 10, status: 8, shipmentStatus: 2, warehouseReceivedBy: 7 }];
+      if (sql.includes('FROM warehouse_receipt_movements WHERE')) return [{
+        id: 91, inventoryItemId: 55, quantity: 2, previousStatus: 2,
+        previousShipmentStatus: 1, previousDeliveryBy: 2,
+        previousShippedFromInventory: false, previousShippingReceiveDate: null,
+      }];
+      if (sql.includes('FROM "shipmentInventoryItems" WHERE id')) return [{ quantity: 3 }];
+      return [];
+    });
+    await expect(new ReceivingService().cancel(10, 7)).resolves.toEqual({ orderId: 10 });
+    expect(db).toHaveBeenCalledWith(expect.stringContaining('SET quantity = quantity - :quantity'), expect.objectContaining({ replacements: { id: 55, quantity: 2 }, transaction }));
+    expect(db).toHaveBeenCalledWith(expect.stringContaining('UPDATE orders SET status = :status'), expect.objectContaining({ replacements: expect.objectContaining({ orderId: 10, status: 2, shipmentStatus: 1, deliveryBy: 2 }), transaction }));
+  });
+  it("refuses to guess previous states for old receipts", async () => {
+    db.mockImplementation(async (sql: string) => sql.includes('SELECT id, status, "shipmentStatus", "warehouseReceivedBy" FROM orders')
+      ? [{ id: 10, status: 8, shipmentStatus: 2, warehouseReceivedBy: 7 }] : []);
+    await expect(new ReceivingService().cancel(10, 7)).rejects.toMatchObject({ statusCode: 409 });
   });
 });
 

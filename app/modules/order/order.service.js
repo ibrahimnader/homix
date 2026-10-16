@@ -54,18 +54,7 @@ const ProductType = require("../product/productType.model");
 const Log = require("../logs/log.model");
 const PREFIX = "H";
 const CUSTOM_PREFIX = "CU";
-const {
-  calculateOrderFine,
-  calculateOrderFineForRecord,
-  resolveExpectedDeliveryDate,
-} = require("../../../src/modules/orders/order-fines");
-const FINAL_FINE_STATUSES = [
-  ORDER_STATUS.CANCELED,
-  ORDER_STATUS.DELIVERED,
-  ORDER_STATUS.REFUNDED,
-  ORDER_STATUS.REPLACED,
-  ORDER_STATUS.IN_INVENTORY,
-];
+const { resolveExpectedDeliveryDate } = require("../../../src/modules/orders/order-fines");
 
 const normalizeNumber = (value) => {
   const parsedValue = Number(value);
@@ -438,7 +427,9 @@ class OrderService {
         if (order.__discountShare !== undefined) {
           total_discounts = normalizeNumber(order.__discountShare);
         }
-        const customerKey = order.id
+        const customerKey = order.customer.existingCustomerId
+          ? `local:${order.customer.existingCustomerId}`
+          : order.id
           ? order.customer.id
           : `${
               order.customer.firstName ||
@@ -544,12 +535,7 @@ class OrderService {
           orderSource:
             order.orderSource
             || (order.id ? ORDER_SOURCE.ONLINE : ORDER_SOURCE.SHOWROOM),
-          fine: calculateOrderFine({
-            baseAmount: subTotalPrice,
-            daysToDeliver: vendor?.daysToDeliver,
-            expectedDeliveryDate,
-            orderDate,
-          }),
+          fine: 0,
           priority: order.priority || undefined,
           // An explicitly picked administrator wins over the vendor's default one.
           userId: order.userId || vendor?.accountManagerUserId || null,
@@ -569,13 +555,6 @@ class OrderService {
           !obj.deliveryDate
         ) {
           obj.deliveryDate = new Date();
-          obj.fine = calculateOrderFine({
-            baseAmount: subTotalPrice,
-            daysToDeliver: vendor?.daysToDeliver,
-            endDate: obj.deliveryDate,
-            expectedDeliveryDate: obj.expectedDeliveryDate,
-            orderDate: obj.orderDate,
-          });
         }
         if (order.financialStatus) {
           obj.financialStatus = order.financialStatus;
@@ -1865,26 +1844,6 @@ class OrderService {
       });
     }
 
-    const nextStatus = Number(orderData.status || order.status) || null;
-    const nextDeliveryDate = orderData.deliveryDate || order.deliveryDate || null;
-    const nextExpectedDeliveryDate =
-      orderData.expectedDeliveryDate || order.expectedDeliveryDate || null;
-    const shouldFreezeFine =
-      nextStatus === ORDER_STATUS.DELIVERED
-      || nextStatus === ORDER_STATUS.CANCELED
-      || nextStatus === ORDER_STATUS.REFUNDED
-      || nextStatus === ORDER_STATUS.REPLACED
-      || nextStatus === ORDER_STATUS.IN_INVENTORY;
-
-    orderData.fine = calculateOrderFineForRecord(
-      {
-        ...order.toJSON(),
-        ...orderData,
-        expectedDeliveryDate: nextExpectedDeliveryDate,
-      },
-      shouldFreezeFine ? (nextDeliveryDate || new Date()) : new Date(),
-    );
-
     await order.update(orderData);
     await Log.bulkCreate(logs);
     const returnedOrder = await Order.findOne({
@@ -2011,15 +1970,6 @@ class OrderService {
             orderData.deliveryDate = new Date();
           }
 
-          orderData.fine = calculateOrderFineForRecord(
-            {
-              ...order.toJSON(),
-              ...orderData,
-            },
-            Number(orderData.status) === ORDER_STATUS.DELIVERED
-              ? (orderData.deliveryDate || new Date())
-              : new Date(),
-          );
 
           await OrderService.sendNotification(
             order.id,
@@ -2126,21 +2076,6 @@ class OrderService {
       ) {
         perOrderData.deliveryDate = new Date();
       }
-
-      const shouldFreezeFine =
-        nextStatus === ORDER_STATUS.DELIVERED
-        || nextStatus === ORDER_STATUS.CANCELED
-        || nextStatus === ORDER_STATUS.REFUNDED
-        || nextStatus === ORDER_STATUS.REPLACED
-        || nextStatus === ORDER_STATUS.IN_INVENTORY;
-
-      perOrderData.fine = calculateOrderFineForRecord(
-        {
-          ...order.toJSON(),
-          ...perOrderData,
-        },
-        shouldFreezeFine ? (perOrderData.deliveryDate || new Date()) : new Date(),
-      );
 
       await order.update(perOrderData);
     }
@@ -2410,58 +2345,8 @@ class OrderService {
   }
 
   static async recalculateDailyFines() {
-    const activeOrders = await Order.findAll({
-      attributes: [
-        "id",
-        "fine",
-        "orderDate",
-        "status",
-        "subTotalPrice",
-        "expectedDeliveryDate",
-        "deliveryDate",
-      ],
-      include: [
-        {
-          model: OrderLine,
-          as: "orderLines",
-          required: false,
-          include: [
-            {
-              model: Product,
-              as: "product",
-              required: false,
-              include: [
-                {
-                  model: Vendor,
-                  as: "vendor",
-                  required: false,
-                  attributes: ["daysToDeliver"],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-      where: {
-        status: {
-          [Op.notIn]: FINAL_FINE_STATUSES,
-        },
-      },
-    });
-
-    let updatedCount = 0;
-
-    for (const order of activeOrders) {
-      const nextFine = calculateOrderFineForRecord(order, new Date());
-
-      if (normalizeNumber(order.fine) === nextFine) {
-        continue;
-      }
-
-      await order.update({ fine: nextFine });
-      updatedCount += 1;
-    }
-
+    const { recalculateRuleFines } = require("../../../src/modules/fines/recalculate-fines");
+    const updatedCount = await recalculateRuleFines();
     return {
       message: `Daily fines recalculated for ${updatedCount} orders`,
       status: true,

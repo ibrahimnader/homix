@@ -7,6 +7,7 @@ import { dashboardRouter } from "./dashboard";
 import { notificationRouter } from "./notification";
 import { navigationRouter } from "./navigation";
 import { orderRouter } from "./orders";
+import { fineRouter } from "./fines/fine.routes";
 import { ticketRouter } from "./tickets";
 
 const userRouter = require("../../app/modules/user/user.routes");
@@ -2441,6 +2442,7 @@ export const createMainRouter = (): express.Router => {
   });
   router.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
   router.use("/orders", orderRouter);
+  router.use("/fines", fineRouter);
   router.use("/orderLines", orderLineRouter);
   router.use("/users", userRouter);
   router.use("/factories", verifyToken, isNotLogistic, factoryRouter);

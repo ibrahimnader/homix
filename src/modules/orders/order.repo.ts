@@ -339,6 +339,13 @@ const getOrderLineVariant = (lineValue: unknown): Record<string, unknown> => {
 };
 
 const getFinancialOrderCost = (order: Record<string, unknown>, orderLines: unknown[]): number => {
+  // The line cost is the actual product cost. Some older seller deliveries
+  // stored the amount to collect in totalCost; prefer the line ledger when it
+  // has a complete, positive cost for every line.
+  const lineCosts = orderLines.map((lineValue) => toNumber(toPlain(lineValue).cost));
+  if (lineCosts.length > 0 && lineCosts.every((cost) => cost > 0)) {
+    return lineCosts.reduce((total, cost) => total + cost, 0);
+  }
   const storedTotalCost = toNumber(order.totalCost);
   if (storedTotalCost > 0) return storedTotalCost;
 

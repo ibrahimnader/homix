@@ -63,6 +63,50 @@ const withManufactureDays = (row: ReceivedItem): ReceivedItem => ({
 });
 
 export class ReceivingService {
+  private async addReceiptStock(order: any, transaction: Transaction): Promise<void> {
+    const lines = await select<{ productId: number; sku: string | null; quantity: number; cost: number }>(
+      `SELECT "productId", sku, quantity, cost FROM "orderLines"
+       WHERE "orderId" = :orderId AND "deletedAt" IS NULL ORDER BY id LIMIT 2`,
+      { orderId: order.id }, transaction
+    );
+    if (lines.length !== 1) throw new ValidationError("يجب أن يحتوي الطلب على صنف واحد فقط للاستلام");
+    const line = lines[0]!;
+    if (!line.productId || Number(line.quantity) <= 0) throw new ValidationError("الطلب لا يحتوي على صنف صالح للمخزون");
+    const productCode = line.sku?.trim() || `PRODUCT-${line.productId}`;
+    const [stock] = await select<{ id: number; quantity: number }>(
+      `SELECT id, quantity FROM "shipmentInventoryItems"
+       WHERE "productId" = :productId AND "productCode" = :productCode AND "deletedAt" IS NULL
+       ORDER BY id LIMIT 1 FOR UPDATE`,
+      { productId: line.productId, productCode }, transaction
+    );
+    let inventoryItemId: number;
+    if (stock) {
+      inventoryItemId = stock.id;
+      await sequelize.query(`UPDATE "shipmentInventoryItems" SET quantity = quantity + :quantity, status = 1, "updatedAt" = NOW() WHERE id = :id`, {
+        replacements: { id: stock.id, quantity: line.quantity }, transaction,
+      });
+    } else {
+      const [created] = await select<{ id: number }>(
+        `INSERT INTO "shipmentInventoryItems" ("productId", "productCode", quantity, "costPrice", status, "createdAt", "updatedAt")
+         VALUES (:productId, :productCode, :quantity, :costPrice, 1, NOW(), NOW()) RETURNING id`,
+        { productId: line.productId, productCode, quantity: line.quantity, costPrice: Number(line.cost) / Number(line.quantity) || 0 }, transaction
+      );
+      inventoryItemId = created!.id;
+    }
+    await sequelize.query(`INSERT INTO warehouse_receipt_movements
+      ("orderId", "inventoryItemId", quantity, "previousStatus", "previousShipmentStatus", "previousDeliveryBy", "previousShippedFromInventory", "previousShippingReceiveDate")
+      VALUES (:orderId, :inventoryItemId, :quantity, :previousStatus, :previousShipmentStatus, :previousDeliveryBy, :previousShippedFromInventory, :previousShippingReceiveDate)`, {
+      replacements: {
+        orderId: order.id, inventoryItemId, quantity: line.quantity,
+        previousStatus: order.status ?? null,
+        previousShipmentStatus: order.shipmentStatus ?? null,
+        previousDeliveryBy: order.deliveryBy ?? null,
+        previousShippedFromInventory: order.shippedFromInventory ?? null,
+        previousShippingReceiveDate: order.shippingReceiveDate ?? null,
+      }, transaction,
+    });
+  }
+
   async candidates(filters: z.infer<typeof receivingListSchema>) {
     const replacements = {
       search: `%${filters.search}%`,
@@ -199,6 +243,7 @@ export class ReceivingService {
         if (manufactureDate && input.receivedDate < manufactureDate) {
           throw new ValidationError("تاريخ الاستلام يسبق تاريخ التصنيع");
         }
+        await this.addReceiptStock(order, transaction);
         const changes = {
           warehouseReceivedBy: userId,
           warehouseSenderName: input.senderName,
@@ -228,6 +273,46 @@ export class ReceivingService {
         await order.update(changes, { transaction });
       }
       return { orderIds: input.orderIds, receiverName: user.name };
+    });
+  }
+
+  async cancel(orderId: number, userId: number) {
+    return sequelize.transaction(async (transaction) => {
+      const [order] = await select<{ id: number; status: number; shipmentStatus: number; warehouseReceivedBy: number | null }>(
+        'SELECT id, status, "shipmentStatus", "warehouseReceivedBy" FROM orders WHERE id = :orderId FOR UPDATE',
+        { orderId }, transaction,
+      );
+      if (!order) throw new NotFoundError("الطلب غير موجود");
+      if (!order.warehouseReceivedBy || Number(order.status) !== ORDER_STATUS.IN_INVENTORY || Number(order.shipmentStatus) !== SHIPMENTS_STATUS.IN_WAREHOUSE) {
+        throw new ConflictError("حالة الطلب تغيرت بعد الاستلام؛ راجع الطلب قبل إلغاء الاستلام");
+      }
+      const [movement] = await select<{
+        id: number; inventoryItemId: number; quantity: number;
+        previousStatus: number | null; previousShipmentStatus: number | null;
+        previousDeliveryBy: number | null; previousShippedFromInventory: boolean | null;
+        previousShippingReceiveDate: string | null;
+      }>(`SELECT * FROM warehouse_receipt_movements WHERE "orderId" = :orderId AND "cancelledAt" IS NULL FOR UPDATE`, { orderId }, transaction);
+      if (!movement) throw new ConflictError("استلام قديم بلا حالة سابقة محفوظة؛ يحتاج مراجعة يدوية");
+      const [stock] = await select<{ quantity: number }>(`SELECT quantity FROM "shipmentInventoryItems" WHERE id = :id AND "deletedAt" IS NULL FOR UPDATE`, { id: movement.inventoryItemId }, transaction);
+      if (!stock || Number(stock.quantity) < Number(movement.quantity)) throw new ConflictError("الكمية المتاحة أقل من كمية الاستلام؛ راجع حركة المخزون أولًا");
+      await sequelize.query(`UPDATE "shipmentInventoryItems" SET quantity = quantity - :quantity,
+        status = CASE WHEN quantity - :quantity > 0 THEN 1 ELSE 2 END, "updatedAt" = NOW() WHERE id = :id`, {
+        replacements: { id: movement.inventoryItemId, quantity: movement.quantity }, transaction,
+      });
+      await sequelize.query(`UPDATE orders SET status = :status, "shipmentStatus" = :shipmentStatus,
+        "deliveryBy" = :deliveryBy, "shippedFromInventory" = :shippedFromInventory,
+        "shippingReceiveDate" = :shippingReceiveDate, "warehouseReceivedBy" = NULL,
+        "warehouseSenderName" = NULL, "warehouseReceiptNotes" = NULL,
+        "warehouseReceiptNumber" = NULL, "warehouseReceiptIssuedAt" = NULL, "updatedAt" = NOW()
+        WHERE id = :orderId`, { replacements: {
+          orderId, status: movement.previousStatus, shipmentStatus: movement.previousShipmentStatus,
+          deliveryBy: movement.previousDeliveryBy, shippedFromInventory: movement.previousShippedFromInventory,
+          shippingReceiveDate: movement.previousShippingReceiveDate,
+        }, transaction });
+      await sequelize.query(`UPDATE warehouse_receipt_movements SET "cancelledAt" = NOW() WHERE id = :id`, { replacements: { id: movement.id }, transaction });
+      const Log = require("../../../app/modules/logs/log.model");
+      await Log.create({ entityId: orderId, entityType: "order", action: "cancel_receipt", field: "warehouseReceivedBy", from: String(userId), to: "", userId }, { transaction });
+      return { orderId };
     });
   }
 

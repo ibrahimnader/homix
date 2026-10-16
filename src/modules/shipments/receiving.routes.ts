@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod";
 import { logger } from "../../shared/logger";
 import { asyncHandler, validateRequest } from "../../shared/http";
 import {
@@ -66,5 +67,19 @@ receivingRouter.post(
       logger.error({ err: error, orderIds: data.orderIds }, "Receipt saved; dashboard refresh failed");
     }
     res.status(201).json({ status: true, data });
+  })
+);
+receivingRouter.post(
+  "/:orderId/cancel",
+  requirePermission("ship_edit"),
+  validateRequest({ params: z.object({ orderId: z.coerce.number().int().positive() }) }),
+  asyncHandler(async (req, res) => {
+    const data = await service.cancel(Number(req.params.orderId), Number(req.user!.id));
+    try {
+      await service.refreshMetrics([data.orderId]);
+    } catch (error) {
+      logger.error({ err: error, orderId: data.orderId }, "Receipt cancelled; dashboard refresh failed");
+    }
+    res.json({ status: true, data });
   })
 );

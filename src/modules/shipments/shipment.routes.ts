@@ -1,5 +1,6 @@
 import express from "express";
 import { receivingRouter } from "./receiving.routes";
+import { reassignmentRouter } from "./reassignment.routes";
 
 import { asyncHandler, validateRequest } from "../../shared/http";
 import { ShipmentController } from "./shipment.controller";
@@ -73,6 +74,7 @@ export const shipmentRouter = express.Router();
 
 shipmentRouter.use(verifyToken, isNotVendor);
 shipmentRouter.use("/receipts", receivingRouter);
+shipmentRouter.use("/reassignments", reassignmentRouter);
 
 /**
  * @swagger

@@ -22,6 +22,7 @@ type CustomerAddress = {
 };
 
 type CustomerInput = {
+  existingCustomerId?: number;
   address1?: string;
   address2?: string;
   city?: string;
@@ -84,6 +85,7 @@ const toCustomerPayload = (customer: CustomerInput): CustomerPayload => {
 };
 
 const customerKey = (customer: {
+  existingCustomerId?: number;
   email?: string | null;
   firstName?: string | null;
   id?: number;
@@ -91,6 +93,7 @@ const customerKey = (customer: {
   phoneNumber?: string | null;
   shopifyId?: string | null;
 }): string => {
+  if (customer.existingCustomerId) return `local:${customer.existingCustomerId}`;
   return customer.shopifyId
     ? customer.shopifyId
     : `${customer.firstName ?? ""}${customer.lastName ?? ""}${customer.email ?? ""}${customer.phoneNumber ?? ""}`;
@@ -187,6 +190,9 @@ class CustomerService {
   }
 
   public static async getCustomersMappedByNames(customers: CustomerInput[]): Promise<Record<string, number>> {
+    const selectedIds = [...new Set(customers.map((customer) => Number(customer.existingCustomerId)).filter((id) => Number.isInteger(id) && id > 0))];
+    const selectedCustomers = selectedIds.length ? (await Customer.findAll({ where: { id: selectedIds } })) as PersistedCustomer[] : [];
+    if (selectedCustomers.length !== selectedIds.length) throw new NotFoundError("Selected customer not found");
     const customerIds = customers
       .filter((customer) => customer.id)
       .map((customer) => String(customer.id));
@@ -207,9 +213,10 @@ class CustomerService {
         existingShopifyIds.add(customer.shopifyId);
       }
     }
+    for (const customer of selectedCustomers) result[`local:${customer.id}`] = customer.id;
 
     const nonExistingCustomers = customers.filter(
-      (customer) => !customer.id || !existingShopifyIds.has(String(customer.id)),
+      (customer) => !customer.existingCustomerId && (!customer.id || !existingShopifyIds.has(String(customer.id))),
     );
 
     if (nonExistingCustomers.length === 0) {
@@ -314,18 +321,20 @@ class CustomerService {
   }
 
   public static async getCustomersSummary(): Promise<Result<{
+    customersWithoutOrders: number;
     topSpender: { name: string; totalSpend: number } | null;
     totalCustomers: number;
     totalSpend: number;
   }>> {
     const [row] = (await sequelize.query(
       `SELECT COUNT(DISTINCT c.id)::int AS "totalCustomers",
+        COUNT(DISTINCT c.id) FILTER (WHERE o.id IS NULL)::int AS "customersWithoutOrders",
         COALESCE(SUM(o."totalPrice"), 0)::float AS "totalSpend"
       FROM customers c
       LEFT JOIN orders o ON o."customerId" = c.id AND o."deletedAt" IS NULL
       WHERE c."deletedAt" IS NULL`,
       { type: QueryTypes.SELECT },
-    )) as Array<{ totalCustomers: number; totalSpend: number }>;
+    )) as Array<{ customersWithoutOrders: number; totalCustomers: number; totalSpend: number }>;
 
     const [topSpenderRow] = (await sequelize.query(
       `SELECT c."firstName", c."lastName", COALESCE(SUM(o."totalPrice"), 0)::float AS "totalSpend"
@@ -339,6 +348,7 @@ class CustomerService {
     )) as Array<{ firstName: string | null; lastName: string | null; totalSpend: number }>;
 
     return success({
+      customersWithoutOrders: Number(row?.customersWithoutOrders) || 0,
       topSpender: topSpenderRow
         ? { name: `${topSpenderRow.firstName ?? ""} ${topSpenderRow.lastName ?? ""}`.trim(), totalSpend: Number(topSpenderRow.totalSpend) || 0 }
         : null,

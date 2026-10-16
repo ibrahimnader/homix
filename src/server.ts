@@ -9,6 +9,7 @@ import { createApp } from "./app";
 import { connectToDatabase } from "./infrastructure/database";
 import { navigationCountsEvents } from "./modules/navigation";
 import { DashboardAggregateService } from "./modules/dashboard/dashboard-aggregate.service";
+import { recalculateRuleFines } from "./modules/fines/recalculate-fines";
 import type { DashboardMetricSnapshot } from "./modules/dashboard/dashboard.types";
 import { logger } from "./shared/logger/logger";
 
@@ -135,11 +136,11 @@ const runSaveMissingOrders = async (): Promise<void> => {
 const DAILY_FINES_JOB = "recalculateDailyFines";
 
 const runDailyFines = async (): Promise<void> => {
-  const result = await orderService.recalculateDailyFines();
+  const updatedCount = await recalculateRuleFines();
   logger.info(
     {
       operationName: DAILY_FINES_JOB,
-      updatedCount: result?.updatedCount ?? 0,
+      updatedCount,
     },
     "Daily fines recalculated",
   );

@@ -1,4 +1,6 @@
 export type ReassignmentLine = { productId: number; sku: string | null; quantity: number };
+export const CUSTOMER_STILL_NEEDS_REASON = "إعادة تخصيص - العميل لسه محتاج الطلب";
+export const keepsSourcePendingForReason = (reason: string): boolean => reason.trim() === CUSTOMER_STILL_NEEDS_REASON;
 
 export const sameReassignmentItem = (
   source: ReassignmentLine[], target: ReassignmentLine[],

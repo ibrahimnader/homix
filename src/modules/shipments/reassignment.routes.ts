@@ -5,7 +5,7 @@ import { sequelize } from "../../infrastructure/database";
 import { asyncHandler, validateRequest } from "../../shared/http";
 import { ConflictError, NotFoundError, ValidationError } from "../../shared/errors";
 import { SHIPMENT_STATUS } from "./shipment.constants";
-import { sameReassignmentItem } from "./reassignment.logic";
+import { keepsSourcePendingForReason, sameReassignmentItem } from "./reassignment.logic";
 
 const { ORDER_STATUS } = require("../../../config/constants");
 const requirePermission = require("../../../app/middlewares/requirePermission");
@@ -16,7 +16,6 @@ const mutation = z.object({
   targetOperationNumber: z.string().trim().min(1).max(100).optional(),
   reason: z.string().trim().min(2).max(200),
   notes: z.string().trim().max(2000).optional().default(""),
-  keepOldPending: z.boolean().default(false),
 }).refine((value) => Boolean(value.targetOrderId || value.targetOperationNumber), "Choose a target order");
 
 type OrderRow = { id: number; status: number; shipmentStatus: number | null };
@@ -37,6 +36,7 @@ reassignmentRouter.get("/", requirePermission("ship_view"), asyncHandler(async (
 
 reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ body: mutation }), asyncHandler(async (request, response) => {
   const input = request.body as z.infer<typeof mutation>;
+  const keepOldPending = keepsSourcePendingForReason(input.reason);
   const createdBy = Number((request as any).user?.id) || null;
   const record = await sequelize.transaction(async (transaction) => {
     let targetOrderId = input.targetOrderId;
@@ -78,7 +78,7 @@ reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ b
     }
 
     await sequelize.query(`UPDATE orders SET status = :status, "shipmentStatus" = :shipmentStatus, "updatedAt" = NOW() WHERE id = :id`, {
-      replacements: { id: input.sourceOrderId, status: input.keepOldPending ? ORDER_STATUS.PENDING : ORDER_STATUS.CANCELED, shipmentStatus: input.keepOldPending ? SHIPMENT_STATUS.PENDING : SHIPMENT_STATUS.CANCELED }, transaction,
+      replacements: { id: input.sourceOrderId, status: keepOldPending ? ORDER_STATUS.PENDING : ORDER_STATUS.CANCELED, shipmentStatus: keepOldPending ? SHIPMENT_STATUS.PENDING : SHIPMENT_STATUS.CANCELED }, transaction,
     });
     await sequelize.query(`UPDATE orders SET status = :status, "shipmentStatus" = :shipmentStatus, "updatedAt" = NOW() WHERE id = :id`, {
       replacements: { id: targetOrderId, status: ORDER_STATUS.IN_INVENTORY, shipmentStatus: SHIPMENT_STATUS.IN_WAREHOUSE }, transaction,
@@ -86,7 +86,7 @@ reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ b
     const [inserted] = await sequelize.query(`
       INSERT INTO shipment_reassignments ("sourceOrderId", "targetOrderId", reason, notes, "keepOldPending", "createdBy")
       VALUES (:sourceOrderId, :targetOrderId, :reason, :notes, :keepOldPending, :createdBy) RETURNING *
-    `, { replacements: { sourceOrderId: input.sourceOrderId, targetOrderId, reason: input.reason, notes: input.notes, keepOldPending: input.keepOldPending, createdBy }, transaction, type: QueryTypes.SELECT });
+    `, { replacements: { sourceOrderId: input.sourceOrderId, targetOrderId, reason: input.reason, notes: input.notes, keepOldPending, createdBy }, transaction, type: QueryTypes.SELECT });
     return inserted;
   });
   response.status(201).json({ status: true, data: record });

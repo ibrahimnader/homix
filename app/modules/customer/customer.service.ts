@@ -5,7 +5,7 @@ const { QueryTypes } = require("sequelize");
 import { NotFoundError } from "../../../src/shared/errors";
 import type { Result } from "../../../src/shared/result";
 import { success } from "../../../src/shared/result";
-import { governorateDisplayLabel } from "../../../src/shared/governorate/governorate.resolver";
+import { matchGovernorate } from "../../../src/shared/governorate/governorate.resolver";
 import type { CustomerCreateInput, CustomerListQuery, CustomerUpdateInput } from "./customer.schemas";
 
 type CustomerAddress = {
@@ -113,12 +113,6 @@ type CustomerListRow = {
   totalSpend: number;
 };
 
-const CUSTOMER_SORT_COLUMNS: Record<CustomerListQuery["sort"], string> = {
-  orders: "\"ordersCount\" DESC, c.\"createdAt\" DESC",
-  recent: "c.\"createdAt\" DESC",
-  spend: "\"totalSpend\" DESC, c.\"createdAt\" DESC",
-};
-
 const customerListWhere = (search?: string) => {
   const conditions = [`c."deletedAt" IS NULL`];
   if (search?.trim()) {
@@ -135,7 +129,7 @@ const mapCustomerListRow = (row: CustomerListRow) => ({
   createdAt: row.createdAt,
   email: row.email ?? "",
   firstName: row.firstName ?? "",
-  governorate: governorateDisplayLabel(row.address),
+  governorate: matchGovernorate(row.address)?.label ?? "",
   id: row.id,
   isManual: !row.shopifyId,
   lastName: row.lastName ?? "",
@@ -144,6 +138,36 @@ const mapCustomerListRow = (row: CustomerListRow) => ({
   phoneNumber: row.phoneNumber ?? "",
   totalSpend: Number(row.totalSpend) || 0,
 });
+
+type MappedCustomerListRow = ReturnType<typeof mapCustomerListRow>;
+
+const filterCustomerRows = (rows: MappedCustomerListRow[], filters: Pick<CustomerListQuery, "governorate" | "orders">) =>
+  rows.filter((row) => {
+    if (filters.governorate && row.governorate !== filters.governorate) return false;
+    if (filters.orders === "with" && row.ordersCount === 0) return false;
+    if (filters.orders === "without" && row.ordersCount > 0) return false;
+    return true;
+  });
+
+const sortCustomerRows = (rows: MappedCustomerListRow[], sort: CustomerListQuery["sort"]) => {
+  const byRecent = (left: MappedCustomerListRow, right: MappedCustomerListRow) =>
+    new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+  const sorted = [...rows];
+
+  sorted.sort((left, right) => {
+    if (sort === "spend") return right.totalSpend - left.totalSpend || byRecent(left, right);
+    if (sort === "spend_asc") return left.totalSpend - right.totalSpend || byRecent(left, right);
+    if (sort === "orders") return right.ordersCount - left.ordersCount || byRecent(left, right);
+    if (sort === "name") {
+      const leftName = `${left.firstName} ${left.lastName}`.trim();
+      const rightName = `${right.firstName} ${right.lastName}`.trim();
+      return leftName.localeCompare(rightName, "ar") || byRecent(left, right);
+    }
+    return byRecent(left, right);
+  });
+
+  return sorted;
+};
 
 class CustomerService {
   public static async importCustomers(parameters: Record<string, unknown>) {
@@ -286,11 +310,7 @@ class CustomerService {
     totalCount: number;
   }>> {
     const where = customerListWhere(filters.search);
-    const replacements = {
-      offset: (filters.page - 1) * filters.size,
-      search: filters.search?.trim() ? `%${filters.search.trim()}%` : null,
-      size: filters.size,
-    };
+    const replacements = { search: filters.search?.trim() ? `%${filters.search.trim()}%` : null };
 
     const rows = (await sequelize.query(
       `SELECT c.id, c."firstName", c."lastName", c."phoneNumber", c.email, c.address,
@@ -302,42 +322,42 @@ class CustomerService {
       LEFT JOIN orders o ON o."customerId" = c.id AND o."deletedAt" IS NULL
       WHERE ${where}
       GROUP BY c.id
-      ORDER BY ${CUSTOMER_SORT_COLUMNS[filters.sort]}
-      LIMIT :size OFFSET :offset`,
+      ORDER BY c."createdAt" DESC`,
       { replacements, type: QueryTypes.SELECT },
     )) as CustomerListRow[];
-
-    const [countRow] = (await sequelize.query(
-      `SELECT COUNT(*)::int AS total FROM customers c WHERE ${where}`,
-      { replacements, type: QueryTypes.SELECT },
-    )) as Array<{ total: number }>;
+    const filteredRows = sortCustomerRows(filterCustomerRows(rows.map(mapCustomerListRow), filters), filters.sort);
+    const offset = (filters.page - 1) * filters.size;
 
     return success({
-      items: rows.map(mapCustomerListRow),
+      items: filteredRows.slice(offset, offset + filters.size),
       page: filters.page,
       size: filters.size,
-      totalCount: countRow?.total ?? 0,
+      totalCount: filteredRows.length,
     });
   }
 
   public static async getCustomersSummary(): Promise<Result<{
     customersWithoutOrders: number;
-    topSpender: { name: string; totalSpend: number } | null;
+    customersWithOrders: number;
+    governorates: string[];
+    topSpender: { name: string; ordersCount: number; totalSpend: number } | null;
     totalCustomers: number;
     totalSpend: number;
   }>> {
     const [row] = (await sequelize.query(
       `SELECT COUNT(DISTINCT c.id)::int AS "totalCustomers",
         COUNT(DISTINCT c.id) FILTER (WHERE o.id IS NULL)::int AS "customersWithoutOrders",
-        COALESCE(SUM(o."totalPrice"), 0)::float AS "totalSpend"
+        COALESCE(SUM(o."totalPrice"), 0)::float AS "totalSpend",
+        ARRAY_AGG(DISTINCT c.address) FILTER (WHERE c.address IS NOT NULL) AS addresses
       FROM customers c
       LEFT JOIN orders o ON o."customerId" = c.id AND o."deletedAt" IS NULL
       WHERE c."deletedAt" IS NULL`,
       { type: QueryTypes.SELECT },
-    )) as Array<{ customersWithoutOrders: number; totalCustomers: number; totalSpend: number }>;
+    )) as Array<{ addresses?: string[]; customersWithoutOrders: number; totalCustomers: number; totalSpend: number }>;
 
     const [topSpenderRow] = (await sequelize.query(
-      `SELECT c."firstName", c."lastName", COALESCE(SUM(o."totalPrice"), 0)::float AS "totalSpend"
+      `SELECT c."firstName", c."lastName", COUNT(o.id)::int AS "ordersCount",
+        COALESCE(SUM(o."totalPrice"), 0)::float AS "totalSpend"
       FROM customers c
       JOIN orders o ON o."customerId" = c.id AND o."deletedAt" IS NULL
       WHERE c."deletedAt" IS NULL
@@ -345,14 +365,26 @@ class CustomerService {
       ORDER BY "totalSpend" DESC
       LIMIT 1`,
       { type: QueryTypes.SELECT },
-    )) as Array<{ firstName: string | null; lastName: string | null; totalSpend: number }>;
+    )) as Array<{ firstName: string | null; lastName: string | null; ordersCount: number; totalSpend: number }>;
+
+    const totalCustomers = Number(row?.totalCustomers) || 0;
+    const customersWithoutOrders = Number(row?.customersWithoutOrders) || 0;
+    const governorates = [...new Set((row?.addresses ?? [])
+      .map((address) => matchGovernorate(address)?.label ?? "")
+      .filter(Boolean))].sort((left, right) => left.localeCompare(right, "ar"));
 
     return success({
-      customersWithoutOrders: Number(row?.customersWithoutOrders) || 0,
+      customersWithoutOrders,
+      customersWithOrders: Math.max(0, totalCustomers - customersWithoutOrders),
+      governorates,
       topSpender: topSpenderRow
-        ? { name: `${topSpenderRow.firstName ?? ""} ${topSpenderRow.lastName ?? ""}`.trim(), totalSpend: Number(topSpenderRow.totalSpend) || 0 }
+        ? {
+          name: `${topSpenderRow.firstName ?? ""} ${topSpenderRow.lastName ?? ""}`.trim(),
+          ordersCount: Number(topSpenderRow.ordersCount) || 0,
+          totalSpend: Number(topSpenderRow.totalSpend) || 0,
+        }
         : null,
-      totalCustomers: Number(row?.totalCustomers) || 0,
+      totalCustomers,
       totalSpend: Number(row?.totalSpend) || 0,
     });
   }
@@ -417,7 +449,8 @@ class CustomerService {
       { replacements, type: QueryTypes.SELECT },
     )) as CustomerListRow[];
 
-    for (const row of rows.map(mapCustomerListRow)) {
+    const filteredRows = sortCustomerRows(filterCustomerRows(rows.map(mapCustomerListRow), filters), filters.sort);
+    for (const row of filteredRows) {
       worksheet.addRow({
         address: row.address,
         createdAt: row.createdAt ? new Date(row.createdAt).toISOString().slice(0, 10) : "",

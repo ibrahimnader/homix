@@ -34,10 +34,12 @@ export const customerUpdateSchema = z.object({
 export type CustomerUpdateInput = z.infer<typeof customerUpdateSchema>;
 
 export const customerListQuerySchema = z.object({
+  governorate: z.string().trim().optional(),
+  orders: z.enum(["all", "with", "without"]).default("all"),
   page: z.coerce.number().int().min(1).default(1),
   search: z.string().trim().optional(),
   size: z.coerce.number().int().min(1).max(200).default(50),
-  sort: z.enum(["recent", "spend", "orders"]).default("recent"),
+  sort: z.enum(["recent", "spend", "spend_asc", "orders", "name"]).default("recent"),
 });
 
 export const customerExportQuerySchema = customerListQuerySchema.omit({

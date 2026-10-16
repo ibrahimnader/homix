@@ -123,6 +123,7 @@ describe("customerRouter", () => {
 describe("customerRouter list/summary/create", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    sequelizeMock.query.mockReset();
   });
 
   it("lists customers with order/spend aggregates", async () => {
@@ -141,8 +142,7 @@ describe("customerRouter list/summary/create", () => {
           shopifyId: null,
           totalSpend: 1500,
         },
-      ])
-      .mockResolvedValueOnce([{ total: 1 }]);
+      ]);
 
     const response = await request(app).get("/customers").query({ page: 1, size: 50 });
 
@@ -150,6 +150,7 @@ describe("customerRouter list/summary/create", () => {
     expect(response.body.data.totalCount).toBe(1);
     expect(response.body.data.items[0]).toEqual(expect.objectContaining({
       firstName: "سارة",
+      governorate: "القاهرة",
       id: 5,
       isManual: true,
       ordersCount: 3,
@@ -159,15 +160,17 @@ describe("customerRouter list/summary/create", () => {
 
   it("returns the customers KPI summary", async () => {
     sequelizeMock.query
-      .mockResolvedValueOnce([{ customersWithoutOrders: 10, totalCustomers: 50, totalSpend: 403442 }])
-      .mockResolvedValueOnce([{ firstName: "سمير", lastName: "حافظ", totalSpend: 66840 }]);
+      .mockResolvedValueOnce([{ addresses: ["سموحة - الإسكندرية", "المعادي - القاهرة"], customersWithoutOrders: 10, totalCustomers: 50, totalSpend: 403442 }])
+      .mockResolvedValueOnce([{ firstName: "سمير", lastName: "حافظ", ordersCount: 6, totalSpend: 66840 }]);
 
     const response = await request(app).get("/customers/summary");
 
     expect(response.status).toBe(200);
     expect(response.body.data).toEqual({
       customersWithoutOrders: 10,
-      topSpender: { name: "سمير حافظ", totalSpend: 66840 },
+      customersWithOrders: 40,
+      governorates: ["الإسكندرية", "القاهرة"],
+      topSpender: { name: "سمير حافظ", ordersCount: 6, totalSpend: 66840 },
       totalCustomers: 50,
       totalSpend: 403442,
     });

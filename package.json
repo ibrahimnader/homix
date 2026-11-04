@@ -15,6 +15,7 @@
     "db:backfill-user-permissions": "tsx src/scripts/backfill-user-permissions.ts",
     "db:migrate-shipping-companies": "tsx src/scripts/migrate-shipping-companies.ts",
     "db:deploy-refactor": "tsx src/scripts/run-refactor-deploy-migration.ts",
+    "db:deploy-dev2": "tsx src/scripts/run-dev2-deploy-migration.ts",
     "db:migrate-factory-profile-fields": "node migrations/add-factory-profile-fields.js",
     "db:plan-constraints": "tsx src/scripts/plan-db-constraint-hardening.ts",
     "db:plan-drop-duplicates": "tsx src/scripts/plan-drop-duplicate-db-constraints.ts",

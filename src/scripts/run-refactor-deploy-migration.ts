@@ -5,7 +5,6 @@ import { DataTypes, QueryTypes } from "sequelize";
 import { connectToDb, sequelize } from "../infrastructure/database";
 import { DashboardAggregateService } from "../modules/dashboard/dashboard-aggregate.service";
 import { DashboardRepository } from "../modules/dashboard/dashboard.repo";
-import { calculateOrderFine } from "../modules/orders/order-fines";
 import { getPermissionTemplateForUserType } from "../../app/modules/user/user.permissions";
 import { normalizePermissions, toPlainRecord, toText } from "../../app/modules/user/user.helpers";
 import { backfillManualOrderData } from "./backfill-manual-order-data";
@@ -55,11 +54,6 @@ const printBranchDiffSummary = (): void => {
   } catch (_error) {
     // Ignore branch diff failures in deployment environments without git metadata.
   }
-};
-
-const normalizeNumber = (value: unknown): number => {
-  const parsedValue = Number(value);
-  return Number.isFinite(parsedValue) ? parsedValue : 0;
 };
 
 const ensureTable = async (tableName: string, columns: Record<string, object>): Promise<void> => {
@@ -934,27 +928,6 @@ const repairRolePermissions = async (): Promise<void> => {
   console.log(`  repaired ${repairedUsers} of ${users.length} users`);
 };
 
-const FINES_UPDATE_CHUNK_SIZE = 900;
-
-/** `--fines-limit=N` caps the recalculation to the newest N eligible orders. */
-const getFinesLimit = (): number | null => {
-  const flag = process.argv.find((argument) => argument.startsWith("--fines-limit="));
-  const parsed = flag ? Number(flag.split("=")[1]) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : null;
-};
-
-/**
- * Recalculates only the orders a fine can actually apply to.
- *
- * `calculateOrderFine` returns 0 unless the order is past its delivery window,
- * so scanning every open order was wasted work — and an arbitrary date window
- * would be worse still, because it silently skips old orders that are overdue.
- *
- * An order is worth touching when it is either already carrying a fine (the
- * value may need updating or clearing) or is genuinely overdue. Overdue mirrors
- * calculateExceededDays: the vendor's delivery window is used when it exists,
- * otherwise the expected delivery date.
- */
 /**
  * Recomputes "toBeCollected" from the order's own financials.
  *
@@ -997,112 +970,6 @@ const recalculateOrderCollectionAmounts = async (): Promise<void> => {
   console.log(`  corrected ${(rows as unknown[]).length} order(s)`);
 };
 
-const recalculateOrderFines = async (): Promise<void> => {
-  const finesLimit = getFinesLimit();
-  logStep(
-    finesLimit === null
-      ? "Recalculating order fines (overdue or already fined)"
-      : `Recalculating order fines (newest ${finesLimit} overdue or already fined)`,
-  );
-
-  // DISTINCT ON collapses the order-line join in the database instead of
-  // shipping one row per line and de-duplicating in JS.
-  const rows = await sequelize.query<{
-    id: number;
-    fine: string | number | null;
-    orderDate: string | null;
-    expectedDeliveryDate: string | null;
-    subTotalPrice: string | number | null;
-    daysToDeliver: number | null;
-  }>(`
-    select * from (
-    select distinct on (o.id)
-      o.id,
-      o.fine,
-      o."orderDate",
-      o."expectedDeliveryDate",
-      o."subTotalPrice",
-      v."daysToDeliver"
-    from orders o
-    left join "orderLines" ol on ol."orderId" = o.id
-    left join products p on p.id = ol."productId"
-    left join vendors v on v.id = p."vendorId"
-    where o.status not in (:finalStatuses)
-      and o."deletedAt" is null
-      and (
-        coalesce(o.fine, 0) <> 0
-        or (
-          o."expectedDeliveryDate" is not null
-          and o."expectedDeliveryDate" < now()
-        )
-        or (
-          o."expectedDeliveryDate" is null
-          and coalesce(v."daysToDeliver", 0) > 0
-          and o."orderDate" is not null
-          and o."orderDate" + (v."daysToDeliver" * interval '1 day') < now()
-        )
-      )
-    order by o.id asc, ol.id asc
-    ) eligible
-    order by eligible."orderDate" desc nulls last, eligible.id desc
-    ${finesLimit === null ? "" : `limit ${finesLimit}`}
-  `, {
-    replacements: { finalStatuses: FINAL_FINE_STATUSES },
-    type: QueryTypes.SELECT,
-  });
-
-  // eslint-disable-next-line no-console
-  console.log(`  ${rows.length} orders are overdue or already fined`);
-
-  const pendingIds: number[] = [];
-  const pendingFines: number[] = [];
-
-  for (const row of rows) {
-    const nextFine = calculateOrderFine({
-      baseAmount: row.subTotalPrice,
-      daysToDeliver: row.daysToDeliver,
-      expectedDeliveryDate: row.expectedDeliveryDate,
-      orderDate: row.orderDate,
-    });
-
-    if (normalizeNumber(row.fine) === nextFine) {
-      continue;
-    }
-
-    pendingIds.push(row.id);
-    pendingFines.push(nextFine);
-  }
-
-  if (pendingIds.length === 0) {
-    // eslint-disable-next-line no-console
-    console.log("  no fines needed updating");
-    return;
-  }
-
-  /* Batched: the previous version issued one UPDATE per order and awaited each
-     round trip, which took minutes against a remote database. */
-  for (let offset = 0; offset < pendingIds.length; offset += FINES_UPDATE_CHUNK_SIZE) {
-    const ids = pendingIds.slice(offset, offset + FINES_UPDATE_CHUNK_SIZE);
-    const fines = pendingFines.slice(offset, offset + FINES_UPDATE_CHUNK_SIZE);
-
-    await sequelize.query(
-      `
-        update orders as o
-        set fine = data.fine, "updatedAt" = now()
-        from (
-          select unnest(array[:ids]::int[]) as id,
-                 unnest(array[:fines]::numeric[]) as fine
-        ) as data
-        where o.id = data.id
-      `,
-      { replacements: { fines, ids } },
-    );
-
-    // eslint-disable-next-line no-console
-    console.log(`  updated ${Math.min(offset + ids.length, pendingIds.length)}/${pendingIds.length} fines`);
-  }
-};
-
 const backfillDashboardAggregates = async (): Promise<void> => {
   if (hasFlag("--skip-dashboard-backfill")) {
     return;
@@ -1141,7 +1008,6 @@ const main = async (): Promise<void> => {
   await repairRolePermissions();
   await backfillHistoricalManualOrderData();
   // await recalculateOrderCollectionAmounts();
-  // Fine rules are configured separately; deployment must not apply legacy fixed rates.
   await backfillDashboardAggregates();
 
   // eslint-disable-next-line no-console

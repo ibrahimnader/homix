@@ -1124,7 +1124,7 @@ shipmentRouter.put(
  *       - bearerAuth: []
  *     tags: [Shipments]
  *     summary: Attach the reference document for a delivery's accounting record
- *     description: "المرجع" is a single uploaded file (image or PDF), not free text — this stores it and records its path as the delivery's accountingReference.
+ *     description: "\"المرجع\" is a single uploaded file (image or PDF), not free text — this stores it and records its path as the delivery's accountingReference."
  *     parameters:
  *       - in: path
  *         name: orderId

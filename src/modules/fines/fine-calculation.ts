@@ -1,3 +1,10 @@
+import { CLOSED_ORDER_STATUSES, ORDER_STATUS, SHIPMENTS_STATUS } from "../../../config/constants";
+
+/* New cancel/reject variants (order ids 9-17, shipment ids 13-21) behave like the
+   closest legacy status: cancel_* ~ CANCELED, reject_* ~ shipment REJECTED. */
+const CANCELED_ORDER_VARIANTS: number[] = CLOSED_ORDER_STATUSES.filter((id: number) => id !== ORDER_STATUS.REJECTED_AFTER_MFG_MISMATCH && id !== ORDER_STATUS.REJECTED_AFTER_MFG_NOT_SUITABLE);
+const REJECTED_SHIPMENT_VARIANTS: number[] = [SHIPMENTS_STATUS.REJECTED_AFTER_MFG_MISMATCH, SHIPMENTS_STATUS.REJECTED_AFTER_MFG_NOT_SUITABLE];
+
 export type FineRule = {
   id: number;
   trigger: "delivery_delay" | "late_cancellation" | "customer_refusal" | "manual";
@@ -9,6 +16,7 @@ export type FineRule = {
   maxAmount: number | null;
   effectiveFrom: string;
   active: boolean;
+  deletedAt?: Date | string | null;
 };
 
 export type FineOrder = {
@@ -28,19 +36,19 @@ export type FineOrder = {
 const safe = (value: unknown) => Math.max(0, Number(value) || 0);
 
 export function calculateFineForRule(rule: FineRule, order: FineOrder, now = new Date()): number {
-  if (!rule.active || new Date(rule.effectiveFrom).getTime() > now.getTime()) return 0;
+  if (!rule.active || rule.deletedAt || new Date(rule.effectiveFrom).getTime() > now.getTime()) return 0;
   if (rule.trigger === "manual") return 0;
-  if (rule.trigger === "late_cancellation" && Number(order.status) !== 4) return 0;
-  if (rule.trigger === "customer_refusal" && Number(order.shipmentStatus) !== 6) return 0;
+  if (rule.trigger === "late_cancellation" && Number(order.status) !== 4 && !CANCELED_ORDER_VARIANTS.includes(Number(order.status))) return 0;
+  if (rule.trigger === "customer_refusal" && Number(order.shipmentStatus) !== 6 && !REJECTED_SHIPMENT_VARIANTS.includes(Number(order.shipmentStatus))) return 0;
   const due = order.expectedDeliveryDate && new Date(order.expectedDeliveryDate);
   if (!due || !Number.isFinite(due.getTime())) return 0;
-  const finalEvent = rule.trigger !== "delivery_delay" || [4, 5, 6, 7, 8].includes(Number(order.status));
+  const finalEvent = rule.trigger !== "delivery_delay" || [4, 5, 6, 7, 8, ...CLOSED_ORDER_STATUSES].includes(Number(order.status));
   const completedAt = Number(order.status) === 8 ? order.shippingReceiveDate : order.deliveryDate;
   const end = completedAt ? new Date(completedAt) : finalEvent && order.updatedAt ? new Date(order.updatedAt) : now;
   const chargeStart = Math.max(due.getTime() + safe(rule.graceHours) * 3_600_000, new Date(rule.effectiveFrom).getTime());
   const elapsedHours = (end.getTime() - chargeStart) / 3_600_000;
   if (elapsedHours <= 0) return 0;
-  if (rule.trigger === "delivery_delay" && [4, 6, 7].includes(Number(order.status))) return 0;
+  if (rule.trigger === "delivery_delay" && [4, 6, 7, ...CLOSED_ORDER_STATUSES].includes(Number(order.status))) return 0;
   const base = { subtotal: order.subTotalPrice, total: order.totalPrice, commission: order.commission, cost: order.totalCost }[rule.basis];
   const unit = rule.amountType === "percent" ? safe(base) * safe(rule.amount) / 100 : safe(rule.amount);
   const multiplier = rule.frequency === "daily" ? Math.ceil(elapsedHours / 24) : 1;

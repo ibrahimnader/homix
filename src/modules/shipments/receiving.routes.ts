@@ -6,7 +6,10 @@ import {
   receivingCreateSchema,
   receivingDocumentSchema,
   receivingListSchema,
+  receivingReceivedFilterSchema,
+  receivingExportSchema,
   receivingDocumentParams,
+  receivingUpdateSchema,
 } from "./receiving.schemas";
 import { ReceivingService } from "./receiving.service";
 const requirePermission = require("../../../app/middlewares/requirePermission");
@@ -22,8 +25,21 @@ receivingRouter.get(
   })
 );
 receivingRouter.get(
+  "/vendors",
+  asyncHandler(async (_req, res) => {
+    res.json({ status: true, data: await service.receivedVendors() });
+  })
+);
+receivingRouter.get(
+  "/export",
+  validateRequest({ query: receivingExportSchema }),
+  asyncHandler(async (req, res) => {
+    await service.exportWorkbook(res, req.query as never);
+  })
+);
+receivingRouter.get(
   "/",
-  validateRequest({ query: receivingListSchema }),
+  validateRequest({ query: receivingReceivedFilterSchema }),
   asyncHandler(async (req, res) => {
     res.json({ status: true, data: await service.list(req.query as never) });
   })
@@ -67,6 +83,40 @@ receivingRouter.post(
       logger.error({ err: error, orderIds: data.orderIds }, "Receipt saved; dashboard refresh failed");
     }
     res.status(201).json({ status: true, data });
+  })
+);
+/**
+ * @swagger
+ * /shipments/receipts/{orderId}:
+ *   patch:
+ *     summary: Edit receipt notes and/or manufacture date of a received item
+ *     tags: [Shipments]
+ *     parameters:
+ *       - { in: path, name: orderId, required: true, schema: { type: integer } }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               notes: { type: string, maxLength: 4000 }
+ *               manufactureDate: { type: string, format: date, nullable: true, description: Cannot be after the receipt date }
+ *     responses:
+ *       200: { description: Updated }
+ *       404: { description: Item not received or not found }
+ */
+receivingRouter.patch(
+  "/:orderId",
+  requirePermission("ship_edit"),
+  validateRequest({
+    params: z.object({ orderId: z.coerce.number().int().positive() }),
+    body: receivingUpdateSchema,
+  }),
+  asyncHandler(async (req, res) => {
+    res.json({
+      status: true,
+      data: await service.updateReceipt(Number(req.params.orderId), req.body, Number(req.user!.id)),
+    });
   })
 );
 receivingRouter.post(

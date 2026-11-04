@@ -22,6 +22,10 @@ export class ShipmentController {
     response.status(200).json({ data: unwrap(await this.shipmentService.listShipments(request.query as never, request.vendorId)), status: true });
   };
 
+  public listGroupedItems = async (request: Request, response: Response): Promise<void> => {
+    response.status(200).json({ data: unwrap(await this.shipmentService.listGroupedItems(Number(request.params.shipmentId))), status: true });
+  };
+
   public getShipmentById = async (request: Request, response: Response): Promise<void> => {
     response.status(200).json({ data: unwrap(await this.shipmentService.getShipmentById(Number(request.params.shipmentId), request.vendorId)), status: true });
   };

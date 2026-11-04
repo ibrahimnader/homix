@@ -24,7 +24,7 @@ import {
   SHIPMENT_STATUS_LABELS,
   SHIPMENT_TYPE_LABELS,
 } from "../shipments/shipment.constants";
-import type { OrderPriorityKey } from "./order.types";
+import type { OrderPriorityKey, SellerChatMessage } from "./order.types";
 
 type PlainRecord = Record<string, unknown>;
 type Plainable = PlainRecord | { toJSON: () => PlainRecord };
@@ -468,4 +468,27 @@ export const normalizeOrderMutationPayload = (
   payload.toBeCollected = subTotalPrice + shippingFees - totalDiscounts - downPayment;
 
   return payload;
+};
+
+/** Maps a seller-chat note row (with joined user + attachments) to the API message shape. */
+export const mapSellerChatMessage = (row: unknown): SellerChatMessage => {
+  const plainNote = toPlain(row);
+  const user = toPlain(plainNote.user);
+  return {
+    attachments: Array.isArray(plainNote.attachments) ? plainNote.attachments.map((attachment: unknown) => {
+      const plainAttachment = toPlain(attachment);
+      return {
+        createdAt: toIsoString(plainAttachment.createdAt) ?? "",
+        description: toText(plainAttachment.description),
+        id: toNumber(plainAttachment.id),
+        name: toText(plainAttachment.name),
+        url: toText(plainAttachment.url),
+      };
+    }) : [],
+    createdAt: toIsoString(plainNote.createdAt) ?? "",
+    id: toNumber(plainNote.id),
+    text: toText(plainNote.text),
+    userId: toNumber(plainNote.userId),
+    userName: `${toText(user.firstName)} ${toText(user.lastName)}`.trim(),
+  };
 };

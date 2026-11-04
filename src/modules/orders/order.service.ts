@@ -1,11 +1,11 @@
-import { ConflictError, NotFoundError, UnauthorizedError } from "../../shared/errors";
+import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError } from "../../shared/errors";
 import type { Result } from "../../shared/result";
 import { success } from "../../shared/result";
 import { DELIVERY_BY, USER_TYPES } from "../../../config/constants";
 import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
 import type { DashboardMetricSnapshot } from "../dashboard/dashboard.types";
 import { orderLegacyGateway, type LegacyOrderGateway } from "./order.legacy-gateway";
-import { normalizeOrderMutationPayload, toPlain, toText } from "./order.helpers";
+import { normalizeOrderMutationPayload, toNumber, toPlain, toText } from "./order.helpers";
 import { OrderRepository } from "./order.repo";
 import type { LegacyOrderResponse, OrderDetailsResponse, OrderFinancialReportQuery, OrderFinancialReportResponse, OrderListQuery, OrderListResponse, OrderMetaResponse, OrderMutationPayload, OrderRequestUser, OrderSummaryResponse } from "./order.types";
 import type { Response } from "express";
@@ -43,6 +43,36 @@ export const restrictVendorOrderPayload = (
   return Object.fromEntries(
     Object.entries(payload).filter(([field]) => VENDOR_EDITABLE_ORDER_FIELDS.has(field)),
   ) as OrderMutationPayload;
+};
+
+/**
+ * Order financial fields (cost / shipping / discount / purchase deposit) may only be
+ * changed by an admin or a non-vendor user holding `orders_edit_financials`.
+ * Vendors never may, whatever their permission map says. A field that is sent but
+ * equals the stored value is not a change (the full edit form re-sends every field).
+ */
+export const ORDER_FINANCIAL_EDIT_PERMISSION = "orders_edit_financials";
+const ORDER_FINANCIAL_FIELDS = ["costPrice", "shippingFees", "totalDiscounts", "downPayment"] as const;
+
+export const canEditOrderFinancials = (user: OrderRequestUser): boolean => {
+  if (String(user?.userType) === String(USER_TYPES.VENDOR)) return false;
+  if (String(user?.userType) === String(USER_TYPES.ADMIN)) return true;
+  const permissions = (user as { permissions?: Record<string, unknown> } | undefined)?.permissions;
+  return Boolean(permissions && typeof permissions === "object" && permissions[ORDER_FINANCIAL_EDIT_PERMISSION]);
+};
+
+export const assertFinancialEditAllowed = (
+  payload: Record<string, unknown>,
+  user: OrderRequestUser,
+  existing?: Record<string, unknown> | null,
+): void => {
+  if (canEditOrderFinancials(user)) return;
+  const changed = ORDER_FINANCIAL_FIELDS.some((field) => {
+    if (!(field in payload) || payload[field] === undefined) return false;
+    if (!existing || field === "costPrice") return true;
+    return toNumber(payload[field]) !== toNumber(existing[field]);
+  });
+  if (changed) throw new ForbiddenError("ليس لديك صلاحية تعديل التفاصيل المالية للطلب");
 };
 
 export class OrderService {
@@ -100,6 +130,7 @@ export class OrderService {
   public async updateOrder(orderId: number, payload: OrderMutationPayload, user: OrderRequestUser): Promise<Result<unknown>> {
     const existingOrder = await this.orderRepository.findOrderEntity(orderId);
     const scopedPayload = restrictVendorOrderPayload(payload, user);
+    assertFinancialEditAllowed(payload as Record<string, unknown>, user, existingOrder ? toPlain(existingOrder) : null);
     const normalizedPayload = normalizeOrderMutationPayload(scopedPayload, toPlain(existingOrder));
     const response = ensureLegacySuccess(await this.legacyGateway.updateOrder(orderId, normalizedPayload, user));
     await this.refreshAggregateForDates([existingOrder ? this.getOrderDate(existingOrder) : null, normalizedPayload.orderDate, this.getOrderDate(response.data)]);
@@ -112,6 +143,7 @@ export class OrderService {
   ): Promise<Result<{ message: string }>> {
     const orderIds = Array.isArray(payload.orderIds) ? payload.orderIds.map(Number).filter(Boolean) : [];
     const orderData = { ...((payload.orderData as Record<string, unknown> | undefined) ?? {}) };
+    assertFinancialEditAllowed(orderData, user, null);
     delete orderData.shippedFromInventory;
     if (orderData.deliveryBy !== undefined && orderData.deliveryBy !== null && orderData.deliveryBy !== "") {
       orderData.shippedFromInventory = Number(orderData.deliveryBy) === DELIVERY_BY.HOMIX;

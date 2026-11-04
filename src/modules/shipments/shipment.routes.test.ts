@@ -57,6 +57,10 @@ const shippingCompanyModel = {
   findOne: jest.fn(),
 };
 
+const vendorModel = {
+  findAll: jest.fn(),
+};
+
 const legacyShipmentService = {
   exportShipments: jest.fn(async (_res: express.Response, _payload: Record<string, unknown>) => undefined),
 };
@@ -103,7 +107,7 @@ jest.mock("../../../app/modules/shipments/shipmentInventory.model", () => shipme
 jest.mock("../../../app/modules/shipments/shipmentExpense.model", () => shipmentExpenseModel);
 jest.mock("../../../app/modules/shipments/shipmentReturn.model", () => shipmentReturnModel);
 jest.mock("../../../app/modules/shipments/shippingCompany.model", () => shippingCompanyModel);
-jest.mock("../../../app/modules/vendor/vendor.model", () => ({}));
+jest.mock("../../../app/modules/vendor/vendor.model", () => vendorModel);
 jest.mock("../../../app/modules/customer/customer.model", () => ({}));
 jest.mock("../../../app/modules/notes/notes.model", () => ({
   create: jest.fn(),
@@ -445,6 +449,11 @@ describe("shipmentRouter", () => {
   });
 
   it("returns shipments metadata", async () => {
+    vendorModel.findAll.mockResolvedValue([
+      { id: 12, name: "ركنة للأثاث" },
+      { id: 22, name: "   " },
+      { id: 30, name: "دريسينج هاوس" },
+    ]);
     const response = await request(app).get("/shipments/meta");
 
     expect(response.status).toBe(200);
@@ -489,6 +498,11 @@ describe("shipmentRouter", () => {
     expect(response.body.data.shippingCompanies).toEqual([
       { id: 3, label: "J&T" },
     ]);
+    expect(response.body.data.vendors).toEqual([
+      { id: 12, label: "ركنة للأثاث" },
+      { id: 30, label: "دريسينج هاوس" },
+    ]);
+    expect(vendorModel.findAll).toHaveBeenCalledWith(expect.objectContaining({ order: [["name", "ASC"]] }));
     expect(response.body.data.scheduleStatuses).toEqual([
       { id: 1, label: "مجدول" },
       { id: 3, label: "مؤجل" },
@@ -580,6 +594,31 @@ describe("shipmentRouter", () => {
         toBeCollected: 16999,
       }),
     ], true);
+  });
+
+  it("lists the items of a grouped delivery with their warehouse state", async () => {
+    sequelizeQuery.mockReset();
+    sequelizeQuery
+      .mockResolvedValueOnce([{ orderNumber: "ON-9" }])
+      .mockResolvedValueOnce([
+        { id: 5, code: "100", orderNumber: "ON-9", status: 1, shipmentStatus: 2, sku: "A", title: "كرسي", sellerName: "بائع" },
+        { id: 6, code: "101", orderNumber: "ON-9", status: 1, shipmentStatus: 1, sku: "B", title: "طاولة", sellerName: "بائع" },
+      ]);
+
+    const response = await request(app).get("/shipments/5/grouped-items");
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual([
+      expect.objectContaining({ id: 5, operationNumber: "100", inWarehouse: true, current: true, shipmentStatusLabel: "في المخزن" }),
+      expect.objectContaining({ id: 6, operationNumber: "101", inWarehouse: false, current: false }),
+    ]);
+    expect(sequelizeQuery.mock.calls[1][1].replacements).toEqual({ orderNumber: "ON-9" });
+  });
+
+  it("404s grouped items for an unknown shipment", async () => {
+    sequelizeQuery.mockReset();
+    sequelizeQuery.mockResolvedValueOnce([]);
+    expect((await request(app).get("/shipments/404/grouped-items")).status).toBe(404);
   });
 
   it("lists shipping companies", async () => {
@@ -712,6 +751,7 @@ describe("shipmentRouter", () => {
       scheduleStatus: "__blank__",
       startDate: "2026-05-01",
       endDate: "2026-05-02",
+      vendorId: "3,7",
     });
 
     expect(response.status).toBe(200);
@@ -724,6 +764,7 @@ describe("shipmentRouter", () => {
         scheduleStatus: "__blank__",
         sort: { orderDate: -1 },
         startDate: "2026-05-01",
+        vendorId: "3,7",
       }),
     );
     expect(String(response.headers["content-type"])).toContain(
@@ -774,6 +815,29 @@ describe("shipmentRouter", () => {
         }),
       }),
     );
+  });
+
+  it("filters shipments by one or more vendor ids", async () => {
+    const response = await request(app).get("/shipments").query({ page: 1, size: 20, vendorId: "3, 7,abc" });
+
+    expect(response.status).toBe(200);
+    const whereClause = orderModel.findAndCountAll.mock.calls[0][0].where as Record<PropertyKey, unknown>;
+    const conditions = whereClause[Op.and] as Array<{ logic?: Record<PropertyKey, unknown> }>;
+    expect(conditions).toContainEqual(expect.objectContaining({
+      logic: expect.objectContaining({ [Op.in]: [3, 7] }),
+    }));
+  });
+
+  it("filters the shipments summary by vendor ids and joins the vendor chain", async () => {
+    orderModel.findAll.mockResolvedValue([]);
+    const response = await request(app).get("/shipments/summary").query({ vendorId: "3,7" });
+
+    expect(response.status).toBe(200);
+    const call = orderModel.findAll.mock.calls.at(-1)?.[0] as { include: Array<{ as: string }>; where: Record<PropertyKey, unknown> };
+    expect(call.include).toContainEqual(expect.objectContaining({ as: "orderLines" }));
+    expect(call.where[Op.and] as unknown[]).toContainEqual(expect.objectContaining({
+      logic: expect.objectContaining({ [Op.in]: [3, 7] }),
+    }));
   });
 
   it("filters shipments with no schedule status", async () => {
@@ -1076,6 +1140,35 @@ describe("shipmentRouter", () => {
       to: "4",
       userId: 1,
     }));
+  });
+
+  it("bulk-updates the shipping company for every selected shipment", async () => {
+    const records = [makeShipmentRecord({ id: 9802 }), makeShipmentRecord({ id: 9803 })];
+    orderModel.findByPk.mockImplementation(async (id: number) => records.find((r) => r.toJSON().id === id) ?? null);
+
+    const response = await request(app)
+      .put("/shipments/bulk-update")
+      .send({ data: { shippingCompany: 3 }, shipmentIds: [9802, 9803] });
+
+    expect(response.status).toBe(200);
+    expect(shippingCompanyModel.findByPk).toHaveBeenCalledWith(3);
+    records.forEach((record) => {
+      expect(record.update).toHaveBeenCalledWith(expect.objectContaining({ shippingCompany: "J&T" }));
+    });
+  });
+
+  it("bulk-clears the schedule status and shipping company with null", async () => {
+    const records = [makeShipmentRecord({ id: 9802 }), makeShipmentRecord({ id: 9803 })];
+    orderModel.findByPk.mockImplementation(async (id: number) => records.find((r) => r.toJSON().id === id) ?? null);
+
+    const response = await request(app)
+      .put("/shipments/bulk-update")
+      .send({ data: { scheduleStatus: null, shippingCompany: null }, shipmentIds: [9802, 9803] });
+
+    expect(response.status).toBe(200);
+    records.forEach((record) => {
+      expect(record.update).toHaveBeenCalledWith(expect.objectContaining({ scheduleStatus: null, shippingCompany: null }));
+    });
   });
 
   it("marks the received amount as manual when the user changes it to zero", async () => {
@@ -1447,6 +1540,76 @@ describe("shipmentRouter", () => {
       accountingDate: new Date("2026-08-25T00:00:00.000Z"),
       accountingStatus: 2,
     }));
+  });
+
+  it("applies inclusive Cairo-day accounting and delivery date ranges to list and export", async () => {
+    const query = {
+      deliveryDateFrom: "2026-05-10",
+      deliveryDateTo: "2026-05-12",
+      settledDateFrom: "2026-05-01",
+      settledDateTo: "2026-05-31",
+    };
+    orderModel.findAndCountAll
+      .mockResolvedValueOnce({ count: 0, rows: [] })
+      .mockResolvedValueOnce({ count: 0, rows: [] });
+
+    const listResponse = await request(app)
+      .get("/shipments/accounts/deliveries")
+      .query({ ...query, page: 1, size: 20 });
+    const exportResponse = await request(app)
+      .get("/shipments/accounts/deliveries/export")
+      .query(query)
+      .buffer(true)
+      .parse(binaryParser);
+    expect(listResponse.status).toBe(200);
+    expect(exportResponse.status).toBe(200);
+
+    const bounds = (call: unknown[]) => {
+      const conditions = (call[0] as { where: Record<symbol, unknown[]> }).where[Op.and] as Array<{
+        attribute?: { col?: string };
+        logic?: Record<symbol, Date>;
+      }>;
+      const find = (column: string, op: symbol) =>
+        conditions.find((c) => c.attribute?.col === column && c.logic && op in c.logic)?.logic?.[op];
+      return {
+        accountingFrom: find("Order.accountingDate", Op.gte),
+        accountingTo: find("Order.accountingDate", Op.lte),
+        deliveryFrom: find("Order.deliveryDate", Op.gte),
+        deliveryTo: find("Order.deliveryDate", Op.lte),
+      };
+    };
+    const calls = orderModel.findAndCountAll.mock.calls.slice(-2);
+    for (const call of calls) {
+      const b = bounds(call);
+      // Cairo is UTC+3 in May: day start is 21:00Z the previous day, end is 20:59:59.999Z.
+      expect(b.accountingFrom?.toISOString()).toBe("2026-04-30T21:00:00.000Z");
+      expect(b.accountingTo?.toISOString()).toBe("2026-05-31T20:59:59.999Z");
+      expect(b.deliveryFrom?.toISOString()).toBe("2026-05-09T21:00:00.000Z");
+      expect(b.deliveryTo?.toISOString()).toBe("2026-05-12T20:59:59.999Z");
+    }
+  });
+
+  it("applies an inclusive Cairo-day accounting date range to expenses list and export", async () => {
+    const query = { settledDateFrom: "2026-05-01", settledDateTo: "2026-05-31" };
+    shipmentExpenseModel.findAll.mockClear();
+
+    const listResponse = await request(app)
+      .get("/shipments/accounts/expenses")
+      .query({ ...query, page: 1, size: 20 });
+    const exportResponse = await request(app)
+      .get("/shipments/accounts/expenses/export")
+      .query(query)
+      .buffer(true)
+      .parse(binaryParser);
+    expect(listResponse.status).toBe(200);
+    expect(exportResponse.status).toBe(200);
+
+    expect(shipmentExpenseModel.findAll).toHaveBeenCalledTimes(2);
+    for (const call of shipmentExpenseModel.findAll.mock.calls) {
+      const range = (call[0] as { where: { accountingDate: Record<symbol, Date> } }).where.accountingDate;
+      expect(range[Op.gte]?.toISOString()).toBe("2026-04-30T21:00:00.000Z");
+      expect(range[Op.lte]?.toISOString()).toBe("2026-05-31T20:59:59.999Z");
+    }
   });
 
   it("exports delivery accounts as an Excel workbook", async () => {

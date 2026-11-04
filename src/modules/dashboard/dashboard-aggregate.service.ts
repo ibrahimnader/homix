@@ -176,12 +176,17 @@ const OPEN_STATUS_SQL = "1,2,3";
 const PENDING_STATUS_SQL = "1";
 const IN_PROGRESS_STATUS_SQL = "2";
 const DELIVERED_STATUS_SQL = "5";
-const CANCELED_STATUS_SQL = "4";
+/* CANCELED (4) plus the cancel/reject variants (9-17) — all count as cancelled revenue. */
+const { CANCELED_LIKE_ORDER_STATUSES, CLOSED_ORDER_STATUSES } = require("../../../config/constants") as {
+  CANCELED_LIKE_ORDER_STATUSES: number[];
+  CLOSED_ORDER_STATUSES: number[];
+};
+const CANCELED_STATUS_SQL = CANCELED_LIKE_ORDER_STATUSES.join(",");
 const DELIVERY_BY_HOMIX_SQL = "1";
 const DELIVERY_BY_VENDOR_SQL = "2";
 const ORDER_SOURCE_SHOWROOM_SQL = "1";
 const ORDER_SOURCE_ONLINE_SQL = "2";
-const CANCELED_OR_REFUNDED_STATUS_SQL = "4,6,7";
+const CANCELED_OR_REFUNDED_STATUS_SQL = ["4", "6", "7", ...CLOSED_ORDER_STATUSES].join(",");
 const UNCATEGORIZED_CATEGORY_ID = 0;
 const UNCATEGORIZED_CATEGORY_TITLE = "أخرى";
 const MAX_LEADERBOARD_ITEMS = 10;
@@ -705,12 +710,12 @@ export class DashboardAggregateService {
           MAX("sourceUpdatedAt") AS "sourceUpdatedAt",
           COALESCE(SUM("grossValue") FILTER (WHERE COALESCE("orderSource", ${ORDER_SOURCE_ONLINE_SQL}) <> ${ORDER_SOURCE_SHOWROOM_SQL}), 0)::numeric AS "gmvOnline",
           COALESCE(SUM("grossValue") FILTER (WHERE "orderSource" = ${ORDER_SOURCE_SHOWROOM_SQL}), 0)::numeric AS "gmvShowroom",
-          COALESCE(SUM("grossValue" - "discountValue") FILTER (WHERE "status" = ${CANCELED_STATUS_SQL}), 0)::numeric AS "cancellations",
+          COALESCE(SUM("grossValue" - "discountValue") FILTER (WHERE "status" IN (${CANCELED_STATUS_SQL})), 0)::numeric AS "cancellations",
           COALESCE(SUM("discountValue"), 0)::numeric AS "discounts",
           COALESCE(SUM("grossValue" - "discountValue") FILTER (WHERE "status" = ${DELIVERED_STATUS_SQL} AND "deliveryBy" = ${DELIVERY_BY_HOMIX_SQL}), 0)::numeric AS "deliveredHomix",
           COALESCE(SUM("grossValue" - "discountValue") FILTER (WHERE "status" = ${DELIVERED_STATUS_SQL} AND "deliveryBy" = ${DELIVERY_BY_VENDOR_SQL}), 0)::numeric AS "deliveredVendor",
           COALESCE(SUM("costValue"), 0)::numeric AS "cogsGmv",
-          COALESCE(SUM("costValue") FILTER (WHERE COALESCE("status", 0) <> ${CANCELED_STATUS_SQL}), 0)::numeric AS "cogsNmv",
+          COALESCE(SUM("costValue") FILTER (WHERE COALESCE("status", 0) NOT IN (${CANCELED_STATUS_SQL})), 0)::numeric AS "cogsNmv",
           COALESCE(SUM("costValue") FILTER (WHERE "status" = ${DELIVERED_STATUS_SQL}), 0)::numeric AS "cogsG2n"
         FROM order_finance
         GROUP BY "metricDate"

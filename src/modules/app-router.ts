@@ -8,6 +8,7 @@ import { notificationRouter } from "./notification";
 import { navigationRouter } from "./navigation";
 import { orderRouter } from "./orders";
 import { fineRouter } from "./fines/fine.routes";
+import { invoiceRouter } from "./financial-invoices";
 import { ticketRouter } from "./tickets";
 
 const userRouter = require("../../app/modules/user/user.routes");
@@ -1478,6 +1479,7 @@ const swaggerOptions = {
                 shippingCompanies: { items: { $ref: "#/components/schemas/ShipmentMetaOption" }, type: "array" },
                 shipmentStatuses: { items: { $ref: "#/components/schemas/ShipmentMetaOption" }, type: "array" },
                 shipmentTypes: { items: { $ref: "#/components/schemas/ShipmentMetaOption" }, type: "array" },
+                vendors: { description: "Non-deleted sellers (id, name) for the shipments seller multi-select filter.", items: { $ref: "#/components/schemas/ShipmentMetaOption" }, type: "array" },
                 subTabCounts: {
                   type: "object",
                   properties: {
@@ -2443,6 +2445,7 @@ export const createMainRouter = (): express.Router => {
   router.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
   router.use("/orders", orderRouter);
   router.use("/fines", fineRouter);
+  router.use("/financial-invoices", verifyToken, invoiceRouter);
   router.use("/orderLines", orderLineRouter);
   router.use("/users", userRouter);
   router.use("/factories", verifyToken, isNotLogistic, factoryRouter);

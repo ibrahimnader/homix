@@ -25,6 +25,9 @@ export const receivingCreateSchema = z.object({
   senderName: z.string().trim().max(200).default(""),
 });
 export const receivingDocumentSchema = z.object({ orderIds: ids });
+const isoDay = z
+  .string()
+  .refine((value) => moment(value, "YYYY-MM-DD", true).isValid(), "تاريخ غير صالح");
 export const receivingListSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   search: z.string().trim().max(150).default(""),
@@ -36,6 +39,28 @@ export const receivingListSchema = z.object({
     )
     .optional(),
 });
+const optionalText = z.string().trim().max(150).optional();
+// Filters for the "received" list and its export. Each is applied server-side
+// so results stay correct across pages.
+export const receivingReceivedFilterSchema = receivingListSchema.extend({
+  sku: optionalText,
+  operationNumber: optionalText,
+  orderNumber: optionalText,
+  vendorId: z.coerce.number().int().positive().optional(),
+  documentNumber: optionalText,
+  /** issued = a receipt voucher was printed for the item; none = not printed yet. */
+  documentState: z.enum(["issued", "none"]).optional(),
+  dateFrom: isoDay.optional(),
+  dateTo: isoDay.optional(),
+});
+/** Inline edits of an already received item (receipt notes / manufacture date). */
+export const receivingUpdateSchema = z
+  .object({
+    notes: z.string().trim().max(4000).optional(),
+    manufactureDate: isoDay.nullable().optional(),
+  })
+  .refine((value) => value.notes !== undefined || value.manufactureDate !== undefined, "لا توجد تعديلات");
+export const receivingExportSchema = receivingReceivedFilterSchema.omit({ page: true });
 export const receivingDocumentParams = z.object({
   number: z.string().trim().min(1),
 });

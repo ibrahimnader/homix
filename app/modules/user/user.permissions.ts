@@ -27,6 +27,7 @@ export const USER_PERMISSION_GROUPS = [
     permissions: [
       { key: "orders_view", label: "عرض الطلبات" },
       { key: "orders_edit", label: "تعديل الطلبات" },
+      { key: "orders_edit_financials", label: "تعديل التفاصيل المالية للطلب" },
       { key: "orders_create", label: "إنشاء طلب" },
       { key: "orders_delete", label: "حذف الطلبات" },
     ],
@@ -136,6 +137,7 @@ export const USER_PERMISSION_TEMPLATES = {
     dashboard_view: true,
     orders_view: true,
     orders_edit: true,
+    orders_edit_financials: true,
     orders_delete: true,
     orders_create: true,
     factory_view: true,

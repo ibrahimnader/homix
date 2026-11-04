@@ -200,3 +200,100 @@ describe("receipt validation", () => {
     }
   });
 });
+
+describe("received list filters", () => {
+  it("applies sku, operation, order and factory filters in SQL for list and count", async () => {
+    db.mockImplementation(async (sql: string) => (sql.includes("COUNT(*)") ? [{ total: 0 }] : []));
+    await new ReceivingService().list({
+      page: 2, search: "", sku: "SK1", operationNumber: "OP9", orderNumber: "16", vendorId: 4,
+    } as never);
+    const calls = db.mock.calls;
+    expect(calls).toHaveLength(2);
+    for (const [sql, options] of calls) {
+      expect(sql).toContain("l.sku ILIKE :sku");
+      expect(sql).toContain("o.code ILIKE :operationNumber");
+      expect(sql).toContain(`o."orderNumber" ILIKE :orderNumber`);
+      expect(sql).toContain(`p."vendorId" = :vendorId`);
+      expect(options.replacements).toMatchObject({ sku: "%SK1%", operationNumber: "%OP9%", orderNumber: "%16%", vendorId: 4 });
+    }
+    expect(calls[0][1].replacements.offset).toBe(20);
+  });
+  it("omits filter clauses that are not set", async () => {
+    db.mockImplementation(async (sql: string) => (sql.includes("COUNT(*)") ? [{ total: 0 }] : []));
+    await new ReceivingService().list({ page: 1, search: "" } as never);
+    expect(db.mock.calls[0][0]).not.toContain(":sku");
+    expect(db.mock.calls[0][0]).not.toContain(":vendorId");
+  });
+  it("export reuses the same filters without pagination", async () => {
+    db.mockResolvedValue([]);
+    const rows = await new ReceivingService().exportRows({ search: "", vendorId: 4 } as never);
+    expect(rows).toEqual([]);
+    expect(db.mock.calls[0][0]).toContain(`p."vendorId" = :vendorId`);
+    expect(db.mock.calls[0][0]).not.toContain("OFFSET");
+  });
+});
+
+describe("received list voucher/date filters", () => {
+  it("filters by voucher number/state and a received-date range in SQL", async () => {
+    db.mockImplementation(async (sql: string) => (sql.includes("COUNT(*)") ? [{ total: 0 }] : []));
+    await new ReceivingService().list({
+      page: 1, search: "", documentNumber: "RCV-2026", documentState: "issued", dateFrom: "2026-09-01", dateTo: "2026-09-30",
+    } as never);
+    for (const [sql, options] of db.mock.calls) {
+      expect(sql).toContain(`o."warehouseReceiptNumber" ILIKE :documentNumber`);
+      expect(sql).toContain(`o."warehouseReceiptNumber" IS NOT NULL`);
+      expect(sql).toContain(`o."shippingReceiveDate"::date >= :dateFrom`);
+      expect(sql).toContain(`o."shippingReceiveDate"::date <= :dateTo`);
+      expect(options.replacements).toMatchObject({ documentNumber: "%RCV-2026%", dateFrom: "2026-09-01", dateTo: "2026-09-30" });
+    }
+    db.mockClear();
+    await new ReceivingService().list({ page: 1, search: "", documentState: "none" } as never);
+    expect(db.mock.calls[0][0]).toContain(`o."warehouseReceiptNumber" IS NULL`);
+  });
+});
+
+describe("updateReceipt", () => {
+  const row = { id: 10, PoDate: "2026-09-21T00:00:00Z", shippingReceiveDate: "2026-09-30T00:00:00Z", warehouseReceiptNotes: "old" };
+  beforeEach(() => {
+    db.mockImplementation(async (sql: string) => (sql.includes("FOR UPDATE") ? [row] : []));
+  });
+  it("updates notes and logs the change", async () => {
+    const out = await new ReceivingService().updateReceipt(10, { notes: "جديد" }, 7);
+    expect(out).toEqual({ orderId: 10, warehouseReceiptNotes: "جديد" });
+    expect(Log.bulkCreate).toHaveBeenCalledWith(
+      [expect.objectContaining({ field: "warehouseReceiptNotes", from: "old", to: "جديد", userId: 7 })],
+      { transaction }
+    );
+    const update = db.mock.calls.find(([sql]) => sql.startsWith("UPDATE orders"))!;
+    expect(update[0]).toContain(`"warehouseReceiptNotes" = :warehouseReceiptNotes`);
+    expect(update[0]).not.toContain("PoDate");
+  });
+  it("rejects a manufacture date after the receipt date and writes nothing", async () => {
+    await expect(new ReceivingService().updateReceipt(10, { manufactureDate: "2026-10-05" }, 7)).rejects.toThrow("تاريخ التصنيع");
+    expect(db.mock.calls.some(([sql]) => sql.startsWith("UPDATE orders"))).toBe(false);
+  });
+  it("sets and clears the manufacture date", async () => {
+    await new ReceivingService().updateReceipt(10, { manufactureDate: "2026-09-25" }, 7);
+    expect(db.mock.calls.find(([sql]) => sql.startsWith("UPDATE orders"))![0]).toContain(`"PoDate" = :PoDate`);
+    db.mockClear();
+    const out = await new ReceivingService().updateReceipt(10, { manufactureDate: null }, 7);
+    expect(out.PoDate).toBeNull();
+  });
+  it("404s for an item that is not received", async () => {
+    db.mockResolvedValue([]);
+    await expect(new ReceivingService().updateReceipt(99, { notes: "x" }, 7)).rejects.toThrow("غير مستلم");
+  });
+});
+
+describe("receivedVendors", () => {
+  it("selects distinct non-deleted vendors of received items, matching the p.vendorId filter", async () => {
+    db.mockResolvedValue([{ id: 4, name: "Factory A" }]);
+    const rows = await new ReceivingService().receivedVendors();
+    expect(rows).toEqual([{ id: 4, name: "Factory A" }]);
+    const sql = db.mock.calls[0][0];
+    expect(sql).toContain("SELECT DISTINCT v.id, v.name");
+    expect(sql).toContain(`o."warehouseReceivedBy" IS NOT NULL`);
+    expect(sql).toContain("LEFT JOIN vendors v ON v.id = p.\"vendorId\"");
+    expect(sql).toContain(`v."deletedAt" IS NULL`);
+  });
+});

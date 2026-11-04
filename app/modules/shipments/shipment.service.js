@@ -13,6 +13,8 @@ const User = require("../user/user.model");
 const ShippingCompany = require("./shippingCompany.model");
 const {
   SHIPMENT_STATUS,
+  ORDER_STATUS,
+  CANCELED_LIKE_ORDER_STATUSES,
   USER_TYPES,
   DELIVERY_STATUS,
   PAYMENT_STATUS,
@@ -734,7 +736,7 @@ class ShipmentService {
       );
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("Order.status"), {
-          [Op.ne]: ORDER_STATUS.CANCELED,
+          [Op.notIn]: CANCELED_LIKE_ORDER_STATUSES,
         })
       );
     } else if (status) {

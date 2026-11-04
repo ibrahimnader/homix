@@ -56,6 +56,11 @@ export const createApp = (): Express => {
   }));
   app.use(bodyParser.urlencoded({ extended: true, limit: URL_ENCODED_LIMIT }));
   app.use(cors());
+  /* Transfer receipts are vendor-financial documents: served only through the
+     authenticated /financial-invoices/:id/receipt endpoint, never as a static file. */
+  app.use(`${UPLOADS_ROUTE}/financial-receipts`, (_request, response) => {
+    response.status(404).json({ status: false, message: "Not found" });
+  });
   app.use(UPLOADS_ROUTE, express.static(path.resolve(env.UPLOADS_DIR)));
   app.use(applyCacheHeaders);
   app.use(notifyNavigationCountsChanged);

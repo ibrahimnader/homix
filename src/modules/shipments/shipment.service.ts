@@ -21,6 +21,7 @@ import type {
   ReturnMutationInput,
   ShipmentDetailsResponse,
   ShipmentListQuery,
+  GroupedShipmentItem,
   ShipmentListResponse,
   ShipmentMetaResponse,
   ShippingCompanyItem,
@@ -75,6 +76,12 @@ export class ShipmentService {
 
   public async listShipments(filters: ShipmentListQuery, vendorId?: number | null): Promise<Result<ShipmentListResponse>> {
     return success(await this.shipmentRepository.listShipments(filters, vendorId));
+  }
+
+  public async listGroupedItems(orderId: number): Promise<Result<GroupedShipmentItem[]>> {
+    const items = await this.shipmentRepository.listGroupedItems(orderId);
+    if (!items) throw new NotFoundError("Shipment not found");
+    return success(items);
   }
 
   public async getShipmentById(shipmentId: number, vendorId?: number | null): Promise<Result<ShipmentDetailsResponse>> {

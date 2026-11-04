@@ -4,7 +4,7 @@ import { calculateFineForRule, type FineOrder, type FineRule } from "./fine-calc
 
 /** Rebuilds active rule charges. Waived records stay waived and are never reactivated. */
 export async function recalculateRuleFines(): Promise<number> {
-  const rules = await sequelize.query<FineRule>('SELECT * FROM fine_rules WHERE active = TRUE AND trigger <> \'manual\'', { type: QueryTypes.SELECT });
+  const rules = await sequelize.query<FineRule>('SELECT * FROM fine_rules WHERE active = TRUE AND "deletedAt" IS NULL AND trigger <> \'manual\'', { type: QueryTypes.SELECT });
   const orders = await sequelize.query<FineOrder & { id: number }>(`
     SELECT id, status, "shipmentStatus", "orderDate", "expectedDeliveryDate", "deliveryDate", "shippingReceiveDate", "updatedAt",
       "subTotalPrice", "totalPrice", commission, "totalCost" FROM orders

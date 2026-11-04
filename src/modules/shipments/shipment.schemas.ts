@@ -64,6 +64,7 @@ export const shipmentListQuerySchema = z.object({
   sort: sortSchema,
   size: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
   startDate: dateString.optional(),
+  vendorId: csvString.optional(),
   vendorName: z.string().trim().optional(),
 });
 
@@ -149,9 +150,12 @@ export const shipmentBulkUpdateSchema = z.object({
     deliveryBy: z.coerce.number().int().positive().optional(),
     governorate: z.string().trim().optional(),
     scheduledDeliveryDate: z.union([dateString, z.literal("")]).optional().nullable(),
-    scheduleStatus: z.coerce.number().int().positive().optional(),
+    /* null clears the field on every selected row (UI: «تفريغ الحالة» / «بدون شركة»). */
+    scheduleStatus: z.union([z.null(), z.coerce.number().int().positive()]).optional(),
     shipmentStatus: z.coerce.number().int().positive().optional(),
     shipmentType: z.string().trim().optional(),
+    /* Shipping company id — resolved to its name by the repository, same as the single edit. null clears it. */
+    shippingCompany: z.union([z.null(), z.coerce.number().int().positive()]).optional(),
     userId: z.coerce.number().int().positive().optional(),
   }).refine((value) => Object.keys(value).length > 0, "No fields to update"),
   shipmentIds: z.array(z.coerce.number().int().positive()).min(1),
@@ -233,10 +237,16 @@ export const shipmentInventoryBulkDeleteSchema = z.object({
 export const shipmentDeliveryAccountsQuerySchema = z.object({
   accountingStatus: z.coerce.number().int().positive().optional(),
   deliveryDate: dateString.optional(),
+  /** تاريخ التسليم الفعلي من/إلى — شامل الطرفين (يوم القاهرة). */
+  deliveryDateFrom: dateString.optional(),
+  deliveryDateTo: dateString.optional(),
   orderNumber: z.string().trim().optional(),
   page: z.coerce.number().int().min(1).default(DEFAULT_PAGE_NUMBER),
   paymentMethod: z.string().trim().optional(),
   settledDate: dateString.optional(),
+  /** تاريخ المحاسبة من/إلى — شامل الطرفين (يوم القاهرة). */
+  settledDateFrom: dateString.optional(),
+  settledDateTo: dateString.optional(),
   size: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
 });
 
@@ -275,6 +285,9 @@ export const shipmentDeliveryAccountBulkMutationSchema = z.object({
 
 export const shipmentExpenseAccountsQuerySchema = z.object({
   accountingStatus: z.coerce.number().int().positive().optional(),
+  /** تاريخ المحاسبة من/إلى — شامل الطرفين (يوم القاهرة). */
+  settledDateFrom: dateString.optional(),
+  settledDateTo: dateString.optional(),
   page: z.coerce.number().int().min(1).default(DEFAULT_PAGE_NUMBER),
   size: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
   type: z.coerce.number().int().positive().optional(),

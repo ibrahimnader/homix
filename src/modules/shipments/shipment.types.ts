@@ -29,6 +29,7 @@ export type ShipmentListQuery = {
   sort?: Partial<Record<"orderDate" | "priority" | "subTotalPrice" | "totalPrice", 1 | -1>>;
   size: number;
   startDate?: string;
+  vendorId?: string;
   vendorName?: string;
 };
 
@@ -69,16 +70,22 @@ export type InventoryMutationInput = {
 export type DeliveryAccountsListQuery = {
   accountingStatus?: number;
   deliveryDate?: string;
+  deliveryDateFrom?: string;
+  deliveryDateTo?: string;
   orderNumber?: string;
   page: number;
   paymentMethod?: string;
   settledDate?: string;
+  settledDateFrom?: string;
+  settledDateTo?: string;
   size: number;
 };
 
 export type ExpenseAccountsListQuery = {
   accountingStatus?: number;
   page: number;
+  settledDateFrom?: string;
+  settledDateTo?: string;
   size: number;
   type?: number;
 };
@@ -117,6 +124,7 @@ export type ShipmentMetaResponse = {
   shippingCompanies: ShipmentMetaOption[];
   shipmentStatuses: ShipmentMetaOption[];
   shipmentTypes: ShipmentMetaOption[];
+  vendors: ShipmentMetaOption[];
   subTabCounts: {
     accountDeliveries: number;
     accountExpenses: number;
@@ -178,6 +186,22 @@ export type ShipmentListItem = {
   /* مجموعة التوصيل المجمع: كل الطلبات الناتجة عن تقسيم أوردر واحد تتشارك
      `orderNumber`، فحالة اكتمال المجموعة بالمخزن تُحسب عبرها. */
   groupedShipment: GroupedShipmentInfo | null;
+  /** رقم عملية الطلب الذي نُقل إليه هذا الصنف عبر إعادة التخصيص؛ `null` إن لم يُعاد تخصيصه. */
+  reassignedToOperationNumber: string | null;
+};
+
+/** صنف ضمن مجموعة التوصيل المجمع (نفس رقم الأوردر). */
+export type GroupedShipmentItem = {
+  id: number;
+  operationNumber: string;
+  orderNumber: string;
+  productName: string;
+  productSku: string;
+  sellerName: string;
+  shipmentStatusLabel: string;
+  inWarehouse: boolean;
+  /** `true` للطلب الذي فُتحت منه النافذة. */
+  current: boolean;
 };
 
 /** ملخّص مجموعة التوصيل المجمع الظاهر كأيقونة بجوار الشحنة. */

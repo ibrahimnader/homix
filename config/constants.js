@@ -13,9 +13,16 @@ const ORDER_STATUS = {
   REFUNDED: 6,
   REPLACED: 7,
   IN_INVENTORY: 8,
-
-  // HALF_COMPLETED: 3,
-  // OUT_FOR_DELIVERY: 4,
+  // ids 9+ are append-only (stored as integers) — never renumber.
+  CANCELED_BEFORE_MFG_CONFIRMATION: 9,
+  CANCELED_AFTER_MFG_CONFIRMATION_72H: 10,
+  CANCELED_AFTER_MFG_NO_RESPONSE: 11,
+  CANCELED_AFTER_MFG_CHANGED_MIND: 12,
+  CANCELED_AFTER_MFG_SPECIAL: 13,
+  CANCELED_AFTER_MFG_DELAY: 14,
+  CANCELED_AFTER_MFG_FAKE_ORDER: 15,
+  REJECTED_AFTER_MFG_MISMATCH: 16,
+  REJECTED_AFTER_MFG_NOT_SUITABLE: 17,
 };
 const ORDER_STATUS_Arabic = {
   1: "معلق",
@@ -26,10 +33,31 @@ const ORDER_STATUS_Arabic = {
   6: "مسترجع",
   7: "مستبدل",
   8: "في المخزن",
-
-  // HALF_COMPLETED: 3,
-  // OUT_FOR_DELIVERY: 4,
+  9: "ملغي قبل التأكيد للتصنيع",
+  10: "ملغي بعد التأكيد للتصنيع (خلال أول 72 ساعة)",
+  11: "ملغي بعد التصنيع (لا يوجد رد من العميل)",
+  12: "ملغي بعد التصنيع (تغيير رأي)",
+  13: "ملغي بعد التصنيع (ظروف خاصة)",
+  14: "ملغي بعد التصنيع (بسبب التأخير)",
+  15: "ملغي بعد التصنيع (طلب وهمي)",
+  16: "مرفوض بعد التصنيع (المنتج غير مطابق)",
+  17: "مرفوض بعد التصنيع (غير مناسب للعميل)",
 };
+/* Cancel/reject variants added with the new design (ids 9-17). Every place that
+   treats CANCELED (4) as "closed" must treat these the same — use these lists
+   instead of comparing against ORDER_STATUS.CANCELED alone. */
+const CLOSED_ORDER_STATUSES = [
+  ORDER_STATUS.CANCELED_BEFORE_MFG_CONFIRMATION,
+  ORDER_STATUS.CANCELED_AFTER_MFG_CONFIRMATION_72H,
+  ORDER_STATUS.CANCELED_AFTER_MFG_NO_RESPONSE,
+  ORDER_STATUS.CANCELED_AFTER_MFG_CHANGED_MIND,
+  ORDER_STATUS.CANCELED_AFTER_MFG_SPECIAL,
+  ORDER_STATUS.CANCELED_AFTER_MFG_DELAY,
+  ORDER_STATUS.CANCELED_AFTER_MFG_FAKE_ORDER,
+  ORDER_STATUS.REJECTED_AFTER_MFG_MISMATCH,
+  ORDER_STATUS.REJECTED_AFTER_MFG_NOT_SUITABLE,
+];
+const CANCELED_LIKE_ORDER_STATUSES = [ORDER_STATUS.CANCELED, ...CLOSED_ORDER_STATUSES];
 const DELIVERY_STATUS = {
   ON_SCHEDULE: 1,
   ALMOST_LAST: 2,
@@ -123,7 +151,28 @@ const SHIPMENTS_STATUS = {
   FAILED_DELIVERY: 10,
   SCHEDULED: 11,
   OUT_FOR_DELIVERY: 12,
+  CANCELED_BEFORE_MFG_CONFIRMATION: 13,
+  CANCELED_AFTER_MFG_CONFIRMATION_72H: 14,
+  CANCELED_AFTER_MFG_NO_RESPONSE: 15,
+  CANCELED_AFTER_MFG_CHANGED_MIND: 16,
+  CANCELED_AFTER_MFG_SPECIAL: 17,
+  CANCELED_AFTER_MFG_DELAY: 18,
+  CANCELED_AFTER_MFG_FAKE_ORDER: 19,
+  REJECTED_AFTER_MFG_MISMATCH: 20,
+  REJECTED_AFTER_MFG_NOT_SUITABLE: 21,
 };
+/* Shipment cancel/reject variants (ids 13-21) — behave like CANCELED (5) / REJECTED (6). */
+const CLOSED_SHIPMENT_STATUSES = [
+  SHIPMENTS_STATUS.CANCELED_BEFORE_MFG_CONFIRMATION,
+  SHIPMENTS_STATUS.CANCELED_AFTER_MFG_CONFIRMATION_72H,
+  SHIPMENTS_STATUS.CANCELED_AFTER_MFG_NO_RESPONSE,
+  SHIPMENTS_STATUS.CANCELED_AFTER_MFG_CHANGED_MIND,
+  SHIPMENTS_STATUS.CANCELED_AFTER_MFG_SPECIAL,
+  SHIPMENTS_STATUS.CANCELED_AFTER_MFG_DELAY,
+  SHIPMENTS_STATUS.CANCELED_AFTER_MFG_FAKE_ORDER,
+  SHIPMENTS_STATUS.REJECTED_AFTER_MFG_MISMATCH,
+  SHIPMENTS_STATUS.REJECTED_AFTER_MFG_NOT_SUITABLE,
+];
 /* الأرقام ثابتة لأن الطلبات المخزَّنة تحملها — أي إعادة ترقيم تغيّر حالة صفوف
    قائمة بالفعل. المحاولتان الثانية والثالثة أُضيفتا برقمين جديدين (8 و9)
    بدل تقسيم الرقم 2، فتبقى الصفوف القديمة على «المحاولة الأولى». */
@@ -194,6 +243,18 @@ const MANUFACTURE_STATUS = {
   DELIVERED: 4,
   FAILED_TO_DELIVER: 5,
   DELIVERED_SUCCESSFULLY: 6,
+  IN_WAREHOUSE: 7,
+  CANCELED_BEFORE_MFG_CONFIRMATION: 8,
+  CANCELED_AFTER_MFG_CONFIRMATION_72H: 9,
+  CANCELED_NO_RESPONSE: 10,
+  CANCELED_CHANGED_MIND: 11,
+  CANCELED_SPECIAL: 12,
+  CANCELED_DELAY: 13,
+  CANCELED_FAKE_ORDER: 14,
+  REJECTED_MISMATCH: 15,
+  REJECTED_NOT_SUITABLE: 16,
+  RETURNED: 17,
+  EXCHANGED: 18,
 };
 
 const MANUFACTURE_STATUS_ARABIC = {
@@ -202,7 +263,19 @@ const MANUFACTURE_STATUS_ARABIC = {
   3: "جاهز للشحن",
   4: "تم الشحن",
   5: "فشل في التوصيل",
-  6: "تم التوصيل"
+  6: "تم التوصيل",
+  7: "في المخزن",
+  8: "ملغي قبل تأكيد التصنيع",
+  9: "ملغي بعد تأكيد التصنيع (خلال أول 72 ساعة)",
+  10: "ملغي (لا يوجد رد من العميل)",
+  11: "ملغي (تغيير رأي)",
+  12: "ملغي (ظروف خاصة)",
+  13: "ملغي (بسبب التأخير)",
+  14: "ملغي (طلب وهمي)",
+  15: "مرفوض (المنتج غير مطابق)",
+  16: "مرفوض (غير مناسب للعميل)",
+  17: "مسترجع",
+  18: "مستبدل",
 };
 const CONFIRMATION_STATUS = {
   PENDING: 1,
@@ -234,6 +307,9 @@ const CONFIRMATION_STATUS_ARABIC = {
 module.exports = {
   USER_TYPES,
   ORDER_STATUS,
+  CLOSED_ORDER_STATUSES,
+  CANCELED_LIKE_ORDER_STATUSES,
+  CLOSED_SHIPMENT_STATUSES,
   PAYMENT_STATUS,
   FACTORY_STATUS,
   FACTORY_STATUS_ARABIC,

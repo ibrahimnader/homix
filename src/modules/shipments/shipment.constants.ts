@@ -1,4 +1,5 @@
 import {
+  CLOSED_SHIPMENT_STATUSES,
   DELIVERY_BY_ARABIC,
   GOVERNORATES,
   PAYMENT_STATUS_ARABIC,
@@ -42,6 +43,15 @@ export const SHIPMENT_STATUS = {
   FAILED_DELIVERY: 10,
   SCHEDULED: 11,
   OUT_FOR_DELIVERY: 12,
+  CANCELED_BEFORE_MFG_CONFIRMATION: 13,
+  CANCELED_AFTER_MFG_CONFIRMATION_72H: 14,
+  CANCELED_AFTER_MFG_NO_RESPONSE: 15,
+  CANCELED_AFTER_MFG_CHANGED_MIND: 16,
+  CANCELED_AFTER_MFG_SPECIAL: 17,
+  CANCELED_AFTER_MFG_DELAY: 18,
+  CANCELED_AFTER_MFG_FAKE_ORDER: 19,
+  REJECTED_AFTER_MFG_MISMATCH: 20,
+  REJECTED_AFTER_MFG_NOT_SUITABLE: 21,
 } as const;
 
 export const SHIPMENT_STATUS_LABELS: Record<number, string> = {
@@ -57,6 +67,15 @@ export const SHIPMENT_STATUS_LABELS: Record<number, string> = {
   [SHIPMENT_STATUS.FAILED_DELIVERY]: "فشل في التوصيل",
   [SHIPMENT_STATUS.SCHEDULED]: "شحنة مجدولة",
   [SHIPMENT_STATUS.OUT_FOR_DELIVERY]: "خرجت للتوصيل",
+  [SHIPMENT_STATUS.CANCELED_BEFORE_MFG_CONFIRMATION]: "ملغي قبل التأكيد للتصنيع",
+  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_CONFIRMATION_72H]: "ملغي بعد التأكيد للتصنيع (خلال أول 72 ساعة)",
+  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_NO_RESPONSE]: "ملغي بعد التصنيع (لا يوجد رد من العميل)",
+  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_CHANGED_MIND]: "ملغي بعد التصنيع (تغيير رأي)",
+  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_SPECIAL]: "ملغي بعد التصنيع (ظروف خاصة)",
+  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_DELAY]: "ملغي بعد التصنيع (بسبب التأخير)",
+  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_FAKE_ORDER]: "ملغي بعد التصنيع (طلب وهمي)",
+  [SHIPMENT_STATUS.REJECTED_AFTER_MFG_MISMATCH]: "مرفوض بعد التصنيع (المنتج غير مطابق)",
+  [SHIPMENT_STATUS.REJECTED_AFTER_MFG_NOT_SUITABLE]: "مرفوض بعد التصنيع (غير مناسب للعميل)",
 };
 
 /* مصدر الحقيقة الوحيد لحالات الجدولة هو `config/constants` — تُقرأ من هناك حتى
@@ -194,6 +213,7 @@ export const SHIPMENT_FINAL_STATUSES = [
   SHIPMENT_STATUS.CANCELED,
   SHIPMENT_STATUS.REJECTED,
   SHIPMENT_STATUS.RETURNED_TO_VENDOR,
+  ...CLOSED_SHIPMENT_STATUSES,
 ];
 
 export const PERFORMANCE_PERIODS = ["daily", "weekly", "monthly", "custom"] as const;

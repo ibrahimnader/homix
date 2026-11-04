@@ -7,6 +7,9 @@ import { ORDER_STATUS, SHIPMENTS_STATUS, DELIVERY_BY } from "../../../config/con
 import {
   receivingCreateSchema,
   receivingListSchema,
+  receivingReceivedFilterSchema,
+  receivingExportSchema,
+  receivingUpdateSchema,
 } from "./receiving.schemas";
 
 /* Warehouse receiving lives entirely on `orders` — splitImportedOrderByUnit
@@ -31,6 +34,8 @@ export type ReceivedItem = {
   documentNumber: string | null;
   documentIssuedAt: string | null;
 };
+
+const ExcelJS = require("exceljs");
 
 const select = <T extends object>(
   sql: string,
@@ -107,6 +112,17 @@ export class ReceivingService {
     });
   }
 
+  /** Factories that have at least one received item — ids match `p."vendorId"` in receivedWhere. */
+  async receivedVendors() {
+    return select<{ id: number; name: string }>(
+      `SELECT DISTINCT v.id, v.name ${itemFrom}
+      WHERE o."deletedAt" IS NULL AND o."warehouseReceivedBy" IS NOT NULL
+        AND v.id IS NOT NULL AND v."deletedAt" IS NULL AND COALESCE(v.name, '') <> ''
+      ORDER BY v.name, v.id`,
+      {}
+    );
+  }
+
   async candidates(filters: z.infer<typeof receivingListSchema>) {
     const replacements = {
       search: `%${filters.search}%`,
@@ -126,21 +142,54 @@ export class ReceivingService {
     return { items, totalCount: count?.total ?? 0, page: filters.page, size: 20 };
   }
 
-  async list(filters: z.infer<typeof receivingListSchema>) {
-    const replacements = {
+  private receivedWhere(
+    filters: Omit<z.infer<typeof receivingReceivedFilterSchema>, "page">
+  ) {
+    const replacements: Record<string, unknown> = {
       search: `%${filters.search}%`,
-      date: filters.date,
-      offset: (filters.page - 1) * 20,
     };
-    const where = `o."deletedAt" IS NULL AND o."warehouseReceivedBy" IS NOT NULL
-      AND (o.code ILIKE :search OR o."orderNumber" ILIKE :search
-      OR l.sku ILIKE :search OR l.title ILIKE :search OR v.name ILIKE :search)
-      ${filters.date ? `AND o."shippingReceiveDate"::date = :date` : ""}`;
+    const clauses = [
+      `o."deletedAt" IS NULL AND o."warehouseReceivedBy" IS NOT NULL`,
+      `(o.code ILIKE :search OR o."orderNumber" ILIKE :search
+      OR l.sku ILIKE :search OR l.title ILIKE :search OR v.name ILIKE :search)`,
+    ];
+    const like = (value: string | undefined, key: string, column: string) => {
+      if (!value) return;
+      replacements[key] = `%${value}%`;
+      clauses.push(`${column} ILIKE :${key}`);
+    };
+    like(filters.sku, "sku", "l.sku");
+    like(filters.operationNumber, "operationNumber", "o.code");
+    like(filters.orderNumber, "orderNumber", `o."orderNumber"`);
+    if (filters.vendorId) {
+      replacements.vendorId = filters.vendorId;
+      clauses.push(`p."vendorId" = :vendorId`);
+    }
+    like(filters.documentNumber, "documentNumber", `o."warehouseReceiptNumber"`);
+    if (filters.documentState === "issued") clauses.push(`o."warehouseReceiptNumber" IS NOT NULL`);
+    if (filters.documentState === "none") clauses.push(`o."warehouseReceiptNumber" IS NULL`);
+    if (filters.date) {
+      replacements.date = filters.date;
+      clauses.push(`o."shippingReceiveDate"::date = :date`);
+    }
+    if (filters.dateFrom) {
+      replacements.dateFrom = filters.dateFrom;
+      clauses.push(`o."shippingReceiveDate"::date >= :dateFrom`);
+    }
+    if (filters.dateTo) {
+      replacements.dateTo = filters.dateTo;
+      clauses.push(`o."shippingReceiveDate"::date <= :dateTo`);
+    }
+    return { where: clauses.join(" AND "), replacements };
+  }
+
+  async list(filters: z.infer<typeof receivingReceivedFilterSchema>) {
+    const { where, replacements } = this.receivedWhere(filters);
     const rows = await select<ReceivedItem>(
       `SELECT ${receivedColumns} ${receivedFrom} WHERE ${where}
       ORDER BY o."shippingReceiveDate" DESC, o.id DESC
       LIMIT 20 OFFSET :offset`,
-      replacements
+      { ...replacements, offset: (filters.page - 1) * 20 }
     );
     const [count] = await select<{ total: number }>(
       `SELECT COUNT(*)::int AS total ${itemFrom} WHERE ${where}`,
@@ -152,6 +201,48 @@ export class ReceivingService {
       page: filters.page,
       size: 20,
     };
+  }
+
+  /** Every received row matching the filters (same WHERE as list), capped. */
+  async exportRows(filters: z.infer<typeof receivingExportSchema>) {
+    const { where, replacements } = this.receivedWhere(filters);
+    const rows = await select<ReceivedItem>(
+      `SELECT ${receivedColumns} ${receivedFrom} WHERE ${where}
+      ORDER BY o."shippingReceiveDate" DESC, o.id DESC
+      LIMIT 50000`,
+      replacements
+    );
+    return rows.map(withManufactureDays);
+  }
+
+  async exportWorkbook(
+    response: { setHeader(k: string, v: string): unknown; end(): unknown },
+    filters: z.infer<typeof receivingExportSchema>
+  ) {
+    const rows = await this.exportRows(filters);
+    response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    response.setHeader("Content-Disposition", "attachment; filename=receipts.xlsx");
+    const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: response });
+    const sheet = workbook.addWorksheet("receipts");
+    sheet.columns = [
+      { header: "رقم العملية", key: "operationNumber", width: 18 },
+      { header: "رقم الطلب", key: "orderNumber", width: 18 },
+      { header: "كود المنتج (SKU)", key: "productSku", width: 20 },
+      { header: "المنتج", key: "productName", width: 36 },
+      { header: "المصنع", key: "vendorName", width: 24 },
+      { header: "الكمية", key: "quantity", width: 10 },
+      { header: "تاريخ التصنيع", key: "manufactureDate", width: 16 },
+      { header: "تاريخ الاستلام", key: "receivedDate", width: 16 },
+      { header: "أيام التصنيع", key: "manufactureDays", width: 14 },
+      { header: "المستلم", key: "receiverName", width: 22 },
+      { header: "المُرسِل", key: "senderName", width: 22 },
+      { header: "رقم السند", key: "documentNumber", width: 18 },
+      { header: "ملاحظات", key: "notes", width: 30 },
+    ];
+    rows.forEach((row) => sheet.addRow(row));
+    sheet.commit();
+    await workbook.commit();
+    response.end();
   }
 
   async documents(filters: z.infer<typeof receivingListSchema>) {
@@ -273,6 +364,49 @@ export class ReceivingService {
         await order.update(changes, { transaction });
       }
       return { orderIds: input.orderIds, receiverName: user.name };
+    });
+  }
+
+  /** Edits receipt notes and/or the manufacture date (orders."PoDate") of a received item. */
+  async updateReceipt(
+    orderId: number, input: z.infer<typeof receivingUpdateSchema>, userId: number,
+  ): Promise<{ orderId: number; warehouseReceiptNotes?: string | null; PoDate?: string | null }> {
+    return sequelize.transaction(async (transaction) => {
+      const [order] = await select<{
+        id: number; PoDate: string | null; shippingReceiveDate: string | null; warehouseReceiptNotes: string | null;
+      }>(
+        `SELECT id, "PoDate", "shippingReceiveDate", "warehouseReceiptNotes" FROM orders
+        WHERE id = :orderId AND "deletedAt" IS NULL AND "warehouseReceivedBy" IS NOT NULL FOR UPDATE`,
+        { orderId }, transaction
+      );
+      if (!order) throw new NotFoundError("الصنف غير مستلم أو غير موجود");
+      const changes: Record<string, string | null> = {};
+      if (input.notes !== undefined) changes.warehouseReceiptNotes = input.notes;
+      if (input.manufactureDate !== undefined) {
+        if (input.manufactureDate && order.shippingReceiveDate) {
+          const received = moment(order.shippingReceiveDate).tz("Africa/Cairo").format("YYYY-MM-DD");
+          if (input.manufactureDate > received) throw new ValidationError("تاريخ التصنيع بعد تاريخ الاستلام");
+        }
+        changes.PoDate = input.manufactureDate
+          ? moment.tz(input.manufactureDate, "YYYY-MM-DD", "Africa/Cairo").toISOString()
+          : null;
+      }
+      const Log = require("../../../app/modules/logs/log.model");
+      const previous: Record<string, unknown> = { warehouseReceiptNotes: order.warehouseReceiptNotes, PoDate: order.PoDate };
+      await Log.bulkCreate(
+        Object.entries(changes)
+          .filter(([field, value]) => String(previous[field] ?? "") !== String(value ?? ""))
+          .map(([field, value]) => ({
+            entityId: orderId, entityType: "order", action: "update", field,
+            from: String(previous[field] ?? ""), to: String(value ?? ""), userId,
+          })),
+        { transaction }
+      );
+      const sets = Object.keys(changes).map((field) => `"${field}" = :${field}`).join(", ");
+      await sequelize.query(`UPDATE orders SET ${sets}, "updatedAt" = NOW() WHERE id = :orderId`, {
+        replacements: { ...changes, orderId }, transaction,
+      });
+      return { orderId, ...changes } as { orderId: number; warehouseReceiptNotes?: string | null; PoDate?: string | null };
     });
   }
 

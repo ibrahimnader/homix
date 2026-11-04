@@ -18,7 +18,10 @@ const createDefaultData = require("./config/defaultData.seeder");
 const { Server } = require("socket.io");
 const User = require("./app/modules/user/user.model");
 const cron = require("node-cron");
-const { recalculateDailyFines, saveMissingOrders } = require("./app/modules/order/order.service");
+const {
+  recalculateDailyFines,
+  saveMissingOrders,
+} = require("./app/modules/order/order.service");
 
 const startServer = async () => {
   try {
@@ -185,6 +188,8 @@ const startServer = async () => {
     server.listen(port, async () => {
       console.log(`Server running at http://localhost:${port}`);
       console.log("Webhooks created successfully");
+      const result = await saveMissingOrders();
+
       await createDefaultData();
       console.log("Default user created successfully");
     });

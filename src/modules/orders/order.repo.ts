@@ -30,6 +30,7 @@ import {
   getConfirmationLabel,
   getManufactureLabel,
   getPaymentLabel,
+  mapSellerChatMessage,
   toIsoString,
   toNumber,
   toPlain,
@@ -747,8 +748,12 @@ export class OrderRepository {
     const activeStatusByCode = new Map(
       activeStatusHistory.map((item) => [item.status, item]),
     );
+    /* The stepper keeps its original eight steps. The cancel/reject variants
+       (ids 9+) are terminal branches, not steps — they only appear once the
+       order has actually reached one. */
     const statusHistory: OrderStatusHistoryItem[] = Object.keys(ORDER_STATUS_LABELS)
       .map(Number)
+      .filter((status) => status <= ORDER_STATUS.IN_INVENTORY || activeStatusByCode.has(status))
       .sort((left, right) => left - right)
       .map((status) => {
         const activeItem = activeStatusByCode.get(status);
@@ -1298,25 +1303,7 @@ export class OrderRepository {
       order: [["createdAt", "ASC"]],
       where: { entityId: orderId, entityType: "order_seller_chat" },
     });
-    return rows.map((row: unknown) => {
-      const plainNote = toPlain(row);
-      return {
-        attachments: Array.isArray(plainNote.attachments) ? plainNote.attachments.map((attachment: unknown) => {
-          const plainAttachment = toPlain(attachment);
-          return {
-            createdAt: toIsoString(plainAttachment.createdAt) ?? "",
-            description: toText(plainAttachment.description),
-            id: toNumber(plainAttachment.id),
-            name: toText(plainAttachment.name),
-            url: toText(plainAttachment.url),
-          };
-        }) : [],
-        createdAt: toIsoString(plainNote.createdAt) ?? "",
-        id: toNumber(plainNote.id),
-        text: toText(plainNote.text),
-        userName: `${toText(toPlain(plainNote.user).firstName)} ${toText(toPlain(plainNote.user).lastName)}`.trim(),
-      };
-    });
+    return rows.map(mapSellerChatMessage);
   }
 
   public async createSellerChatMessage(orderId: number, userId: number, text: string): Promise<unknown> {

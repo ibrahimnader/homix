@@ -14,6 +14,7 @@ const User = require("../user/user.model");
 const Notification = require("../notification/notification.model");
 const {
   ORDER_STATUS,
+  CANCELED_LIKE_ORDER_STATUSES,
   ORDER_SOURCE,
   USER_TYPES,
   ORDER_STATUS_Arabic,
@@ -1181,7 +1182,7 @@ class OrderService {
       );
       whereClause[Op.and].push(
         sequelize.where(sequelize.col("Order.status"), {
-          [Op.ne]: ORDER_STATUS.CANCELED,
+          [Op.notIn]: CANCELED_LIKE_ORDER_STATUSES,
         }),
       );
     } else if (status) {

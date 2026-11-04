@@ -793,4 +793,15 @@ describe("orderRouter", () => {
       { isActive: false, status: 8 },
     ]);
   });
+
+  it("adds a cancel/reject variant to the stepper only when the order is on it", async () => {
+    orderModel.findOne.mockResolvedValue({ ...makeOrder(), status: 10 });
+
+    const response = await request(app).get("/orders/7");
+
+    expect(response.status).toBe(200);
+    const history = response.body.data.statusHistory as Array<{ isActive: boolean; status: number; statusLabel: string }>;
+    expect(history.map((item) => item.status)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 10]);
+    expect(history[history.length - 1]).toMatchObject({ isActive: true, statusLabel: "ملغي بعد التأكيد للتصنيع (خلال أول 72 ساعة)" });
+  });
 });

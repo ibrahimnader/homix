@@ -10,7 +10,7 @@ import {
   replaceManagedOptions,
   type ManagedOptionValue,
 } from "../settings/managed-options";
-import { DELIVERY_BY, ORDER_SOURCE_ARABIC, ORDER_SOURCE, ORDER_STATUS, PAYMENT_STATUS, SHIPMENT_SCHEDULE_STATUS_ARABIC, USER_TYPES } from "../../../config/constants";
+import { CLOSED_SHIPMENT_STATUSES, DELIVERY_BY, ORDER_SOURCE_ARABIC, ORDER_SOURCE, ORDER_STATUS, PAYMENT_STATUS, SHIPMENT_SCHEDULE_STATUS_ARABIC, USER_TYPES } from "../../../config/constants";
 import { applyCostPriceToLines, parseCostPriceInput } from "../orders/order-cost-price";
 import {
   ACCOUNTING_STATUS,
@@ -60,6 +60,7 @@ import {
 } from "./shipment.helpers";
 import { applyOrderLinesToInventory } from "./inventory.movements";
 import type {
+  GroupedShipmentItem,
   DeliveryAccountItem,
   DeliveryAccountsListQuery,
   DeliveryAccountsListResponse,
@@ -152,6 +153,16 @@ const ORDER_STATUS_BY_SHIPMENT_STATUS: Partial<Record<number, number>> = {
   [SHIPMENT_STATUS.DELIVERED]: ORDER_STATUS.DELIVERED,
   [SHIPMENT_STATUS.IN_WAREHOUSE]: ORDER_STATUS.IN_INVENTORY,
   [SHIPMENT_STATUS.CANCELED]: ORDER_STATUS.CANCELED,
+  // Cancel/reject variants carry the matching order variant (same keys on both sides).
+  [SHIPMENT_STATUS.CANCELED_BEFORE_MFG_CONFIRMATION]: ORDER_STATUS.CANCELED_BEFORE_MFG_CONFIRMATION,
+  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_CONFIRMATION_72H]: ORDER_STATUS.CANCELED_AFTER_MFG_CONFIRMATION_72H,
+  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_NO_RESPONSE]: ORDER_STATUS.CANCELED_AFTER_MFG_NO_RESPONSE,
+  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_CHANGED_MIND]: ORDER_STATUS.CANCELED_AFTER_MFG_CHANGED_MIND,
+  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_SPECIAL]: ORDER_STATUS.CANCELED_AFTER_MFG_SPECIAL,
+  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_DELAY]: ORDER_STATUS.CANCELED_AFTER_MFG_DELAY,
+  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_FAKE_ORDER]: ORDER_STATUS.CANCELED_AFTER_MFG_FAKE_ORDER,
+  [SHIPMENT_STATUS.REJECTED_AFTER_MFG_MISMATCH]: ORDER_STATUS.REJECTED_AFTER_MFG_MISMATCH,
+  [SHIPMENT_STATUS.REJECTED_AFTER_MFG_NOT_SUITABLE]: ORDER_STATUS.REJECTED_AFTER_MFG_NOT_SUITABLE,
 };
 
 const logOrderFieldChange = async (
@@ -219,6 +230,9 @@ const buildInventoryItem = (inventoryValue: unknown): InventoryItem => {
   };
 };
 
+const parseVendorIds = (value: string): number[] =>
+  value.split(",").map((token) => Number(token.trim())).filter((id) => Number.isInteger(id) && id > 0);
+
 const buildShipmentWhereClause = (
   filters: Omit<ShipmentListQuery, "page" | "size">,
   vendorId?: number | null,
@@ -276,6 +290,13 @@ const buildShipmentWhereClause = (
 
   if (filters.customerPhone) {
     andConditions.push(where(col("customer.phoneNumber"), { [Op.like]: `%${filters.customerPhone}%` }));
+  }
+
+  if (filters.vendorId) {
+    const vendorIds = parseVendorIds(filters.vendorId);
+    if (vendorIds.length > 0) {
+      andConditions.push(where(col("orderLines.product.vendor.id"), { [Op.in]: vendorIds }));
+    }
   }
 
   if (filters.vendorName) {
@@ -427,7 +448,7 @@ const buildShipmentWhereClause = (
 const buildSummaryIncludes = (filters: Omit<ShipmentListQuery, "page" | "size">) => {
   const includes: Record<string, unknown>[] = [];
 
-  if (filters.vendorName) {
+  if (filters.vendorName || (filters.vendorId && parseVendorIds(filters.vendorId).length > 0)) {
     includes.push({
       as: "orderLines",
       attributes: [],
@@ -591,6 +612,7 @@ const mapShipmentListItem = (orderValue: unknown): ShipmentListItem => {
     /* يُملأ لاحقاً بـ `attachGroupedShipmentInfo` — يحتاج استعلاماً عبر الصفحة
        كلها، فلا يمكن حسابه من صف واحد. */
     groupedShipment: null,
+    reassignedToOperationNumber: null,
   };
 };
 
@@ -831,7 +853,7 @@ export class ShipmentRepository {
    * count plus the remaining lookups issued in parallel.
    */
   public async getMeta(): Promise<ShipmentMetaResponse> {
-    const [statusCountRows, shippingCompanies, inventoryCount, expensesCount, expenseTypes, assignees] = await Promise.all([
+    const [statusCountRows, shippingCompanies, vendors, inventoryCount, expensesCount, expenseTypes, assignees] = await Promise.all([
       orderModel.findAll({
         attributes: ["shipmentStatus", [fn("COUNT", col("Order.id")), "rowCount"]],
         group: ["Order.shipmentStatus"],
@@ -839,6 +861,8 @@ export class ShipmentRepository {
         where: buildHomixShipmentScope(),
       }),
       shippingCompanyModel.findAll({ order: [["name", "ASC"]] }),
+      /* البائعون لفلتر «البائع» متعدد الاختيار؛ الموديل paranoid فلا يعيد المحذوفين. */
+      vendorModel.findAll({ attributes: ["id", "name"], order: [["name", "ASC"]], where: { name: { [Op.ne]: "" } } }),
       shipmentInventoryModel.count(),
       shipmentExpenseModel.count(),
       listManagedOptions(MANAGED_OPTION_GROUP.EXPENSE_TYPE),
@@ -885,6 +909,9 @@ export class ShipmentRepository {
       scheduleStatuses: SHIPMENT_SCHEDULE_STATUS_OPTIONS.map(({ id, label }) => ({ id, label })),
       shippingCompanies: shippingCompanies.map((company: unknown) => ({ id: toNumber(toPlain(company).id), label: toText(toPlain(company).name) })),
       shipmentStatuses: Object.entries(SHIPMENT_STATUS_LABELS).map(([id, label]) => ({ id: Number(id), label })),
+      vendors: vendors
+        .map((vendor: unknown) => ({ id: toNumber(toPlain(vendor).id), label: toText(toPlain(vendor).name).trim() }))
+        .filter((option: { label: string }) => option.label !== ""),
       shipmentTypes: [
         { id: "grouped", label: SHIPMENT_TYPE_LABELS.grouped ?? "شحن مجمع" },
         { id: "separate", label: SHIPMENT_TYPE_LABELS.separate ?? "شحن منفصل" },
@@ -949,6 +976,7 @@ export class ShipmentRepository {
       SHIPMENT_STATUS.RETURNED_FROM_CUSTOMER,
       SHIPMENT_STATUS.RETURNED_TO_VENDOR,
       SHIPMENT_STATUS.FAILED_DELIVERY,
+      ...CLOSED_SHIPMENT_STATUSES,
     ];
 
     /* One grouped pass over the matching orders. The vendor/customer joins are
@@ -1011,9 +1039,9 @@ export class ShipmentRepository {
       where: whereClause,
     });
 
-    const items = await this.attachGroupedShipmentInfo(
+    const items = await this.attachReassignmentInfo(await this.attachGroupedShipmentInfo(
       result.rows.map((row: unknown) => mapShipmentListItem(row)),
-    );
+    ));
 
     return {
       items,
@@ -1021,6 +1049,58 @@ export class ShipmentRepository {
       size: filters.size ?? DEFAULT_PAGE_SIZE,
       totalCount: result.count,
     };
+  }
+
+  /** Items of the grouped delivery an order belongs to: every non-deleted order sharing its orderNumber. */
+  public async listGroupedItems(orderId: number): Promise<GroupedShipmentItem[] | null> {
+    const [origin] = await sequelize.query<{ orderNumber: string | null }>(
+      `SELECT "orderNumber" FROM orders WHERE id = :orderId AND "deletedAt" IS NULL`,
+      { replacements: { orderId }, type: QueryTypes.SELECT },
+    );
+    if (!origin) return null;
+    const orderNumber = toText(origin.orderNumber);
+    if (!orderNumber) return [];
+    const rows = await sequelize.query<Record<string, unknown>>(
+      `SELECT o.id, o.code, o."orderNumber", o.status, o."shipmentStatus", line.sku,
+         COALESCE(line.title, product.title) AS title, vendor.name AS "sellerName"
+       FROM orders o
+       LEFT JOIN LATERAL (
+         SELECT sku, title, "productId" FROM "orderLines"
+         WHERE "orderId" = o.id AND "deletedAt" IS NULL ORDER BY id LIMIT 1
+       ) line ON TRUE
+       LEFT JOIN products product ON product.id = line."productId"
+       LEFT JOIN vendors vendor ON vendor.id = product."vendorId"
+       WHERE o."orderNumber" = :orderNumber AND o."deletedAt" IS NULL
+       ORDER BY o.id`,
+      { replacements: { orderNumber }, type: QueryTypes.SELECT },
+    );
+    return rows.map((row) => ({
+      id: toNumber(row.id),
+      operationNumber: toText(row.code),
+      orderNumber: toText(row.orderNumber),
+      productName: toText(row.title),
+      productSku: toText(row.sku),
+      sellerName: toText(row.sellerName),
+      shipmentStatusLabel: SHIPMENT_STATUS_LABELS[toNumber(row.shipmentStatus)] ?? "",
+      inWarehouse: hasReachedWarehouse(row),
+      current: toNumber(row.id) === orderId,
+    }));
+  }
+
+  /** Marks rows whose item was moved to another order (source side of shipment_reassignments). */
+  private async attachReassignmentInfo(items: ShipmentListItem[]): Promise<ShipmentListItem[]> {
+    if (items.length === 0) return items;
+    const rows = await sequelize.query<{ sourceOrderId: number; targetOperationNumber: string | null }>(
+      `SELECT r."sourceOrderId", t.code AS "targetOperationNumber"
+       FROM shipment_reassignments r JOIN orders t ON t.id = r."targetOrderId"
+       WHERE r."sourceOrderId" IN (:ids)`,
+      { replacements: { ids: items.map((item) => item.id) }, type: QueryTypes.SELECT },
+    );
+    if (rows.length === 0) return items;
+    const byId = new Map(rows.map((row) => [Number(row.sourceOrderId), row.targetOperationNumber ?? ""]));
+    return items.map((item) => (byId.has(item.id)
+      ? { ...item, reassignedToOperationNumber: byId.get(item.id) as string }
+      : item));
   }
 
   /**
@@ -1714,21 +1794,20 @@ export class ShipmentRepository {
       );
     }
 
-    if (filters.settledDate) {
-      const startOfDay = toDateRangeBoundary(filters.settledDate, "start");
-      const endOfDay = toDateRangeBoundary(filters.settledDate, "end");
-      if (startOfDay && endOfDay) {
-        andConditions.push(where(col("Order.accountingDate"), { [Op.gte]: startOfDay, [Op.lte]: endOfDay }));
-      }
-    }
+    // Single-day params (settledDate/deliveryDate) are kept for older clients;
+    // the From/To pairs are inclusive Cairo-day ranges, same as
+    // deliveryDateFrom/To on the shipments list.
+    const pushDateRange = (column: string, from?: string, to?: string) => {
+      const start = from ? toDateRangeBoundary(from, "start") : null;
+      const end = to ? toDateRangeBoundary(to, "end") : null;
+      if (start) andConditions.push(where(col(column), { [Op.gte]: start }));
+      if (end) andConditions.push(where(col(column), { [Op.lte]: end }));
+    };
 
-    if (filters.deliveryDate) {
-      const startOfDay = toDateRangeBoundary(filters.deliveryDate, "start");
-      const endOfDay = toDateRangeBoundary(filters.deliveryDate, "end");
-      if (startOfDay && endOfDay) {
-        andConditions.push(where(col("Order.deliveryDate"), { [Op.gte]: startOfDay, [Op.lte]: endOfDay }));
-      }
-    }
+    pushDateRange("Order.accountingDate", filters.settledDate, filters.settledDate);
+    pushDateRange("Order.accountingDate", filters.settledDateFrom, filters.settledDateTo);
+    pushDateRange("Order.deliveryDate", filters.deliveryDate, filters.deliveryDate);
+    pushDateRange("Order.deliveryDate", filters.deliveryDateFrom, filters.deliveryDateTo);
 
     const result = await orderModel.findAndCountAll({
       distinct: true,
@@ -1801,7 +1880,18 @@ export class ShipmentRepository {
   }
 
   public async listExpenseAccounts(filters: ExpenseAccountsListQuery): Promise<ExpenseAccountsListResponse> {
+    const dateStart = filters.settledDateFrom ? toDateRangeBoundary(filters.settledDateFrom, "start") : null;
+    const dateEnd = filters.settledDateTo ? toDateRangeBoundary(filters.settledDateTo, "end") : null;
+    const dateWhere = dateStart || dateEnd
+      ? {
+          accountingDate: {
+            ...(dateStart ? { [Op.gte]: dateStart } : {}),
+            ...(dateEnd ? { [Op.lte]: dateEnd } : {}),
+          },
+        }
+      : undefined;
     const [rows, expenseTypeLabels] = await Promise.all([shipmentExpenseModel.findAll({
+      ...(dateWhere ? { where: dateWhere } : {}),
       order: [["accountingDate", "DESC"], ["createdAt", "DESC"]],
     }), getManagedOptionLabels(MANAGED_OPTION_GROUP.EXPENSE_TYPE)]);
     const items: ExpenseAccountItem[] = rows.map((row: unknown) => {
@@ -2038,6 +2128,7 @@ export class ShipmentRepository {
       SHIPMENT_STATUS.RETURNED_TO_VENDOR,
       SHIPMENT_STATUS.REPLACED,
       SHIPMENT_STATUS.FAILED_DELIVERY,
+      ...CLOSED_SHIPMENT_STATUSES,
     ];
     const returnedStatuses = new Set<number>([
       SHIPMENT_STATUS.CANCELED,
@@ -2046,6 +2137,7 @@ export class ShipmentRepository {
       SHIPMENT_STATUS.RETURNED_TO_VENDOR,
       SHIPMENT_STATUS.REPLACED,
       SHIPMENT_STATUS.FAILED_DELIVERY,
+      ...CLOSED_SHIPMENT_STATUSES,
     ]);
     const whereClause: Record<string | symbol, unknown> = {
       ...buildHomixShipmentScope(),

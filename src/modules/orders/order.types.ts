@@ -198,6 +198,7 @@ export type SellerChatMessage = {
   createdAt: string;
   id: number;
   text: string;
+  userId: number;
   userName: string;
 };
 

@@ -127,6 +127,12 @@ shipmentRouter.get("/meta", requirePermission("ship_view"), asyncHandler(shipmen
  *         schema:
  *           type: string
  *       - in: query
+ *         name: vendorId
+ *         description: Comma-separated vendor (seller) ids; matches any of them.
+ *         schema:
+ *           type: string
+ *           example: 3,7
+ *       - in: query
  *         name: vendorName
  *         schema:
  *           type: string
@@ -400,6 +406,12 @@ shipmentRouter.delete(
  *         name: orderNumber
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: vendorId
+ *         description: Comma-separated vendor (seller) ids; matches any of them.
+ *         schema:
+ *           type: string
+ *           example: 3,7
  *       - in: query
  *         name: vendorName
  *         schema:
@@ -976,6 +988,30 @@ shipmentRouter.delete(
  *         schema:
  *           type: string
  *           format: date
+ *       - in: query
+ *         name: settledDateFrom
+ *         description: Accounting date range start (inclusive, Cairo day).
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: settledDateTo
+ *         description: Accounting date range end (inclusive through end of Cairo day).
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: deliveryDateFrom
+ *         description: Actual delivery date range start (inclusive, Cairo day).
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: deliveryDateTo
+ *         description: Actual delivery date range end (inclusive through end of Cairo day).
+ *         schema:
+ *           type: string
+ *           format: date
  *     responses:
  *       200:
  *         description: Delivery accounting rows
@@ -1149,6 +1185,16 @@ shipmentRouter.post(
  *         description: Numeric expense type id.
  *         schema:
  *           type: integer
+ *       - in: query
+ *         name: settledDateFrom
+ *         description: Accounting date from (YYYY-MM-DD), inclusive Cairo day.
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: settledDateTo
+ *         description: Accounting date to (YYYY-MM-DD), inclusive Cairo day.
+ *         schema:
+ *           type: string
  *     responses:
  *       200:
  *         description: Expenses accounting rows
@@ -1421,6 +1467,12 @@ shipmentRouter.get(
  *         schema:
  *           type: string
  *       - in: query
+ *         name: vendorId
+ *         description: Comma-separated vendor (seller) ids; matches any of them.
+ *         schema:
+ *           type: string
+ *           example: 3,7
+ *       - in: query
  *         name: vendorName
  *         schema:
  *           type: string
@@ -1488,6 +1540,7 @@ shipmentRouter.get(
  *                   shipmentType: { type: string }
  *                   governorate: { type: string }
  *                   deliveryBy: { type: integer }
+ *                   shippingCompany: { type: integer }
  *                   userId: { type: integer }
  *     responses:
  *       200:
@@ -1564,6 +1617,34 @@ shipmentRouter.put(
  *             schema:
  *               $ref: '#/components/schemas/ShipmentMessageResponse'
  */
+/**
+ * @swagger
+ * /shipments/{shipmentId}/grouped-items:
+ *   get:
+ *     security:
+ *       - bearerAuth: []
+ *     tags: [Shipments]
+ *     summary: Items of the grouped delivery a shipment belongs to
+ *     description: Every order sharing this shipment's orderNumber, each with its warehouse arrival state.
+ *     parameters:
+ *       - in: path
+ *         name: shipmentId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: List of grouped items (id, operationNumber, productName, productSku, sellerName, shipmentStatusLabel, inWarehouse, current)
+ *       404:
+ *         description: Shipment not found
+ */
+shipmentRouter.get(
+  "/:shipmentId/grouped-items",
+  requirePermission("ship_view"),
+  validateRequest({ params: shipmentIdParamsSchema }),
+  asyncHandler(shipmentController.listGroupedItems),
+);
+
 shipmentRouter.get(
   "/:shipmentId",
   requirePermission("ship_view"),

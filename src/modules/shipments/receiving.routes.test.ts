@@ -7,6 +7,7 @@ jest.mock("./receiving.service", () => ({
     refreshMetrics: jest.fn(),
     list: jest.fn(async () => ({ items: [], totalCount: 0 })),
     receivedVendors: jest.fn(async () => [{ id: 4, name: "Factory A" }]),
+    candidates: jest.fn(async (filters) => ({ items: [], totalCount: 0, filters })),
     receive: jest.fn(async (input, userId) => ({
       orderIds: input.orderIds,
       receiverName: `user-${userId}`,
@@ -95,4 +96,18 @@ test("received list rejects an unknown voucher state", async () => {
   const app = appFor({ ship_receipts_view: true });
   expect((await request(app).get("/receipts?documentState=maybe")).status).toBe(400);
   expect((await request(app).get("/receipts?documentState=issued&dateFrom=2026-09-01")).status).toBe(200);
+});
+test("candidates accept separate sku/operation/order/factory filters and keep legacy search", async () => {
+  expect((await request(appFor({})).get("/receipts/candidates")).status).toBe(403);
+  const app = appFor({ ship_receipts_view: true });
+  const res = await request(app).get(
+    "/receipts/candidates?sku=AB-1&operationNumber=OP7&orderNumber=1001&vendorId=4&search=old"
+  );
+  expect(res.status).toBe(200);
+  expect(res.body.data.filters).toMatchObject({
+    page: 1, sku: "AB-1", operationNumber: "OP7", orderNumber: "1001", vendorId: 4, search: "old",
+  });
+  expect((await request(app).get("/receipts/candidates")).body.data.filters.search).toBe("");
+  expect((await request(app).get("/receipts/candidates?vendorId=abc")).status).toBe(400);
+  expect((await request(app).get(`/receipts/candidates?sku=${"x".repeat(151)}`)).status).toBe(400);
 });

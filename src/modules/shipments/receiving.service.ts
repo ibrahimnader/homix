@@ -7,6 +7,7 @@ import { ORDER_STATUS, SHIPMENTS_STATUS, DELIVERY_BY } from "../../../config/con
 import {
   receivingCreateSchema,
   receivingListSchema,
+  receivingCandidatesSchema,
   receivingReceivedFilterSchema,
   receivingExportSchema,
   receivingUpdateSchema,
@@ -58,6 +59,10 @@ const receivedColumns = `${candidateColumns}, o."shippingReceiveDate" AS "receiv
   o."warehouseReceiptNumber" AS "documentNumber", o."warehouseReceiptIssuedAt" AS "documentIssuedAt",
   concat_ws(' ', u."firstName", u."lastName") AS "receiverName"`;
 const receivedFrom = `${itemFrom} LEFT JOIN users u ON u.id = o."warehouseReceivedBy"`;
+
+/** Escapes LIKE wildcards so user input like "50%" or "A_1" matches literally (ILIKE default escape is backslash). */
+const escapeLike = (value: string) => value.replace(/[\\%_]/g, "\\$&");
+const contains = (value: string) => `%${escapeLike(value)}%`;
 
 const withManufactureDays = (row: ReceivedItem): ReceivedItem => ({
   ...row,
@@ -112,24 +117,39 @@ export class ReceivingService {
     });
   }
 
-  /** Factories that have at least one received item — ids match `p."vendorId"` in receivedWhere. */
+  /** Every non-deleted factory with a name, for the receipts filter dropdowns (vendorId matches `p."vendorId"`). */
   async receivedVendors() {
     return select<{ id: number; name: string }>(
-      `SELECT DISTINCT v.id, v.name ${itemFrom}
-      WHERE o."deletedAt" IS NULL AND o."warehouseReceivedBy" IS NOT NULL
-        AND v.id IS NOT NULL AND v."deletedAt" IS NULL AND COALESCE(v.name, '') <> ''
+      `SELECT v.id, v.name FROM vendors v
+      WHERE v."deletedAt" IS NULL AND COALESCE(v.name, '') <> ''
       ORDER BY v.name, v.id`,
       {}
     );
   }
 
-  async candidates(filters: z.infer<typeof receivingListSchema>) {
-    const replacements = {
-      search: `%${filters.search}%`,
+  async candidates(filters: z.infer<typeof receivingCandidatesSchema>) {
+    const replacements: Record<string, unknown> = {
+      search: contains(filters.search ?? ""),
       offset: (filters.page - 1) * 20,
     };
-    const where = `${candidateWhere} AND (o.code ILIKE :search OR o."orderNumber" ILIKE :search
-      OR l.sku ILIKE :search OR l.title ILIKE :search OR v.name ILIKE :search)`;
+    const clauses = [
+      candidateWhere,
+      `(o.code ILIKE :search OR o."orderNumber" ILIKE :search
+      OR l.sku ILIKE :search OR l.title ILIKE :search OR v.name ILIKE :search)`,
+    ];
+    const like = (value: string | undefined, key: string, column: string) => {
+      if (!value) return;
+      replacements[key] = contains(value);
+      clauses.push(`${column} ILIKE :${key}`);
+    };
+    like(filters.sku, "sku", "l.sku");
+    like(filters.operationNumber, "operationNumber", "o.code");
+    like(filters.orderNumber, "orderNumber", `o."orderNumber"`);
+    if (filters.vendorId) {
+      replacements.vendorId = filters.vendorId;
+      clauses.push(`p."vendorId" = :vendorId`);
+    }
+    const where = clauses.join(" AND ");
     const items = await select<ReceivedItem>(
       `SELECT ${candidateColumns} ${itemFrom} WHERE ${where}
       ORDER BY o.id LIMIT 20 OFFSET :offset`,
@@ -146,7 +166,7 @@ export class ReceivingService {
     filters: Omit<z.infer<typeof receivingReceivedFilterSchema>, "page">
   ) {
     const replacements: Record<string, unknown> = {
-      search: `%${filters.search}%`,
+      search: contains(filters.search ?? ""),
     };
     const clauses = [
       `o."deletedAt" IS NULL AND o."warehouseReceivedBy" IS NOT NULL`,
@@ -155,7 +175,7 @@ export class ReceivingService {
     ];
     const like = (value: string | undefined, key: string, column: string) => {
       if (!value) return;
-      replacements[key] = `%${value}%`;
+      replacements[key] = contains(value);
       clauses.push(`${column} ILIKE :${key}`);
     };
     like(filters.sku, "sku", "l.sku");

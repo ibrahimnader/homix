@@ -40,13 +40,21 @@ export const receivingListSchema = z.object({
     .optional(),
 });
 const optionalText = z.string().trim().max(150).optional();
+const optionalVendorId = z.coerce.number().int().positive().optional();
+/** Not-yet-received candidates: the combined `search` plus one dedicated filter per field. */
+export const receivingCandidatesSchema = receivingListSchema.extend({
+  sku: optionalText,
+  operationNumber: optionalText,
+  orderNumber: optionalText,
+  vendorId: optionalVendorId,
+});
 // Filters for the "received" list and its export. Each is applied server-side
 // so results stay correct across pages.
 export const receivingReceivedFilterSchema = receivingListSchema.extend({
   sku: optionalText,
   operationNumber: optionalText,
   orderNumber: optionalText,
-  vendorId: z.coerce.number().int().positive().optional(),
+  vendorId: optionalVendorId,
   documentNumber: optionalText,
   /** issued = a receipt voucher was printed for the item; none = not printed yet. */
   documentState: z.enum(["issued", "none"]).optional(),

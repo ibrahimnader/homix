@@ -286,14 +286,49 @@ describe("updateReceipt", () => {
 });
 
 describe("receivedVendors", () => {
-  it("selects distinct non-deleted vendors of received items, matching the p.vendorId filter", async () => {
+  it("lists every non-deleted named vendor ordered by name, not only vendors with received items", async () => {
     db.mockResolvedValue([{ id: 4, name: "Factory A" }]);
     const rows = await new ReceivingService().receivedVendors();
     expect(rows).toEqual([{ id: 4, name: "Factory A" }]);
     const sql = db.mock.calls[0][0];
-    expect(sql).toContain("SELECT DISTINCT v.id, v.name");
-    expect(sql).toContain(`o."warehouseReceivedBy" IS NOT NULL`);
-    expect(sql).toContain("LEFT JOIN vendors v ON v.id = p.\"vendorId\"");
+    expect(sql).toContain("FROM vendors v");
     expect(sql).toContain(`v."deletedAt" IS NULL`);
+    expect(sql).toContain("ORDER BY v.name");
+    expect(sql).not.toContain("warehouseReceivedBy");
+    expect(sql).not.toContain("orders");
+  });
+});
+
+describe("candidate filters", () => {
+  const countOrRows = async (sql: string) => (sql.includes("COUNT(*)") ? [{ total: 0 }] : []);
+  it("applies sku, operation, order and factory filters in SQL for items and count", async () => {
+    db.mockImplementation(countOrRows);
+    await new ReceivingService().candidates({
+      page: 2, search: "", sku: "SK1", operationNumber: "OP9", orderNumber: "16", vendorId: 4,
+    } as never);
+    expect(db.mock.calls).toHaveLength(2);
+    for (const [sql, options] of db.mock.calls) {
+      expect(sql).toContain("l.sku ILIKE :sku");
+      expect(sql).toContain("o.code ILIKE :operationNumber");
+      expect(sql).toContain(`o."orderNumber" ILIKE :orderNumber`);
+      expect(sql).toContain(`p."vendorId" = :vendorId`);
+      expect(sql).toContain(`o."warehouseReceivedBy" IS NULL`);
+      expect(options.replacements).toMatchObject({ sku: "%SK1%", operationNumber: "%OP9%", orderNumber: "%16%", vendorId: 4 });
+    }
+    expect(db.mock.calls[0][1].replacements.offset).toBe(20);
+  });
+  it("omits unset filters but keeps the legacy combined search working", async () => {
+    db.mockImplementation(countOrRows);
+    await new ReceivingService().candidates({ page: 1, search: "abc" } as never);
+    const [sql, options] = db.mock.calls[0];
+    expect(sql).not.toContain(":sku");
+    expect(sql).not.toContain(":vendorId");
+    expect(sql).toContain("o.code ILIKE :search");
+    expect(options.replacements.search).toBe("%abc%");
+  });
+  it("escapes LIKE wildcards so user input matches literally", async () => {
+    db.mockImplementation(countOrRows);
+    await new ReceivingService().candidates({ page: 1, search: "", sku: "50%_a\\b" } as never);
+    expect(db.mock.calls[0][1].replacements.sku).toBe("%50\\%\\_a\\\\b%");
   });
 });

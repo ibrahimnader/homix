@@ -6,6 +6,7 @@ import {
   receivingCreateSchema,
   receivingDocumentSchema,
   receivingListSchema,
+  receivingCandidatesSchema,
   receivingReceivedFilterSchema,
   receivingExportSchema,
   receivingDocumentParams,
@@ -17,9 +18,32 @@ const service = new ReceivingService();
 export const receivingRouter = Router();
 // Parent shipment router already enforces authentication and excludes vendors.
 receivingRouter.use(requirePermission("ship_receipts_view"));
+/**
+ * @swagger
+ * /shipments/receipts/candidates:
+ *   get:
+ *     summary: Items awaiting warehouse receipt (not yet received)
+ *     tags: [Shipments]
+ *     parameters:
+ *       - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+ *       - { in: query, name: search, schema: { type: string, maxLength: 150 }, description: Legacy combined search (operation, order, SKU, title, factory) }
+ *       - { in: query, name: sku, schema: { type: string, maxLength: 150 }, description: Case-insensitive partial match on SKU }
+ *       - { in: query, name: operationNumber, schema: { type: string, maxLength: 150 }, description: Case-insensitive partial match on operation number }
+ *       - { in: query, name: orderNumber, schema: { type: string, maxLength: 150 }, description: Case-insensitive partial match on order number }
+ *       - { in: query, name: vendorId, schema: { type: integer }, description: Exact factory id }
+ *     responses:
+ *       200: { description: Page of candidate items }
+ *       400: { description: Invalid filter }
+ * /shipments/receipts/vendors:
+ *   get:
+ *     summary: All factories (id, name) for receipt filters; needs only ship_receipts_view
+ *     tags: [Shipments]
+ *     responses:
+ *       200: { description: List of { id, name } ordered by name }
+ */
 receivingRouter.get(
   "/candidates",
-  validateRequest({ query: receivingListSchema }),
+  validateRequest({ query: receivingCandidatesSchema }),
   asyncHandler(async (req, res) => {
     res.json({ status: true, data: await service.candidates(req.query as never) });
   })

@@ -12,6 +12,9 @@
  * was. Take a backup first anyway.
  *
  * What it contains (source migration in brackets):
+ *   0. orders.scheduledDeliveryDate, orders.accountsHiddenAt  [add-scheduled-delivery-date,
+ *                                                         add-accounts-hidden-at — no other deploy
+ *                                                         script creates them]
  *   1. orders.confirmationStatus                         [add-order-confirmation-status]
  *   2. Warehouse receiving: orders.warehouse* columns,
  *      receipt-number sequence, receipt movements table  [add-warehouse-receiving-columns,
@@ -87,6 +90,13 @@ const assertPrerequisites = async (transaction: Transaction): Promise<void> => {
 type Step = { name: string; statements: string[] };
 
 const STEPS: Step[] = [
+  {
+    name: "orders.scheduledDeliveryDate and orders.accountsHiddenAt",
+    statements: [
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS "scheduledDeliveryDate" TIMESTAMPTZ`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS "accountsHiddenAt" TIMESTAMPTZ`,
+    ],
+  },
   {
     name: "orders.confirmationStatus",
     statements: [
@@ -293,6 +303,10 @@ const STEPS: Step[] = [
 const applySchema = async (): Promise<void> => {
   try {
     await sequelize.transaction(async (transaction) => {
+      // ALTER TABLE orders needs a lock that waits behind running queries and blocks new ones
+      // while it waits. Fail fast instead of freezing the app: run this in a quiet window.
+      await sequelize.query("SET LOCAL lock_timeout = '15s'", { transaction });
+
       await assertPrerequisites(transaction);
 
       for (const step of STEPS) {

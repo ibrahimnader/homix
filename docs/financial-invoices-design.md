@@ -1,7 +1,10 @@
 # Financial invoices (vendor settlement invoices) — design
 
-Status: implemented on branch `dev2` (uncommitted). Module: `src/modules/financial-invoices/`.
-Migration: `migrations/add-financial-invoices.js` (written, NOT run against any DB).
+Status: implemented on branch `dev2`. Module: `src/modules/financial-invoices/`.
+Migration: `migrations/add-financial-invoices.js` is step 5 of `npm run db:deploy-dev2`
+(`src/scripts/run-dev2-deploy-migration.ts`) — run it by deploying dev2 to a database, not on its own.
+Backfill: `npm run db:backfill-financial-invoices -- --from=YYYY-MM-DD` (preview by default; add
+`--actor=<userId> --apply` to issue draft invoices for already-closed cycles; safe to re-run).
 
 ## Goal
 

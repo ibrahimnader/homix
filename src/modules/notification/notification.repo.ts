@@ -14,6 +14,7 @@ import type {
 } from "./notification.types";
 
 type LegacyNotificationModel = {
+  bulkCreate: (payloads: CreateNotificationInput[]) => Promise<unknown>;
   create: (payload: CreateNotificationInput) => Promise<{ toJSON: () => NotificationAttributes }>;
   destroy: (options: { where: Readonly<Record<string, unknown>> }) => Promise<number>;
   findAll: (options: {
@@ -29,7 +30,13 @@ type LegacyNotificationModel = {
   ) => Promise<[number]>;
 };
 
-const notificationModel = require("../../../app/modules/notification/notification.model") as LegacyNotificationModel;
+/* Loaded on first use, not at import time: the notification publisher is imported by the shipment/ticket
+   services and routes, and importing them must not define the Sequelize model as a side effect. */
+let cachedNotificationModel: LegacyNotificationModel | undefined;
+const getNotificationModel = (): LegacyNotificationModel => {
+  cachedNotificationModel ??= require("../../../app/modules/notification/notification.model") as LegacyNotificationModel;
+  return cachedNotificationModel;
+};
 
 const toNotification = (
   notification: { toJSON: () => NotificationAttributes } | NotificationAttributes,
@@ -57,14 +64,21 @@ export class NotificationRepository
   public async create<TResult = NotificationAttributes>(
     payload: CreateNotificationInput,
   ): Promise<TResult> {
-    const createdNotification = await notificationModel.create(payload);
+    const createdNotification = await getNotificationModel().create(payload);
     return toNotification(createdNotification) as TResult;
+  }
+
+  /** One INSERT for many rows (same mechanism the legacy order notifications use). */
+  public async createMany(payloads: CreateNotificationInput[]): Promise<void> {
+    if (payloads.length > 0) {
+      await getNotificationModel().bulkCreate(payloads);
+    }
   }
 
   public async findAll<TResult = NotificationAttributes>(
     filters: Readonly<Record<string, unknown>> = {},
   ): Promise<TResult[]> {
-    const notifications = await notificationModel.findAll({
+    const notifications = await getNotificationModel().findAll({
       order: [["createdAt", "DESC"]],
       where: filters,
     });
@@ -74,7 +88,7 @@ export class NotificationRepository
 
   /** Unread notifications of one user, bucketed per category. */
   public async countUnreadByCategory(userId: number): Promise<NotificationCounts> {
-    const rows = (await notificationModel.findAll({
+    const rows = (await getNotificationModel().findAll({
       attributes: ["entityType", [fn("COUNT", col("id")), "count"]],
       group: ["entityType"],
       raw: true,
@@ -95,14 +109,14 @@ export class NotificationRepository
     filters: Readonly<Record<string, unknown>>,
     payload: Partial<CreateNotificationInput> & { readAt?: Date | null },
   ): Promise<TResult> {
-    const [affectedRows] = await notificationModel.update(payload, { where: filters });
+    const [affectedRows] = await getNotificationModel().update(payload, { where: filters });
     return affectedRows as TResult;
   }
 
   public async delete<TResult = number>(
     filters: Readonly<Record<string, unknown>>,
   ): Promise<TResult> {
-    const deletedRows = await notificationModel.destroy({ where: filters });
+    const deletedRows = await getNotificationModel().destroy({ where: filters });
     return deletedRows as TResult;
   }
 }

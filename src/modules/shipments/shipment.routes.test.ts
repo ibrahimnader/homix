@@ -86,6 +86,7 @@ const mockListManagedOptions = jest.fn(async (group: string) => group === "expen
 const mockReplaceManagedOptions = jest.fn(async (_group: string, options: Array<{ id?: number; label: string }>) =>
   options.map((option, index) => ({ id: option.id ?? index + 1, label: option.label })));
 
+jest.mock("./shipment.notifications");
 jest.mock("../../../app/middlewares/protectApi", () => {
   return (req: express.Request, _res: express.Response, next: express.NextFunction) => {
     req.user = mockAuthenticatedUser as never;

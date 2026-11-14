@@ -7,6 +7,8 @@ import { ConflictError, NotFoundError, ValidationError } from "../../shared/erro
 import { SHIPMENT_STATUS, SHIPMENT_STATUS_LABELS } from "./shipment.constants";
 import { toDateRangeBoundary } from "./shipment.helpers";
 import { buildAutoSyncLogRows, deriveStatusPatch } from "../orders/order-status-sync";
+import { notifyShipmentStatusChanges } from "./shipment.notifications";
+import type { ShipmentStatusChange } from "./shipment.notifications";
 import {
   keepsSourcePendingForReason, REASSIGNMENT_CANDIDATE_REASON_LABELS, reassignmentCandidateReason, sameReassignmentItem,
 } from "./reassignment.logic";
@@ -166,6 +168,7 @@ reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ b
   const input = request.body as z.infer<typeof mutation>;
   const keepOldPending = keepsSourcePendingForReason(input.reason);
   const createdBy = Number((request as any).user?.id) || null;
+  const statusChanges: ShipmentStatusChange[] = [];
   const record = await sequelize.transaction(async (transaction) => {
     let targetOrderId = input.targetOrderId;
     if (input.targetOperationNumber) {
@@ -214,6 +217,7 @@ reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ b
       await sequelize.query(`UPDATE orders SET status = :status, "shipmentStatus" = :shipmentStatus, "confirmationStatus" = :confirmationStatus, "updatedAt" = NOW() WHERE id = :id`, {
         replacements: { id: row.id, status, shipmentStatus, confirmationStatus }, transaction,
       });
+      statusChanges.push({ fromStatus: row.shipmentStatus, orderId: row.id, toStatus: shipmentStatus });
       if (derived.length > 0) {
         // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
         const Log = require("../../../app/modules/logs/log.model");
@@ -228,5 +232,10 @@ reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ b
     `, { replacements: { sourceOrderId: input.sourceOrderId, targetOrderId, reason: input.reason, notes: input.notes, keepOldPending, createdBy }, transaction, type: QueryTypes.SELECT });
     return inserted;
   });
+  /* After the commit. The two orders end in different statuses, so they are notified as two separate changes
+     (each text names its own shipment and status) - not aggregated. */
+  for (const change of statusChanges) {
+    await notifyShipmentStatusChanges([change], createdBy);
+  }
   response.status(201).json({ status: true, data: record });
 }));

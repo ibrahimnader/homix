@@ -2,6 +2,13 @@ import { NotFoundError, UnauthorizedError } from "../../shared/errors";
 import { shipmentLegacyGateway } from "./shipment.legacy-gateway";
 import { ShipmentService } from "./shipment.service";
 
+const mockStatusChanges = jest.fn();
+const mockScheduled = jest.fn();
+jest.mock("./shipment.notifications", () => ({
+  notifyShipmentScheduled: (...args: unknown[]) => mockScheduled(...args),
+  notifyShipmentStatusChanges: (...args: unknown[]) => mockStatusChanges(...args),
+}));
+
 jest.mock("../dashboard/dashboard-aggregate.service", () => ({
   DashboardAggregateService: jest.fn().mockImplementation(() => ({
     refreshRange: jest.fn(),
@@ -206,6 +213,92 @@ describe("ShipmentService", () => {
     ).resolves.toEqual({
       data: { amount: 150, id: 9 },
       ok: true,
+    });
+  });
+
+  describe("notifications", () => {
+    const entity = (shipmentStatus: number, extra: Record<string, unknown> = {}) => ({
+      toJSON: () => ({ shipmentStatus, ...extra }),
+    });
+
+    it("notifies once, with the actor, when a single update changes the shipment status", async () => {
+      const repository = {
+        findShipmentEntity: jest.fn().mockResolvedValue(entity(3)),
+        updateShipment: jest.fn().mockResolvedValue(entity(4)),
+      } as never;
+
+      await new ShipmentService(repository).updateShipment(9802, { shipmentStatus: 4 }, { id: 7 });
+
+      expect(mockStatusChanges).toHaveBeenCalledTimes(1);
+      expect(mockStatusChanges).toHaveBeenCalledWith([{ fromStatus: 3, orderId: 9802, toStatus: 4 }], 7);
+      expect(mockScheduled).not.toHaveBeenCalled();
+    });
+
+    it("does not notify when the shipment status did not change", async () => {
+      const repository = {
+        findShipmentEntity: jest.fn().mockResolvedValue(entity(3)),
+        updateShipment: jest.fn().mockResolvedValue(entity(3)),
+      } as never;
+
+      await new ShipmentService(repository).updateShipment(9802, { governorate: "x" }, { id: 7 });
+
+      expect(mockStatusChanges).not.toHaveBeenCalled();
+    });
+
+    it("notifies about a new scheduled date when the status stays the same", async () => {
+      const repository = {
+        findShipmentEntity: jest.fn().mockResolvedValue(entity(11, { scheduledDeliveryDate: "2026-12-01" })),
+        updateShipment: jest.fn().mockResolvedValue(entity(11, { scheduledDeliveryDate: "2026-12-05" })),
+      } as never;
+
+      await new ShipmentService(repository).updateShipment(9802, { scheduledDeliveryDate: "2026-12-05" }, { id: 7 });
+
+      expect(mockStatusChanges).not.toHaveBeenCalled();
+      expect(mockScheduled).toHaveBeenCalledWith(9802, "2026-12-05", 7);
+    });
+
+    it("sends ONE aggregated call for a bulk update, only for rows whose status really changed", async () => {
+      const after: Record<number, number> = { 1: 4, 2: 4, 3: 4 };
+      const before: Record<number, number> = { 1: 1, 2: 4, 3: 2 };
+      const calls: Record<number, number> = {};
+      const repository = {
+        bulkUpdateShipments: jest.fn().mockResolvedValue(3),
+        findShipmentEntity: jest.fn().mockImplementation(async (id: number) => {
+          calls[id] = (calls[id] ?? 0) + 1;
+          return entity(calls[id] === 1 ? before[id]! : after[id]!);
+        }),
+      } as never;
+
+      await new ShipmentService(repository).bulkUpdateShipments([1, 2, 3], { shipmentStatus: 4 }, { id: 7 });
+
+      expect(mockStatusChanges).toHaveBeenCalledTimes(1);
+      expect(mockStatusChanges).toHaveBeenCalledWith([
+        { fromStatus: 1, orderId: 1, toStatus: 4 },
+        { fromStatus: 2, orderId: 3, toStatus: 4 },
+      ], 7);
+    });
+
+    it("does not notify when the update itself fails", async () => {
+      const repository = {
+        findShipmentEntity: jest.fn().mockResolvedValue(entity(3)),
+        updateShipment: jest.fn().mockRejectedValue(new Error("boom")),
+      } as never;
+
+      await expect(new ShipmentService(repository).updateShipment(9802, { shipmentStatus: 4 }, { id: 7 })).rejects.toThrow("boom");
+      expect(mockStatusChanges).not.toHaveBeenCalled();
+    });
+
+    it("notifies after a vendor return and a customer return are created", async () => {
+      const repository = {
+        createReturnRecord: jest.fn().mockResolvedValue({ id: 9802, orderId: 9802, status: 2 }),
+      } as never;
+      const service = new ShipmentService(repository);
+
+      await service.createVendorReturn({ orderId: 9802, reason: "x" }, { id: 7 });
+      await service.createCustomerReturn({ orderId: 9803, reason: "x" }, { id: 7 });
+
+      expect(mockStatusChanges).toHaveBeenNthCalledWith(1, [{ orderId: 9802, toStatus: 8 }], 7);
+      expect(mockStatusChanges).toHaveBeenNthCalledWith(2, [{ orderId: 9803, toStatus: 7 }], 7);
     });
   });
 });

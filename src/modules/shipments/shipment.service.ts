@@ -31,10 +31,12 @@ import type {
   ShipmentSummaryResponse,
 } from "./shipment.types";
 import type { ShipmentMutationPayload, ShipmentRequestUser } from "./shipment.internal-types";
-import { RETURN_TO_VENDOR_STATUS, SHIPMENT_RETURN_TYPE } from "./shipment.constants";
+import { RETURN_TO_VENDOR_STATUS, SHIPMENT_RETURN_TYPE, SHIPMENT_STATUS } from "./shipment.constants";
 import { DELIVERY_BY } from "../../../config/constants";
 import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
 import type { DashboardMetricSnapshot } from "../dashboard/dashboard.types";
+import { notifyShipmentScheduled, notifyShipmentStatusChanges } from "./shipment.notifications";
+import type { ShipmentStatusChange } from "./shipment.notifications";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
 const ExcelJS = require("exceljs");
@@ -124,11 +126,15 @@ export class ShipmentService {
   }
 
   public async createVendorReturn(payload: ReturnMutationInput, user: ShipmentRequestUser): Promise<Result<ReturnListResponse["items"][number]>> {
-    return success(await this.shipmentRepository.createReturnRecord(SHIPMENT_RETURN_TYPE.TO_VENDOR, payload, user.id));
+    const created = await this.shipmentRepository.createReturnRecord(SHIPMENT_RETURN_TYPE.TO_VENDOR, payload, user.id);
+    await notifyShipmentStatusChanges([{ orderId: payload.orderId, toStatus: SHIPMENT_STATUS.RETURNED_TO_VENDOR }], user.id);
+    return success(created);
   }
 
   public async createCustomerReturn(payload: ReturnMutationInput, user: ShipmentRequestUser): Promise<Result<ReturnListResponse["items"][number]>> {
-    return success(await this.shipmentRepository.createReturnRecord(SHIPMENT_RETURN_TYPE.FROM_CUSTOMER, payload, user.id));
+    const created = await this.shipmentRepository.createReturnRecord(SHIPMENT_RETURN_TYPE.FROM_CUSTOMER, payload, user.id);
+    await notifyShipmentStatusChanges([{ orderId: payload.orderId, toStatus: SHIPMENT_STATUS.RETURNED_FROM_CUSTOMER }], user.id);
+    return success(created);
   }
 
   public async updateVendorReturn(
@@ -458,12 +464,30 @@ export class ShipmentService {
       existingShipment ? toPlain(existingShipment) : null,
       SHIPMENT_FINANCIAL_FIELDS,
     );
+    const before = existingShipment ? { ...toPlain(existingShipment) } : null;
     const shipment = await this.shipmentRepository.updateShipment(shipmentId, payload, user.id);
     if (!shipment) {
       throw new NotFoundError("Shipment not found");
     }
 
     await this.refreshAggregateForShipments([existingShipment, shipment, payload]);
+    /* Only after the update succeeded; notification failures are swallowed inside. A derived change of the
+       status-linking sync is part of this one shipment change, so it never produces a second notification. */
+    if (before) {
+      const after = toPlain(shipment);
+      const statusChanged = Number(after.shipmentStatus ?? 0) > 0
+        && Number(before.shipmentStatus ?? 0) !== Number(after.shipmentStatus);
+      if (statusChanged) {
+        await notifyShipmentStatusChanges([{
+          fromStatus: Number(before.shipmentStatus ?? 0) || null,
+          orderId: shipmentId,
+          toStatus: Number(after.shipmentStatus),
+        }], user.id);
+      } else if (after.scheduledDeliveryDate
+        && new Date(before.scheduledDeliveryDate as string).getTime() !== new Date(after.scheduledDeliveryDate as string).getTime()) {
+        await notifyShipmentScheduled(shipmentId, after.scheduledDeliveryDate, user.id);
+      }
+    }
     return success(shipment);
   }
 
@@ -476,8 +500,27 @@ export class ShipmentService {
     const existingShipments = typeof this.shipmentRepository.findShipmentEntity === "function"
       ? await Promise.all(shipmentIds.map((shipmentId) => this.shipmentRepository.findShipmentEntity(shipmentId)))
       : [];
+    const beforeById = new Map<number, number | null>();
+    existingShipments.forEach((existing, index) => {
+      if (existing) {
+        beforeById.set(shipmentIds[index]!, Number(toPlain(existing).shipmentStatus ?? 0) || null);
+      }
+    });
     const updatedCount = await this.shipmentRepository.bulkUpdateShipments(shipmentIds, payload, user.id);
     await this.refreshAggregateForShipments([...existingShipments, payload]);
+    /* ONE aggregated notification per recipient (not one per row). The rows are re-read once, after the bulk
+       write, so derived status changes are included and rows that did not really change are dropped. */
+    if (beforeById.size > 0 && typeof this.shipmentRepository.findShipmentEntity === "function") {
+      const changes: ShipmentStatusChange[] = [];
+      for (const [shipmentId, fromStatus] of beforeById) {
+        const after = await this.shipmentRepository.findShipmentEntity(shipmentId);
+        const toStatus = after ? Number(toPlain(after).shipmentStatus ?? 0) : 0;
+        if (toStatus > 0 && toStatus !== (fromStatus ?? 0)) {
+          changes.push({ fromStatus, orderId: shipmentId, toStatus });
+        }
+      }
+      await notifyShipmentStatusChanges(changes, user.id);
+    }
     return success({ message: "Shipments updated successfully", updatedCount });
   }
 

@@ -1,11 +1,13 @@
 import moment from "moment-timezone";
-import { ReceivingService } from "./receiving.service";
+import { ReceivingService, groupOrdersByVendor } from "./receiving.service";
 import {
   receivingCreateSchema,
   receivingDocumentSchema,
 } from "./receiving.schemas";
 import { sequelize } from "../../infrastructure/database";
+import { notifyShipmentStatusChanges } from "./shipment.notifications";
 
+jest.mock("./shipment.notifications");
 jest.mock("../../infrastructure/database", () => ({
   sequelize: { query: jest.fn(), transaction: jest.fn() },
 }));
@@ -112,6 +114,19 @@ describe("warehouse receiving", () => {
       if (options?.transaction) expect(options.transaction).toBe(transaction);
     }
   });
+  it("sends one aggregated notification call for the receipt, after the transaction, attributed to the receiver", async () => {
+    await new ReceivingService().receive(input, 7);
+    expect(notifyShipmentStatusChanges).toHaveBeenCalledTimes(1);
+    expect(notifyShipmentStatusChanges).toHaveBeenCalledWith(
+      [{ orderId: 10, toStatus: 2 }, { orderId: 11, toStatus: 2 }],
+      7,
+    );
+  });
+  it("does not notify when the receipt is rejected", async () => {
+    eligible = [10];
+    await expect(new ReceivingService().receive(input, 7)).rejects.toBeDefined();
+    expect(notifyShipmentStatusChanges).not.toHaveBeenCalled();
+  });
   it("rejects a stale selection without updating any order", async () => {
     eligible = [10];
     await expect(new ReceivingService().receive(input, 7)).rejects.toMatchObject({
@@ -147,6 +162,8 @@ describe("warehouse receiving", () => {
       return [];
     });
     await expect(new ReceivingService().cancel(10, 7)).resolves.toEqual({ orderId: 10 });
+    /* undoing the receipt puts the shipment back to its previous status (1) */
+    expect(notifyShipmentStatusChanges).toHaveBeenCalledWith([{ fromStatus: 2, orderId: 10, toStatus: 1 }], 7);
     expect(db).toHaveBeenCalledWith(expect.stringContaining('SET quantity = quantity - :quantity'), expect.objectContaining({ replacements: { id: 55, quantity: 2 }, transaction }));
     expect(db).toHaveBeenCalledWith(expect.stringContaining('UPDATE orders SET status = :status'), expect.objectContaining({ replacements: expect.objectContaining({ orderId: 10, status: 2, shipmentStatus: 1, deliveryBy: 2 }), transaction }));
   });
@@ -154,6 +171,7 @@ describe("warehouse receiving", () => {
     db.mockImplementation(async (sql: string) => sql.includes('SELECT id, status, "shipmentStatus", "warehouseReceivedBy" FROM orders')
       ? [{ id: 10, status: 8, shipmentStatus: 2, warehouseReceivedBy: 7 }] : []);
     await expect(new ReceivingService().cancel(10, 7)).rejects.toMatchObject({ statusCode: 409 });
+    expect(notifyShipmentStatusChanges).not.toHaveBeenCalled();
   });
 });
 
@@ -170,6 +188,76 @@ describe("printing receipt documents", () => {
     await expect(new ReceivingService().printDocument([10, 11])).rejects.toMatchObject({
       statusCode: 404,
     });
+  });
+});
+
+describe("one voucher per factory", () => {
+  const vendors: Record<number, number | null> = { 1: 5, 2: 5, 3: 9, 4: null, 5: null };
+  let seq: number;
+  let stamped: { number: string; ids: number[] }[];
+  const mockDb = () => {
+    seq = 100;
+    stamped = [];
+    db.mockImplementation(async (sql: string, options: any) => {
+      if (sql.includes('"warehouseReceivedBy" IS NOT NULL')) {
+        return (options.replacements.ids as number[]).filter((id) => id in vendors).map((id) => ({ orderId: id, vendorId: vendors[id] }));
+      }
+      if (sql.includes("nextval(")) return [{ seq: String(++seq) }];
+      if (sql.includes('UPDATE orders SET "warehouseReceiptNumber"')) {
+        stamped.push({ number: options.replacements.number, ids: options.replacements.ids });
+        return [];
+      }
+      if (sql.includes('o."warehouseReceiptNumber" = :number')) {
+        const group = stamped.find((entry) => entry.number === options.replacements.number)!;
+        return group.ids.map((orderId) => ({
+          orderId, vendorName: vendors[orderId] === 5 ? "مصنع أ" : vendors[orderId] === 9 ? "مصنع ب" : "",
+          documentNumber: group.number, documentIssuedAt: "2026-10-05T00:00:00.000Z",
+        }));
+      }
+      return [];
+    });
+  };
+  beforeEach(mockDb);
+  const year = () => moment().tz("Africa/Cairo").year();
+
+  it("groups the selection by vendor, one unique number per factory, stamping only its own orders", async () => {
+    const result: any = await new ReceivingService().printDocument([3, 1, 2]);
+    expect(result.documents).toHaveLength(2);
+    expect(result.documents.map((d: any) => d.number)).toEqual([`RCV-${year()}-0101`, `RCV-${year()}-0102`]);
+    expect(new Set(result.documents.map((d: any) => d.number)).size).toBe(2);
+    expect(stamped).toEqual([
+      { number: `RCV-${year()}-0101`, ids: [1, 2] },
+      { number: `RCV-${year()}-0102`, ids: [3] },
+    ]);
+    expect(result.documents[0]).toMatchObject({ vendorId: 5, vendorName: "مصنع أ", itemCount: 2 });
+    expect(result.documents[1]).toMatchObject({ vendorId: 9, itemCount: 1 });
+    expect(result.number).toBeUndefined();
+    expect(db.mock.calls.every(([, options]) => options.transaction === transaction)).toBe(true);
+  });
+  it("puts items without a vendor into their own last voucher", async () => {
+    const result: any = await new ReceivingService().printDocument([4, 1, 5]);
+    expect(result.documents.map((d: any) => [d.vendorId, d.itemCount])).toEqual([[5, 1], [null, 2]]);
+    expect(stamped[1]!.ids).toEqual([4, 5]);
+  });
+  it("keeps the legacy top-level fields for a single-factory selection", async () => {
+    const result: any = await new ReceivingService().printDocument([1, 2]);
+    expect(result.number).toBe(`RCV-${year()}-0101`);
+    expect(result.items).toHaveLength(2);
+    expect(result.issuedAt).toBe("2026-10-05T00:00:00.000Z");
+    expect(result.documents).toHaveLength(1);
+  });
+  it("still rejects unreceived/unknown orders and issues no number", async () => {
+    await expect(new ReceivingService().printDocument([1, 99])).rejects.toMatchObject({ statusCode: 404 });
+    expect(stamped).toHaveLength(0);
+  });
+  it("keeps the 100-item cap on the whole request", () => {
+    expect(receivingDocumentSchema.safeParse({ orderIds: Array.from({ length: 100 }, (_, i) => i + 1) }).success).toBe(true);
+    expect(receivingDocumentSchema.safeParse({ orderIds: Array.from({ length: 101 }, (_, i) => i + 1) }).success).toBe(false);
+  });
+  it("groupOrdersByVendor orders vendors ascending with no-vendor last", () => {
+    expect(groupOrdersByVendor([
+      { orderId: 1, vendorId: null }, { orderId: 2, vendorId: 9 }, { orderId: 3, vendorId: 2 }, { orderId: 4, vendorId: 9 },
+    ])).toEqual([{ vendorId: 2, orderIds: [3] }, { vendorId: 9, orderIds: [2, 4] }, { vendorId: null, orderIds: [1] }]);
   });
 });
 

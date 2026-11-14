@@ -6,6 +6,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../../shared/erro
 import { z } from "zod";
 import { ORDER_STATUS, SHIPMENTS_STATUS, DELIVERY_BY } from "../../../config/constants";
 import { buildAutoSyncLogRows, deriveStatusPatch } from "../orders/order-status-sync";
+import { notifyShipmentStatusChanges } from "./shipment.notifications";
 import {
   receivingCreateSchema,
   receivingListSchema,
@@ -37,6 +38,17 @@ export type ReceivedItem = {
   documentNumber: string | null;
   documentIssuedAt: string | null;
 };
+
+export type ReceiptDocument = {
+  number: string;
+  issuedAt: string | null;
+  items: ReceivedItem[];
+  vendorId: number | null;
+  vendorName: string;
+  itemCount: number;
+};
+/** Legacy top-level fields are present only when the selection is a single factory. */
+export type PrintedDocuments = Partial<ReceiptDocument> & { documents: ReceiptDocument[] };
 
 const ExcelJS = require("exceljs");
 
@@ -73,6 +85,20 @@ const withManufactureDays = (row: ReceivedItem): ReceivedItem => ({
       ? moment(row.receivedDate).diff(moment(row.manufactureDate), "days")
       : null,
 });
+
+/** Splits a voucher selection into one group per factory (vendor id asc, items
+ * without a vendor last as their own group), keeping the selection order inside
+ * each group. */
+export const groupOrdersByVendor = (items: { orderId: number; vendorId: number | null }[]) => {
+  const groups = new Map<number | null, number[]>();
+  for (const { orderId, vendorId } of items) {
+    const key = vendorId ?? null;
+    groups.set(key, [...(groups.get(key) ?? []), orderId]);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => (a === null ? 1 : b === null ? -1 : a - b))
+    .map(([vendorId, orderIds]) => ({ vendorId, orderIds }));
+};
 
 export class ReceivingService {
   private async addReceiptStock(order: any, transaction: Transaction): Promise<void> {
@@ -326,6 +352,16 @@ export class ReceivingService {
   }
 
   async receive(input: z.infer<typeof receivingCreateSchema>, userId: number) {
+    const result = await this.receiveInTransaction(input, userId);
+    /* After the commit: one aggregated notification per recipient (a receipt covers many orders). */
+    await notifyShipmentStatusChanges(
+      input.orderIds.map((orderId) => ({ orderId, toStatus: SHIPMENTS_STATUS.IN_WAREHOUSE })),
+      userId,
+    );
+    return result;
+  }
+
+  private async receiveInTransaction(input: z.infer<typeof receivingCreateSchema>, userId: number) {
     return sequelize.transaction(async (transaction) => {
       await select(
         `SELECT id FROM orders WHERE id IN (:ids) ORDER BY id FOR UPDATE`,
@@ -445,6 +481,16 @@ export class ReceivingService {
   }
 
   async cancel(orderId: number, userId: number) {
+    let restoredShipmentStatus: number | null = null;
+    const result = await this.cancelInTransaction(orderId, userId, (status) => { restoredShipmentStatus = status; });
+    /* Undoing a receipt puts the shipment back to its previous status. */
+    if (restoredShipmentStatus) {
+      await notifyShipmentStatusChanges([{ fromStatus: SHIPMENTS_STATUS.IN_WAREHOUSE, orderId, toStatus: restoredShipmentStatus }], userId);
+    }
+    return result;
+  }
+
+  private async cancelInTransaction(orderId: number, userId: number, onRestored: (shipmentStatus: number | null) => void) {
     return sequelize.transaction(async (transaction) => {
       const [order] = await select<{ id: number; status: number; shipmentStatus: number; warehouseReceivedBy: number | null }>(
         'SELECT id, status, "shipmentStatus", "warehouseReceivedBy" FROM orders WHERE id = :orderId FOR UPDATE',
@@ -480,40 +526,62 @@ export class ReceivingService {
       await sequelize.query(`UPDATE warehouse_receipt_movements SET "cancelledAt" = NOW() WHERE id = :id`, { replacements: { id: movement.id }, transaction });
       const Log = require("../../../app/modules/logs/log.model");
       await Log.create({ entityId: orderId, entityType: "order", action: "cancel_receipt", field: "warehouseReceivedBy", from: String(userId), to: "", userId }, { transaction });
+      onRestored(movement.previousShipmentStatus === null ? null : Number(movement.previousShipmentStatus));
       return { orderId };
     });
   }
 
-  /** Stamps a (re)shared document number onto already-received orders — printing
-   * is a separate step from receiving, so "لسه ما اتطبعش" is a real, persisted
-   * state and not just a dialog artifact. Re-running this on orders that
-   * already had a number re-groups them under a new one. */
-  async printDocument(orderIds: number[]) {
+  /** Stamps document numbers onto already-received orders — printing is a
+   * separate step from receiving, so "لسه ما اتطبعش" is a real, persisted
+   * state and not just a dialog artifact. One voucher is issued PER FACTORY
+   * (the product's vendor); items whose product has no vendor share a
+   * "بدون مصنع" voucher. Numbers come from the same RCV sequence, all inside
+   * one transaction. Re-running on orders that already had a number re-stamps
+   * them. Single-factory selections keep the legacy top-level
+   * `number/issuedAt/items` fields; `documents` is always present. */
+  async printDocument(orderIds: number[]): Promise<PrintedDocuments> {
     return sequelize.transaction(async (transaction) => {
-      const rows = await select<{ orderId: number }>(
-        `SELECT id AS "orderId" FROM orders
-        WHERE id IN (:ids) AND "deletedAt" IS NULL AND "warehouseReceivedBy" IS NOT NULL
-        ORDER BY id FOR UPDATE`,
+      const rows = await select<{ orderId: number; vendorId: number | null }>(
+        `SELECT o.id AS "orderId", p."vendorId" AS "vendorId" FROM orders o
+        LEFT JOIN "orderLines" l ON l."orderId" = o.id AND l."deletedAt" IS NULL
+        LEFT JOIN products p ON p.id = l."productId"
+        WHERE o.id IN (:ids) AND o."deletedAt" IS NULL AND o."warehouseReceivedBy" IS NOT NULL
+        ORDER BY o.id FOR UPDATE OF o`,
         { ids: orderIds },
         transaction
       );
-      if (rows.length !== orderIds.length) {
+      const vendorByOrder = new Map<number, number | null>();
+      for (const row of rows) vendorByOrder.set(Number(row.orderId), row.vendorId == null ? null : Number(row.vendorId));
+      if (vendorByOrder.size !== orderIds.length) {
         throw new NotFoundError("بعض الطلبات المحددة لم تُستلم بعد أو غير موجودة");
       }
-      const [sequenceRow] = await select<{ seq: string }>(
-        `SELECT nextval('warehouse_receipt_number_seq') AS seq`,
-        {},
-        transaction
-      );
-      if (!sequenceRow) throw new Error("Receipt number sequence unavailable");
+      const groups = groupOrdersByVendor(orderIds.map((id) => ({ orderId: id, vendorId: vendorByOrder.get(id) ?? null })));
       const issuedAt = new Date().toISOString();
-      const number = `RCV-${moment(issuedAt).tz("Africa/Cairo").year()}-${String(sequenceRow.seq).padStart(4, "0")}`;
-      await sequelize.query(
-        `UPDATE orders SET "warehouseReceiptNumber" = :number, "warehouseReceiptIssuedAt" = :issuedAt
-        WHERE id IN (:ids)`,
-        { replacements: { number, issuedAt, ids: orderIds }, transaction }
-      );
-      return this.getDocument(number, transaction);
+      const year = moment(issuedAt).tz("Africa/Cairo").year();
+      const documents = [];
+      for (const group of groups) {
+        const [sequenceRow] = await select<{ seq: string }>(
+          `SELECT nextval('warehouse_receipt_number_seq') AS seq`,
+          {},
+          transaction
+        );
+        if (!sequenceRow) throw new Error("Receipt number sequence unavailable");
+        const number = `RCV-${year}-${String(sequenceRow.seq).padStart(4, "0")}`;
+        await sequelize.query(
+          `UPDATE orders SET "warehouseReceiptNumber" = :number, "warehouseReceiptIssuedAt" = :issuedAt
+          WHERE id IN (:ids)`,
+          { replacements: { number, issuedAt, ids: group.orderIds }, transaction }
+        );
+        const document = await this.getDocument(number, transaction);
+        documents.push({
+          ...document,
+          vendorId: group.vendorId,
+          vendorName: document.items[0]?.vendorName || "",
+          itemCount: document.items.length,
+        });
+      }
+      const [first] = documents;
+      return documents.length === 1 && first ? { ...first, documents } : { documents };
     });
   }
 }

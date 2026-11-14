@@ -60,6 +60,10 @@ const {
   deriveStatusPatch,
   buildAutoSyncLogRows,
 } = require("../../../src/modules/orders/order-status-sync");
+const {
+  notifyShipmentStatusChanges,
+  shouldNotifyShipmentStatusChange,
+} = require("../../../src/modules/shipments/shipment.notifications");
 
 const normalizeNumber = (value) => {
   const parsedValue = Number(value);
@@ -1856,8 +1860,25 @@ class OrderService {
       });
     }
 
+    const statusesBeforeUpdate = {
+      status: order.status,
+      shipmentStatus: order.shipmentStatus,
+    };
     await order.update(orderData);
     await Log.bulkCreate(logs);
+    /* Shipment notification only when the shipment status changed WITHOUT an order status change: an order
+       status change already sent the (same-audience) ORDER notification above. Failure-safe, runs after the update. */
+    const statusesAfterUpdate = {
+      status: orderData.status ?? statusesBeforeUpdate.status,
+      shipmentStatus: orderData.shipmentStatus ?? statusesBeforeUpdate.shipmentStatus,
+    };
+    if (shouldNotifyShipmentStatusChange(statusesBeforeUpdate, statusesAfterUpdate)) {
+      await notifyShipmentStatusChanges([{
+        orderId,
+        fromStatus: Number(statusesBeforeUpdate.shipmentStatus) || null,
+        toStatus: Number(statusesAfterUpdate.shipmentStatus),
+      }], user.id);
+    }
     const returnedOrder = await Order.findOne({
       where: {
         id: orderId,
@@ -1918,6 +1939,7 @@ class OrderService {
   static async BulkUpdate(body, user) {
     const { orderIds, orderData } = body;
     const logs = [];
+    const shipmentStatusChanges = [];
     const normalizedOrderIds = orderIds.map((id) => Number(id));
     let orders = [];
     Object.keys(orderData).forEach(
@@ -2115,9 +2137,25 @@ class OrderService {
         perOrderData.deliveryDate = new Date();
       }
 
+      const statusesBeforeUpdate = { status: order.status, shipmentStatus: order.shipmentStatus };
       await order.update(perOrderData);
+      /* Same dedupe rule as the single update: orders whose status changed were already covered by the ORDER
+         notification. The rest are aggregated into one shipment notification per recipient below. */
+      if (shouldNotifyShipmentStatusChange(statusesBeforeUpdate, {
+        status: perOrderData.status ?? statusesBeforeUpdate.status,
+        shipmentStatus: perOrderData.shipmentStatus ?? statusesBeforeUpdate.shipmentStatus,
+      })) {
+        shipmentStatusChanges.push({
+          orderId: order.id,
+          fromStatus: Number(statusesBeforeUpdate.shipmentStatus) || null,
+          toStatus: Number(perOrderData.shipmentStatus),
+        });
+      }
     }
     await Log.bulkCreate(logs);
+    if (shipmentStatusChanges.length > 0) {
+      await notifyShipmentStatusChanges(shipmentStatusChanges, user.id);
+    }
 
     return {
       status: true,

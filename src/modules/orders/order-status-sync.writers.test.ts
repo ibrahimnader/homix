@@ -9,6 +9,11 @@ jest.mock("../../../app/modules/order/order.model", () => ({
   findAll: (...args: unknown[]) => mockOrderFindAll(...args),
   findOne: (...args: unknown[]) => mockOrderFindByPk(...args),
 }));
+const mockNotifyShipments = jest.fn();
+jest.mock("../shipments/shipment.notifications", () => ({
+  ...jest.requireActual("../shipments/shipment.notifications"),
+  notifyShipmentStatusChanges: (...args: unknown[]) => mockNotifyShipments(...args),
+}));
 jest.mock("../shipments/inventory.movements", () => ({ applyOrderLinesToInventory: jest.fn() }));
 jest.mock("../../../app/modules/logs/log.model", () => ({ bulkCreate: (...args: unknown[]) => mockLogBulkCreate(...args) }));
 for (const path of [
@@ -38,6 +43,7 @@ beforeEach(() => {
   mockOrderFindByPk.mockReset();
   mockOrderFindAll.mockReset();
   mockLogBulkCreate.mockReset();
+  mockNotifyShipments.mockReset();
   jest.spyOn(OrderService, "sendNotification").mockResolvedValue(undefined);
 });
 
@@ -113,5 +119,58 @@ describe("OrderService.BulkUpdate status sync", () => {
     mockOrderFindAll.mockResolvedValue([explicit]);
     await OrderService.BulkUpdate({ orderIds: [3], orderData: { confirmationStatus: 7, status: 3 } }, user);
     expect(explicit.update).toHaveBeenCalledWith(expect.objectContaining({ status: 3, shipmentStatus: 13 }));
+  });
+});
+
+describe("shipment notifications from the legacy order writers (dedupe against the order notification)", () => {
+  it("single edit: a shipment-status-only change sends one shipment notification, attributed to the user", async () => {
+    const order = makeOrder(1, { status: 2, shipmentStatus: 1, confirmationStatus: 1 });
+    mockOrderFindByPk.mockResolvedValue(order);
+
+    await OrderService.updateOrder(1, { shipmentStatus: 3 }, user);
+
+    expect(OrderService.sendNotification).not.toHaveBeenCalled();
+    expect(mockNotifyShipments).toHaveBeenCalledTimes(1);
+    expect(mockNotifyShipments).toHaveBeenCalledWith([{ fromStatus: 1, orderId: 1, toStatus: 3 }], 9);
+  });
+
+  it("single edit: a change that also moves the order status (explicit or derived) only sends the ORDER notification", async () => {
+    const order = makeOrder(1, { status: 2, shipmentStatus: 1, confirmationStatus: 1 });
+    mockOrderFindByPk.mockResolvedValue(order);
+    await OrderService.updateOrder(1, { status: 3 }, user);
+    expect(OrderService.sendNotification).toHaveBeenCalledTimes(1);
+
+    const second = makeOrder(2, { status: 2, shipmentStatus: 1, confirmationStatus: 1 });
+    mockOrderFindByPk.mockResolvedValue(second);
+    await OrderService.updateOrder(2, { status: 5 }, user); // status 5 derives shipmentStatus 4 as well
+    expect(mockNotifyShipments).not.toHaveBeenCalled();
+  });
+
+  it("single edit: no shipment notification when nothing about the shipment status changed", async () => {
+    const order = makeOrder(1, { status: 2, shipmentStatus: 3, confirmationStatus: 1 });
+    mockOrderFindByPk.mockResolvedValue(order);
+    await OrderService.updateOrder(1, { shipmentStatus: 3, notes: "x" }, user);
+    expect(mockNotifyShipments).not.toHaveBeenCalled();
+  });
+
+  it("bulk edit: ONE aggregated call with only the orders whose order status did not change", async () => {
+    const a = makeOrder(1, { status: 2, shipmentStatus: 1, confirmationStatus: 1 });
+    const b = makeOrder(2, { status: 2, shipmentStatus: 1, confirmationStatus: 1 });
+    const alreadyThere = makeOrder(3, { status: 2, shipmentStatus: 3, confirmationStatus: 1 });
+    mockOrderFindAll.mockResolvedValue([a, b, alreadyThere]);
+
+    await OrderService.BulkUpdate({ orderIds: [1, 2, 3], orderData: { shipmentStatus: 3 } }, user);
+
+    expect(mockNotifyShipments).toHaveBeenCalledTimes(1);
+    expect(mockNotifyShipments).toHaveBeenCalledWith([
+      { fromStatus: 1, orderId: 1, toStatus: 3 },
+      { fromStatus: 1, orderId: 2, toStatus: 3 },
+    ], 9);
+  });
+
+  it("bulk edit that changes the order status never sends a shipment notification", async () => {
+    mockOrderFindAll.mockResolvedValue([makeOrder(1, { status: 1, shipmentStatus: 1, confirmationStatus: 1 })]);
+    await OrderService.BulkUpdate({ orderIds: [1], orderData: { status: 15 } }, user);
+    expect(mockNotifyShipments).not.toHaveBeenCalled();
   });
 });

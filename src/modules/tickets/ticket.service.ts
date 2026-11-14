@@ -4,6 +4,7 @@ import type { Result } from "../../shared/result";
 import { success } from "../../shared/result";
 import { TICKET_STATUS } from "./ticket.constants";
 import { TicketRepository } from "./ticket.repo";
+import { notifyTicketCreated, notifyTicketReply, notifyTicketUpdated } from "./ticket.notifications";
 import type {
   TicketAttachment,
   TicketCreateInput,
@@ -117,6 +118,11 @@ export class TicketService {
       throw new NotFoundError("Ticket not found");
     }
 
+    await notifyTicketCreated({
+      assignedToUserId: payload.assignedToUserId ?? ticket.assignedTo?.id,
+      id: createdTicket.id,
+      orderNumber: ticket.order?.orderNumber,
+    }, user.id);
     return success(ticket);
   }
 
@@ -235,6 +241,15 @@ export class TicketService {
       throw new NotFoundError("Ticket not found");
     }
 
+    await notifyTicketUpdated({
+      after: {
+        assignedToUserId: payload.assignedToUserId !== undefined ? payload.assignedToUserId : plainTicket.assignedToUserId,
+        status: payload.status,
+      },
+      before: plainTicket,
+      orderNumber: ticket.order?.orderNumber,
+      ticketId,
+    }, user.id);
     return success(ticket);
   }
 
@@ -287,6 +302,14 @@ export class TicketService {
       to: payload.text,
       userId: user.id,
     }]);
+    const plainTicket = "toJSON" in ticket && typeof ticket.toJSON === "function" ? ticket.toJSON() : ticket;
+    await notifyTicketReply({
+      assignedToUserId: plainTicket.assignedToUserId,
+      createdByUserId: plainTicket.createdByUserId,
+      id: ticketId,
+      orderId: plainTicket.orderId,
+      orderNumber: (plainTicket as { linkedOrder?: { orderNumber?: string } }).linkedOrder?.orderNumber,
+    }, user.id);
     return success(createdNote);
   }
 

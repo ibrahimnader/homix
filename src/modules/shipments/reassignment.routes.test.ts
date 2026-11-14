@@ -2,11 +2,14 @@ import express from "express";
 import request from "supertest";
 
 const mockQuery = jest.fn();
+jest.mock("./shipment.notifications");
 jest.mock("../../infrastructure/database", () => ({
   sequelize: { query: (...args: unknown[]) => mockQuery(...args), transaction: jest.fn() },
 }));
 // eslint-disable-next-line import/first
 import { reassignmentRouter } from "./reassignment.routes";
+// eslint-disable-next-line import/first
+import { notifyShipmentStatusChanges } from "./shipment.notifications";
 
 const appFor = (permissions: Record<string, boolean>) => {
   const app = express();
@@ -110,6 +113,22 @@ describe("reassignment runs through the shared status sync", () => {
       { id: 1, status: 4, shipmentStatus: 5, confirmationStatus: 2 },
       { id: 2, status: 8, shipmentStatus: 2, confirmationStatus: 1 },
     ]);
+  });
+
+  it("notifies both shipments after the commit, separately, attributed to the user", async () => {
+    await post("منتج تالف");
+    expect(notifyShipmentStatusChanges).toHaveBeenCalledTimes(2);
+    expect(notifyShipmentStatusChanges).toHaveBeenNthCalledWith(1, [{ fromStatus: 3, orderId: 1, toStatus: 5 }], 7);
+    expect(notifyShipmentStatusChanges).toHaveBeenNthCalledWith(2, [{ fromStatus: 1, orderId: 2, toStatus: 2 }], 7);
+  });
+
+  it("does not notify when the reassignment is rejected", async () => {
+    const { sequelize } = jest.requireMock("../../infrastructure/database");
+    sequelize.transaction.mockImplementation(async (fn: (t: unknown) => unknown) => fn({ id: "t" }));
+    mockQuery.mockImplementation(async (sql: string) => (sql.includes("FOR UPDATE") ? [] : []));
+    const res = await request(appFor({ ship_edit: true })).post("/reassignments").send({ sourceOrderId: 1, targetOrderId: 2, reason: "منتج تالف" });
+    expect(res.status).toBe(500);
+    expect(notifyShipmentStatusChanges).not.toHaveBeenCalled();
   });
 
   it("keeps the source pending when the customer still needs the order", async () => {

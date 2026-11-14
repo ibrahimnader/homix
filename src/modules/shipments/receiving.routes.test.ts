@@ -13,6 +13,7 @@ jest.mock("./receiving.service", () => ({
       receiverName: `user-${userId}`,
     })),
     updateReceipt: jest.fn(async (orderId, input) => ({ orderId, ...input })),
+    cancel: jest.fn(async (orderId) => ({ orderId })),
     printDocument: jest.fn(async () => ({ number: "RCV-COMBINED", items: [] })),
   })),
 }));
@@ -110,4 +111,12 @@ test("candidates accept separate sku/operation/order/factory filters and keep le
   expect((await request(app).get("/receipts/candidates")).body.data.filters.search).toBe("");
   expect((await request(app).get("/receipts/candidates?vendorId=abc")).status).toBe(400);
   expect((await request(app).get(`/receipts/candidates?sku=${"x".repeat(151)}`)).status).toBe(400);
+});
+test("cancelling a receipt needs ship_edit and validates the id", async () => {
+  expect((await request(appFor({ ship_receipts_view: true })).post("/receipts/5/cancel")).status).toBe(403);
+  const edit = appFor({ ship_receipts_view: true, ship_edit: true });
+  expect((await request(edit).post("/receipts/abc/cancel")).status).toBe(400);
+  const ok = await request(edit).post("/receipts/5/cancel");
+  expect(ok.status).toBe(200);
+  expect(ok.body.data).toEqual({ orderId: 5 });
 });

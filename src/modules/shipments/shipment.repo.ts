@@ -2,6 +2,7 @@ import { Op, QueryTypes, fn, col, where } from "sequelize";
 
 import { sequelize } from "../../infrastructure/database";
 import { ConflictError, NotFoundError } from "../../shared/errors";
+import { shipmentCustomerEditSchema } from "./shipment.schemas";
 import { buildLogMessage } from "../orders/order.helpers";
 import {
   getManagedOptionLabels,
@@ -12,6 +13,7 @@ import {
 } from "../settings/managed-options";
 import { CLOSED_SHIPMENT_STATUSES, DELIVERY_BY, ORDER_SOURCE_ARABIC, ORDER_SOURCE, ORDER_STATUS, PAYMENT_STATUS, SHIPMENT_SCHEDULE_STATUS_ARABIC, USER_TYPES } from "../../../config/constants";
 import { applyCostPriceToLines, parseCostPriceInput } from "../orders/order-cost-price";
+import { buildAutoSyncLogRows, deriveStatusPatch } from "../orders/order-status-sync";
 import {
   ACCOUNTING_STATUS,
   ACCOUNT_STATUS_LABELS,
@@ -141,28 +143,6 @@ const resolveGovernorateDisplayLabel = (value: unknown): string => {
   const text = toText(value);
   if (!text) return "";
   return GOVERNORATE_LABELS[Number(text)] ?? text;
-};
-
-/**
- * A shipment record is just the order's own row, so its shipmentStatus and the
- * order's lifecycle status are two different fields that can drift apart. These
- * three shipment statuses are meant to be authoritative over the order's status —
- * moving a shipment to one of them carries the order's status along with it.
- */
-const ORDER_STATUS_BY_SHIPMENT_STATUS: Partial<Record<number, number>> = {
-  [SHIPMENT_STATUS.DELIVERED]: ORDER_STATUS.DELIVERED,
-  [SHIPMENT_STATUS.IN_WAREHOUSE]: ORDER_STATUS.IN_INVENTORY,
-  [SHIPMENT_STATUS.CANCELED]: ORDER_STATUS.CANCELED,
-  // Cancel/reject variants carry the matching order variant (same keys on both sides).
-  [SHIPMENT_STATUS.CANCELED_BEFORE_MFG_CONFIRMATION]: ORDER_STATUS.CANCELED_BEFORE_MFG_CONFIRMATION,
-  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_CONFIRMATION_72H]: ORDER_STATUS.CANCELED_AFTER_MFG_CONFIRMATION_72H,
-  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_NO_RESPONSE]: ORDER_STATUS.CANCELED_AFTER_MFG_NO_RESPONSE,
-  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_CHANGED_MIND]: ORDER_STATUS.CANCELED_AFTER_MFG_CHANGED_MIND,
-  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_SPECIAL]: ORDER_STATUS.CANCELED_AFTER_MFG_SPECIAL,
-  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_DELAY]: ORDER_STATUS.CANCELED_AFTER_MFG_DELAY,
-  [SHIPMENT_STATUS.CANCELED_AFTER_MFG_FAKE_ORDER]: ORDER_STATUS.CANCELED_AFTER_MFG_FAKE_ORDER,
-  [SHIPMENT_STATUS.REJECTED_AFTER_MFG_MISMATCH]: ORDER_STATUS.REJECTED_AFTER_MFG_MISMATCH,
-  [SHIPMENT_STATUS.REJECTED_AFTER_MFG_NOT_SUITABLE]: ORDER_STATUS.REJECTED_AFTER_MFG_NOT_SUITABLE,
 };
 
 const logOrderFieldChange = async (
@@ -1399,8 +1379,12 @@ export class ShipmentRepository {
     const status = payload.status ?? getFallbackReturnStatus(returnType);
     const returnDate = payload.returnDate ? new Date(payload.returnDate) : new Date();
     const nextShipmentStatus = getShipmentStatusForReturnType(returnType);
-    await shipment.update({ shipmentStatus: nextShipmentStatus });
+    const returnStatusSync = deriveStatusPatch(plainShipment, { shipmentStatus: nextShipmentStatus });
+    await shipment.update({ shipmentStatus: nextShipmentStatus, ...returnStatusSync.patch });
     await logOrderFieldChange(payload.orderId, plainShipment.shipmentStatus, nextShipmentStatus, userId);
+    for (const row of buildAutoSyncLogRows(payload.orderId, returnStatusSync.derived, userId)) {
+      await logModel.create(row);
+    }
     const createdRecord = await shipmentReturnModel.create({
       completedAt: isFinalReturnStatus(returnType, status) ? returnDate : null,
       orderId: payload.orderId,
@@ -2453,6 +2437,19 @@ export class ShipmentRepository {
     return applyCostPriceToLines(costPrice, lines as never);
   }
 
+  /** Removes `customer` from the payload and returns it as customers-table columns (or null when absent/empty). */
+  private extractCustomerEdit(payload: Record<string, unknown>): Record<string, string | null> | null {
+    if (!Object.prototype.hasOwnProperty.call(payload, "customer")) {
+      return null;
+    }
+    const raw = payload.customer;
+    Reflect.deleteProperty(payload, "customer");
+    /* Routes pre-validate through shipmentMutationSchema; parse again so direct
+       service callers get the same normalisation and rejection. */
+    const parsed = shipmentCustomerEditSchema.parse(raw);
+    return Object.keys(parsed).length > 0 ? parsed : null;
+  }
+
   public async updateShipment(shipmentId: number, payload: Record<string, unknown>, userId?: number): Promise<unknown | null> {
     const shipment = await orderModel.findByPk(shipmentId);
     if (!shipment) {
@@ -2461,6 +2458,14 @@ export class ShipmentRepository {
 
     const plainShipmentBeforeUpdate = toPlain(shipment);
     const nextPayload = await this.normalizeShippingCompanyPayload(payload);
+    /* The edit form sends the customer's name/phone/address next to the order
+       columns. They live on the customers row, not on the order, so they are
+       split off here and written in the same transaction as the order update
+       (shipment.update would silently ignore the association key). */
+    const customerEdit = this.extractCustomerEdit(nextPayload);
+    if (customerEdit && !plainShipmentBeforeUpdate.customerId) {
+      throw new ConflictError("Shipment has no customer to update");
+    }
     /* «سعر التكلفة» يُكتب على بنود الطلب ثم يُجمَع في totalCost — نفس المسار
        الذي يسلكه تعديل الطلب، حتى لا يختلف الرقمان. */
     const requestedCostPrice = parseCostPriceInput(nextPayload.costPrice);
@@ -2502,13 +2507,11 @@ export class ShipmentRepository {
       }
     }
 
-    let cascadedOrderStatus: number | undefined;
-    if (Object.prototype.hasOwnProperty.call(nextPayload, "shipmentStatus")) {
-      cascadedOrderStatus = ORDER_STATUS_BY_SHIPMENT_STATUS[toNumber(nextPayload.shipmentStatus)];
-      if (cascadedOrderStatus !== undefined) {
-        nextPayload.status = cascadedOrderStatus;
-      }
-    }
+    /* The three statuses of the row drive each other (order-status-sync): a
+       shipment status moves the order status (+ confirmation counterpart), and
+       explicit fields in this payload always win over derived ones. */
+    const statusSync = deriveStatusPatch(plainShipmentBeforeUpdate, nextPayload);
+    Object.assign(nextPayload, statusSync.patch);
 
     /* toBeCollected is only ever recalculated by the order-edit path
        (normalizeOrderMutationPayload), not here — so a shipping-fee or
@@ -2529,7 +2532,18 @@ export class ShipmentRepository {
       nextPayload.toBeCollected = subTotalPrice + shippingFees - totalDiscounts - downPayment;
     }
 
-    await shipment.update(nextPayload);
+    if (customerEdit) {
+      await sequelize.transaction(async (transaction) => {
+        const customer = await customerModel.findByPk(plainShipmentBeforeUpdate.customerId, { transaction });
+        if (!customer) {
+          throw new NotFoundError("Customer not found");
+        }
+        await customer.update(customerEdit, { transaction });
+        await shipment.update(nextPayload, { transaction });
+      });
+    } else {
+      await shipment.update(nextPayload);
+    }
     if (Object.prototype.hasOwnProperty.call(nextPayload, "shipmentStatus")) {
       await logOrderFieldChange(
         shipmentId,
@@ -2538,14 +2552,8 @@ export class ShipmentRepository {
         userId,
       );
     }
-    if (cascadedOrderStatus !== undefined) {
-      await logOrderFieldChange(
-        shipmentId,
-        plainShipmentBeforeUpdate.status,
-        cascadedOrderStatus,
-        userId,
-        "status",
-      );
+    for (const row of buildAutoSyncLogRows(shipmentId, statusSync.derived, userId)) {
+      await logModel.create(row);
     }
     for (const field of ["shippingFees", "downPayment", "receivedAmount"] as const) {
       if (Object.prototype.hasOwnProperty.call(nextPayload, field)) {

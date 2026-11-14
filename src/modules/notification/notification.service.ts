@@ -1,7 +1,8 @@
 import { NotFoundError } from "../../shared/errors";
 import type { Result } from "../../shared/result";
 import { success } from "../../shared/result";
-import { NotificationRepository } from "./notification.repo";
+import type { NotificationCategory } from "./notification.category";
+import { buildCategoryWhere, NotificationRepository } from "./notification.repo";
 import type {
   CreateNotificationInput,
   NotificationActionResponse,
@@ -12,8 +13,9 @@ import type {
 export interface NotificationServiceContract {
   clearNotifications(userId: number): Promise<Result<NotificationActionResponse>>;
   createNotification(payload: CreateNotificationInput): Promise<Result<NotificationAttributes>>;
-  getNotifications(userId: number): Promise<Result<NotificationResponse>>;
-  markAsRead(userId: number): Promise<Result<NotificationActionResponse>>;
+  getNotifications(userId: number, category?: NotificationCategory): Promise<Result<NotificationResponse>>;
+  markAsRead(userId: number, category?: NotificationCategory): Promise<Result<NotificationActionResponse>>;
+  markOneAsRead(userId: number, notificationId: number): Promise<Result<NotificationActionResponse>>;
 }
 
 const NOTIFICATIONS_CLEARED_MESSAGE = "Notifications cleared";
@@ -42,23 +44,60 @@ export class NotificationService implements NotificationServiceContract {
     return success(notification);
   }
 
-  public async getNotifications(userId: number): Promise<Result<NotificationResponse>> {
-    const notifications = await this.notificationRepository.findAll({ userId });
+  /* Every query is scoped by the authenticated user's id (never taken from the request),
+     so a user - vendors included - can only ever see or change their own notifications. */
+  public async getNotifications(
+    userId: number,
+    category?: NotificationCategory,
+  ): Promise<Result<NotificationResponse>> {
+    const [notifications, counts] = await Promise.all([
+      this.notificationRepository.findAll(
+        category ? { userId, ...buildCategoryWhere(category) } : { userId },
+      ),
+      this.notificationRepository.countUnreadByCategory(userId),
+    ]);
 
     return success({
+      counts,
       notifications,
       status: true,
     });
   }
 
-  public async markAsRead(userId: number): Promise<Result<NotificationActionResponse>> {
+  public async markAsRead(
+    userId: number,
+    category?: NotificationCategory,
+  ): Promise<Result<NotificationActionResponse>> {
     const updatedRows = await this.notificationRepository.update(
-      { readAt: null, userId },
+      category ? { readAt: null, userId, ...buildCategoryWhere(category) } : { readAt: null, userId },
       { readAt: new Date() },
     );
 
     if (updatedRows < 1) {
       throw new NotFoundError("Unread notifications not found");
+    }
+
+    return success({
+      message: NOTIFICATIONS_MARKED_AS_READ_MESSAGE,
+      status: true,
+    });
+  }
+
+  /** Idempotent: re-reading an already-read notification succeeds, a foreign/missing id is a 404. */
+  public async markOneAsRead(
+    userId: number,
+    notificationId: number,
+  ): Promise<Result<NotificationActionResponse>> {
+    const updatedRows = await this.notificationRepository.update(
+      { id: notificationId, readAt: null, userId },
+      { readAt: new Date() },
+    );
+
+    if (updatedRows < 1) {
+      const existing = await this.notificationRepository.findAll({ id: notificationId, userId });
+      if (existing.length < 1) {
+        throw new NotFoundError("Notification not found");
+      }
     }
 
     return success({

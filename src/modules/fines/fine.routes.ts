@@ -4,6 +4,7 @@ import { z } from "zod";
 import { sequelize } from "../../infrastructure/database";
 import { asyncHandler, validateRequest } from "../../shared/http";
 import { ConflictError, NotFoundError, ValidationError } from "../../shared/errors";
+import { toDateRangeBoundary } from "../shipments/shipment.helpers";
 
 const verifyToken = require("../../../app/middlewares/protectApi");
 const isNotVendor = require("../../../app/middlewares/isNotVendor");
@@ -95,9 +96,14 @@ const listRecords = async (filters: z.infer<typeof logFilterSchema>, limit = tru
   if (filters.ruleId) where.push('r."ruleId" = :ruleId');
   if (filters.orderId) where.push('r."orderId" = :orderId');
   if (filters.status) where.push(filters.status === "waived" ? 'r."waivedAt" IS NOT NULL' : 'r."waivedAt" IS NULL');
+  /* Cairo calendar days, inclusive on both ends (same helper as the shipments filters). */
   if (filters.from) where.push('r."appliedAt" >= :from');
-  if (filters.to) where.push('r."appliedAt" < (CAST(:to AS date) + INTERVAL \'1 day\')');
-  const replacements: Record<string, unknown> = { ...filters };
+  if (filters.to) where.push('r."appliedAt" <= :to');
+  const replacements: Record<string, unknown> = {
+    ...filters,
+    ...(filters.from ? { from: toDateRangeBoundary(filters.from, "start") } : {}),
+    ...(filters.to ? { to: toDateRangeBoundary(filters.to, "end") } : {}),
+  };
   if (filters.operationNumber) { where.push("o.code ILIKE :operationLike"); replacements.operationLike = `%${escapeLike(filters.operationNumber)}%`; }
   if (filters.vendor) {
     where.push(`EXISTS (SELECT 1 FROM "orderLines" vl JOIN products vp ON vp.id = vl."productId" JOIN vendors vv ON vv.id = vp."vendorId"

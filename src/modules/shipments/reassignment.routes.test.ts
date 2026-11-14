@@ -75,9 +75,46 @@ test("reassignment log filters are applied in SQL and validated", async () => {
   expect(sql).toContain(`target.code ILIKE :newOrder`);
   expect(sql).toContain(`line.sku ILIKE :code`);
   expect(sql).toContain(`product."vendorId" = :vendorId`);
-  expect(sql).toContain(`r."createdAt" >= (:dateFrom)::date`);
-  expect(options.replacements).toMatchObject({ oldOrder: "%12%", newOrder: "%34%", code: "%SK%", vendorId: 4, dateTo: "2026-09-30" });
+  expect(sql).toContain(`r."createdAt" >= :dateFrom`);
+  expect(sql).toContain(`r."createdAt" <= :dateTo`);
+  /* Cairo inclusive days (UTC+3 in September): 1 Sep 00:00 Cairo = 31 Aug 21:00Z; 30 Sep 23:59:59.999 Cairo = 30 Sep 20:59:59.999Z */
+  expect(options.replacements).toMatchObject({ oldOrder: "%12%", newOrder: "%34%", code: "%SK%", vendorId: 4 });
+  expect((options.replacements.dateFrom as Date).toISOString()).toBe("2026-08-31T21:00:00.000Z");
+  expect((options.replacements.dateTo as Date).toISOString()).toBe("2026-09-30T20:59:59.999Z");
   mockQuery.mockResolvedValueOnce([]);
   await request(app).get("/reassignments");
   expect(mockQuery.mock.calls[1][0]).not.toContain("ILIKE");
+});
+
+describe("reassignment runs through the shared status sync", () => {
+  const post = async (reason: string) => {
+    const { sequelize } = jest.requireMock("../../infrastructure/database");
+    sequelize.transaction.mockImplementation(async (fn: (t: unknown) => unknown) => fn({ id: "t" }));
+    const source = { id: 1, status: 2, shipmentStatus: 3, confirmationStatus: 2, manufactureStatus: 3 };
+    const target = { id: 2, status: 1, shipmentStatus: 1, confirmationStatus: 1, manufactureStatus: null };
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM orders") && sql.includes("FOR UPDATE")) return [source, target];
+      if (sql.includes('FROM "orderLines"')) return [line(1), line(2)];
+      if (sql.includes("INSERT INTO shipment_reassignments")) return [{ id: 99 }];
+      return [];
+    });
+    const res = await request(appFor({ ship_edit: true })).post("/reassignments").send({ sourceOrderId: 1, targetOrderId: 2, reason });
+    const updates = mockQuery.mock.calls.filter(([sql]) => String(sql).startsWith("UPDATE orders"));
+    return { res, updates: updates.map(([, options]) => options.replacements) };
+  };
+
+  it("keeps its own rules (source canceled/4+5, target in inventory/8+2) and leaves confirmation as is", async () => {
+    const { res, updates } = await post("منتج تالف");
+    expect(res.status).toBe(201);
+    expect(updates).toEqual([
+      { id: 1, status: 4, shipmentStatus: 5, confirmationStatus: 2 },
+      { id: 2, status: 8, shipmentStatus: 2, confirmationStatus: 1 },
+    ]);
+  });
+
+  it("keeps the source pending when the customer still needs the order", async () => {
+    const { res, updates } = await post("إعادة تخصيص - العميل لسه محتاج الطلب");
+    expect(res.status).toBe(201);
+    expect(updates[0]).toEqual({ id: 1, status: 1, shipmentStatus: 1, confirmationStatus: 2 });
+  });
 });

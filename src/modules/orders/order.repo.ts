@@ -39,6 +39,7 @@ import {
 import type { OrderDetailsResponse, OrderDetailsView, OrderFinancialReportQuery, OrderFinancialReportResponse, OrderFinancialReportSection, OrderFinancialReportSectionSummary, OrderFinancialReportVendorRow, OrderListItem, OrderListQuery, OrderListResponse, OrderMetaResponse, OrderStatusHistoryItem, OrderSummaryResponse, OrderTimelineItem } from "./order.types";
 import { calculateVendorDeliverySettlement } from "./order-financial-settlement";
 import { listManagedOptions, MANAGED_OPTION_GROUP, replaceManagedOptions } from "../settings/managed-options";
+import { SHIPMENT_STATUS_LABELS } from "../shipments/shipment.constants";
 
 const { sequelize } = require("../../infrastructure/database");
 const orderModel = require("../../../app/modules/order/order.model");
@@ -151,7 +152,7 @@ const buildFilters = (filters: OrderListQuery, vendorId?: number | null): Record
     andConditions.push(sequelize.where(sequelize.col("Order.orderSource"), { [Op.in]: filters.orderSource.split(",").map(Number) }));
   }
   if (filters.userId) {
-    andConditions.push(sequelize.where(sequelize.col("Order.userId"), { [Op.eq]: filters.userId }));
+    andConditions.push(sequelize.where(sequelize.col("Order.userId"), { [Op.in]: String(filters.userId).split(",").map(Number) }));
   }
   if (filters.startDate) {
     pushDateCondition("Order.orderDate", Op.gte, filters.startDate);
@@ -551,6 +552,9 @@ const mapOrderSummary = (value: unknown): OrderListItem => {
     productImage: toText(product.image),
     itemType: toText(type.name),
     productName: toText(product.title, toText(orderLine.title)),
+    /** حالة الشحنة مرتبطة بحالة الطلب والتأكيد (order-status-sync) — تُرجَع لتنعكس المشتقات في الواجهة. */
+    shipmentStatus: toNumber(order.shipmentStatus) || null,
+    shipmentStatusLabel: SHIPMENT_STATUS_LABELS[toNumber(order.shipmentStatus)] ?? "",
     status: toNumber(order.status) || null,
     statusLabel: getStatusLabel(order.status),
     toBeCollected: getOrderCollectionAmount(order),
@@ -1250,6 +1254,33 @@ export class OrderRepository {
     return noteModel.findByPk(noteId);
   }
 
+  /** A regular order note bound to this order (never a seller-chat message or another order's note). */
+  public async findOrderNote(noteId: number, orderId: number): Promise<unknown | null> {
+    return noteModel.findOne({ where: { entityId: orderId, entityType: "order", id: noteId } });
+  }
+
+  /**
+   * Ids (of the given ones) that contain at least one product of this vendor —
+   * the same ownership rule getOrderById applies to vendors.
+   */
+  public async findVendorOwnedOrderIds(orderIds: number[], vendorId: number): Promise<number[]> {
+    if (orderIds.length === 0) {
+      return [];
+    }
+    const rows = await orderModel.findAll({
+      attributes: ["id"],
+      include: [{
+        as: "orderLines",
+        attributes: [],
+        include: [{ as: "product", attributes: [], required: true, where: { vendorId } }],
+        required: true,
+      }],
+      raw: true,
+      where: { id: { [Op.in]: orderIds } },
+    }) as Array<{ id: number | string }>;
+    return [...new Set(rows.map((row) => Number(row.id)))];
+  }
+
   public async createOrderNote(orderId: number, userId: number, text: string): Promise<unknown> {
     return noteModel.create({
       entityId: orderId,
@@ -1315,8 +1346,10 @@ export class OrderRepository {
     });
   }
 
-  public async findSellerChatMessageById(messageId: number): Promise<unknown | null> {
-    return noteModel.findOne({ where: { entityType: "order_seller_chat", id: messageId } });
+  public async findSellerChatMessageById(messageId: number, orderId?: number): Promise<unknown | null> {
+    return noteModel.findOne({
+      where: { entityType: "order_seller_chat", id: messageId, ...(orderId !== undefined ? { entityId: orderId } : {}) },
+    });
   }
 
   public async getSellerChatQuickReplies(): Promise<Array<{ id: number; label: string }>> {

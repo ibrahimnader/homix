@@ -211,6 +211,17 @@ describe("read scoping", () => {
     expect(detail.lines[0]).not.toHaveProperty("originalVendorDue");
   });
 
+  test("vendor invoiced-lines feed hides internal notes and pre-override amounts, staff keeps them", async () => {
+    const { repo } = makeRepo(invoice({ status: "reviewed" }));
+    const row = { ...lineRow({ overrideReason: "internal" }), code: "INV1", invoiceId: 1, invoiceStatus: "reviewed", periodEnd: "2026-10-28T21:59:59.999Z", receiptPath: null, transferredAt: null, vendorId: 5, vendorName: "v" };
+    (repo as unknown as { listInvoicedLines: jest.Mock }).listInvoicedLines = jest.fn(async () => ({ rows: [row], total: 1 }));
+    const vendorView = await service(repo).invoicedLines({ page: 1, size: 10 }, { vendorId: 5 });
+    expect(vendorView.items[0]).not.toHaveProperty("overrideReason");
+    expect(vendorView.items[0]).not.toHaveProperty("originalVendorDue");
+    const staffView = await service(repo).invoicedLines({ page: 1, size: 10 }, {});
+    expect(staffView.items[0]).toHaveProperty("overrideReason", "internal");
+  });
+
   test("list forces the vendor's own id and visible statuses whatever the query says", async () => {
     const { repo } = makeRepo();
     const listInvoices = jest.fn(async () => ({ rows: [], total: 0 }));

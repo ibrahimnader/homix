@@ -5,6 +5,8 @@ import { sequelize } from "../../infrastructure/database";
 import { asyncHandler, validateRequest } from "../../shared/http";
 import { ConflictError, NotFoundError, ValidationError } from "../../shared/errors";
 import { SHIPMENT_STATUS, SHIPMENT_STATUS_LABELS } from "./shipment.constants";
+import { toDateRangeBoundary } from "./shipment.helpers";
+import { buildAutoSyncLogRows, deriveStatusPatch } from "../orders/order-status-sync";
 import {
   keepsSourcePendingForReason, REASSIGNMENT_CANDIDATE_REASON_LABELS, reassignmentCandidateReason, sameReassignmentItem,
 } from "./reassignment.logic";
@@ -35,7 +37,7 @@ const logQuery = z.object({
   dateTo: day.optional(),
 });
 
-type OrderRow = { id: number; status: number; shipmentStatus: number | null };
+type OrderRow = { id: number; status: number; shipmentStatus: number | null; confirmationStatus: number | null; manufactureStatus: number | null };
 type LineRow = { orderId: number; productId: number; sku: string | null; quantity: number };
 
 export const reassignmentRouter = express.Router();
@@ -70,8 +72,9 @@ reassignmentRouter.get("/", requirePermission("ship_view"), validateRequest({ qu
   contains(filters.newOrder, "newOrder", `(target.code ILIKE :key OR target."orderNumber"::text ILIKE :key)`);
   contains(filters.code, "code", `line.sku ILIKE :key`);
   if (filters.vendorId) { replacements.vendorId = filters.vendorId; clauses.push(`product."vendorId" = :vendorId`); }
-  if (filters.dateFrom) { replacements.dateFrom = filters.dateFrom; clauses.push(`r."createdAt" >= (:dateFrom)::date`); }
-  if (filters.dateTo) { replacements.dateTo = filters.dateTo; clauses.push(`r."createdAt" < ((:dateTo)::date + 1)`); }
+  /* Cairo calendar days, inclusive on both ends (same helper as the shipments filters). */
+  if (filters.dateFrom) { replacements.dateFrom = toDateRangeBoundary(filters.dateFrom, "start"); clauses.push(`r."createdAt" >= :dateFrom`); }
+  if (filters.dateTo) { replacements.dateTo = toDateRangeBoundary(filters.dateTo, "end"); clauses.push(`r."createdAt" <= :dateTo`); }
   const rows = await sequelize.query(`
     SELECT r.*, source."orderNumber" AS "sourceOrderNumber", target."orderNumber" AS "targetOrderNumber",
       source.code AS "sourceOperationNumber", target.code AS "targetOperationNumber",
@@ -175,7 +178,7 @@ reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ b
     }
     if (targetOrderId === input.sourceOrderId) throw new ValidationError("اختر طلبًا مختلفًا");
     const orders = await sequelize.query<OrderRow>(`
-      SELECT id, status, "shipmentStatus" FROM orders
+      SELECT id, status, "shipmentStatus", "confirmationStatus", "manufactureStatus" FROM orders
       WHERE id IN (:ids) AND "deletedAt" IS NULL ORDER BY id FOR UPDATE
     `, { replacements: { ids: [input.sourceOrderId, targetOrderId] }, transaction, type: QueryTypes.SELECT });
     if (orders.length !== 2) throw new NotFoundError("Source or target order not found");
@@ -202,12 +205,23 @@ reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ b
       throw new ValidationError("Product, SKU and quantity must match");
     }
 
-    await sequelize.query(`UPDATE orders SET status = :status, "shipmentStatus" = :shipmentStatus, "updatedAt" = NOW() WHERE id = :id`, {
-      replacements: { id: input.sourceOrderId, status: keepOldPending ? ORDER_STATUS.PENDING : ORDER_STATUS.CANCELED, shipmentStatus: keepOldPending ? SHIPMENT_STATUS.PENDING : SHIPMENT_STATUS.CANCELED }, transaction,
-    });
-    await sequelize.query(`UPDATE orders SET status = :status, "shipmentStatus" = :shipmentStatus, "updatedAt" = NOW() WHERE id = :id`, {
-      replacements: { id: targetOrderId, status: ORDER_STATUS.IN_INVENTORY, shipmentStatus: SHIPMENT_STATUS.IN_WAREHOUSE }, transaction,
-    });
+    /* The reassignment's own rules pick status + shipmentStatus explicitly; the
+       shared status sync then fills the third linked column (confirmation) when
+       the new order status implies one — it never overrides these explicit values. */
+    const applyStatuses = async (row: OrderRow, status: number, shipmentStatus: number) => {
+      const { patch, derived } = deriveStatusPatch(row as unknown as Record<string, unknown>, { status, shipmentStatus });
+      const confirmationStatus = patch.confirmationStatus ?? row.confirmationStatus;
+      await sequelize.query(`UPDATE orders SET status = :status, "shipmentStatus" = :shipmentStatus, "confirmationStatus" = :confirmationStatus, "updatedAt" = NOW() WHERE id = :id`, {
+        replacements: { id: row.id, status, shipmentStatus, confirmationStatus }, transaction,
+      });
+      if (derived.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
+        const Log = require("../../../app/modules/logs/log.model");
+        await Log.bulkCreate(buildAutoSyncLogRows(row.id, derived, createdBy), { transaction });
+      }
+    };
+    await applyStatuses(source, keepOldPending ? ORDER_STATUS.PENDING : ORDER_STATUS.CANCELED, keepOldPending ? SHIPMENT_STATUS.PENDING : SHIPMENT_STATUS.CANCELED);
+    await applyStatuses(target, ORDER_STATUS.IN_INVENTORY, SHIPMENT_STATUS.IN_WAREHOUSE);
     const [inserted] = await sequelize.query(`
       INSERT INTO shipment_reassignments ("sourceOrderId", "targetOrderId", reason, notes, "keepOldPending", "createdBy")
       VALUES (:sourceOrderId, :targetOrderId, :reason, :notes, :keepOldPending, :createdBy) RETURNING *

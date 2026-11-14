@@ -587,6 +587,43 @@ describe("orderRouter", () => {
     );
   });
 
+  it("accepts a comma-separated userId (assignee) filter on the orders list and keeps a single value working", async () => {
+    for (const [raw, expected] of [["1,2", [1, 2]], ["7", [7]], [" 3 , 4 ", [3, 4]]] as const) {
+      orderModel.findAndCountAll.mockClear();
+      const response = await request(app).get("/orders").query({ page: 1, size: 20, userId: raw });
+
+      expect(response.status).toBe(200);
+      const whereClause = orderModel.findAndCountAll.mock.calls[0][0].where as Record<PropertyKey, unknown>;
+      const andKey = Object.getOwnPropertySymbols(whereClause)[0];
+      const conditions = andKey && Array.isArray(whereClause[andKey])
+        ? whereClause[andKey] as Array<Record<PropertyKey, unknown>>
+        : [];
+      expect(conditions).toContainEqual(expect.objectContaining({ [Op.in]: expected }));
+    }
+  });
+
+  it.each(["0", "-1", "a", "1,,2", "1,x", "1.5"])("rejects an invalid userId filter %p with 400", async (userId) => {
+    const list = await request(app).get("/orders").query({ page: 1, size: 20, userId });
+    const exported = await request(app).get("/orders/export").query({ userId });
+
+    expect(list.status).toBe(400);
+    expect(exported.status).toBe(400);
+  });
+
+  it("forwards a multi-value userId to the legacy exporter", async () => {
+    legacyOrderService.exportOrders.mockImplementation(async (res: express.Response) => {
+      res.status(200).end("ok");
+    });
+
+    const response = await request(app).get("/orders/export").query({ userId: "1,2" });
+
+    expect(response.status).toBe(200);
+    expect(legacyOrderService.exportOrders).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ userId: "1,2" }),
+    );
+  });
+
   it("applies deliveryBy filter to the orders query", async () => {
     const response = await request(app).get("/orders").query({ deliveryBy: "1", page: 1, size: 20 });
 

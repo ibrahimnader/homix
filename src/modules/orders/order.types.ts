@@ -25,7 +25,7 @@ export type OrderListQuery = {
   size: number;
   startDate?: string;
   status?: string;
-  userId?: number;
+  userId?: string;
   vendorId?: string;
   vendorName?: string;
 };
@@ -41,6 +41,8 @@ export type OrderFinancialReportQuery = {
 };
 
 export type OrderListItem = {
+  shipmentStatus: number | null;
+  shipmentStatusLabel: string;
   assigneeId: number | null;
   code: string;
   confirmationStatus: number | null;

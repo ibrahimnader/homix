@@ -1,3 +1,4 @@
+export * from "./notification.category";
 export * from "./notification.controller";
 export * from "./notification.repo";
 export * from "./notification.routes";

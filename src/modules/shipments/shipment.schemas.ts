@@ -139,7 +139,52 @@ export const shipmentCreateSchema = z.object({
   }
 });
 
-export const shipmentMutationSchema = z.record(z.string(), z.unknown());
+/* The customer block the shipment edit form sends. The UI uses snake_case
+   (first_name / last_name / phone); the camelCase customer-table names are also
+   accepted. Blank strings mean "clear", like PUT /customers/:id. The output is
+   normalised to customer-table columns, and only keys that were sent survive. */
+const customerEditString = z.union([z.string(), z.null()]).optional().transform((value) => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+});
+
+export const shipmentCustomerEditSchema = z.object({
+  address: customerEditString,
+  address2: customerEditString,
+  email: customerEditString,
+  firstName: customerEditString,
+  first_name: customerEditString,
+  lastName: customerEditString,
+  last_name: customerEditString,
+  phone: customerEditString,
+  phoneNumber: customerEditString,
+}).transform((value) => {
+  const normalised: Record<string, string | null | undefined> = {
+    address: value.address,
+    address2: value.address2,
+    email: value.email,
+    firstName: value.firstName !== undefined ? value.firstName : value.first_name,
+    lastName: value.lastName !== undefined ? value.lastName : value.last_name,
+    phoneNumber: value.phoneNumber !== undefined ? value.phoneNumber : value.phone,
+  };
+  return Object.fromEntries(Object.entries(normalised).filter(([, entry]) => entry !== undefined)) as Record<string, string | null>;
+});
+
+export const shipmentMutationSchema = z.record(z.string(), z.unknown()).superRefine((value, context) => {
+  if (value.customer === undefined) return;
+  const parsed = shipmentCustomerEditSchema.safeParse(value.customer);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      context.addIssue({ ...issue, path: ["customer", ...issue.path] } as never);
+    }
+  }
+}).transform((value) => {
+  if (value.customer === undefined) return value;
+  /* superRefine already proved this parses. */
+  return { ...value, customer: shipmentCustomerEditSchema.parse(value.customer) };
+});
 
 /* Bulk edit only ever exposes these fields in the UI, so — unlike the
    single-shipment edit, which is a free-form passthrough — this is an explicit

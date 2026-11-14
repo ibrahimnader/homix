@@ -202,6 +202,13 @@ export class InvoiceService {
     return { counts, items: rows.map((row) => this.toInvoiceDto(row)), page: query.page, size: query.size, total };
   }
 
+  /** Vendor view of a line: internal handling notes and pre-override amounts are not for vendors. */
+  private toVendorLineDto<T extends ReturnType<InvoiceService["toLineDto"]>>(dto: T) {
+    const { overrideReason, stateReason, originalCompanyDue, originalFines, originalVendorDue, ...visible } = dto;
+    void [overrideReason, stateReason, originalCompanyDue, originalFines, originalVendorDue];
+    return visible;
+  }
+
   public async detail(id: number, scope: Scope) {
     const invoice = this.assertReadable(await this.repo.findInvoice(id), scope);
     const [lines, adjustments] = await Promise.all([this.repo.listLines(id), this.repo.listAdjustments(id)]);
@@ -214,11 +221,7 @@ export class InvoiceService {
         .filter((line) => isStaff || line.state === LINE_STATE.INCLUDED)
         .map((line) => {
           const dto = this.toLineDto(line);
-          if (isStaff) return dto;
-          // internal handling notes and pre-override amounts are not for vendors
-          const { overrideReason, stateReason, originalCompanyDue, originalFines, originalVendorDue, ...visible } = dto;
-          void [overrideReason, stateReason, originalCompanyDue, originalFines, originalVendorDue];
-          return visible;
+          return isStaff ? dto : this.toVendorLineDto(dto);
         }),
     };
   }
@@ -230,7 +233,7 @@ export class InvoiceService {
     });
     return {
       items: rows.map((row) => ({
-        ...this.toLineDto(row),
+        ...(scope.vendorId ? this.toVendorLineDto(this.toLineDto(row)) : this.toLineDto(row)),
         hasReceipt: Boolean(row.receiptPath),
         invoiceCode: row.code,
         invoiceId: Number(row.invoiceId),

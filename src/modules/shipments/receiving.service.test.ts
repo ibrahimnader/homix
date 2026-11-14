@@ -242,13 +242,35 @@ describe("received list voucher/date filters", () => {
     for (const [sql, options] of db.mock.calls) {
       expect(sql).toContain(`o."warehouseReceiptNumber" ILIKE :documentNumber`);
       expect(sql).toContain(`o."warehouseReceiptNumber" IS NOT NULL`);
-      expect(sql).toContain(`o."shippingReceiveDate"::date >= :dateFrom`);
-      expect(sql).toContain(`o."shippingReceiveDate"::date <= :dateTo`);
-      expect(options.replacements).toMatchObject({ documentNumber: "%RCV-2026%", dateFrom: "2026-09-01", dateTo: "2026-09-30" });
+      expect(sql).toContain(`o."shippingReceiveDate" >= :dateFrom`);
+      expect(sql).toContain(`o."shippingReceiveDate" <= :dateTo`);
+      expect(sql).not.toContain("::date");
+      expect(options.replacements).toMatchObject({ documentNumber: "%RCV-2026%" });
+      /* Cairo inclusive days (UTC+3 in September) */
+      expect((options.replacements.dateFrom as Date).toISOString()).toBe("2026-08-31T21:00:00.000Z");
+      expect((options.replacements.dateTo as Date).toISOString()).toBe("2026-09-30T20:59:59.999Z");
     }
     db.mockClear();
     await new ReceivingService().list({ page: 1, search: "", documentState: "none" } as never);
     expect(db.mock.calls[0][0]).toContain(`o."warehouseReceiptNumber" IS NULL`);
+  });
+});
+
+describe("received list single-day filter (Cairo boundary)", () => {
+  it("a receipt stored as Cairo midnight of 14 Nov (13 Nov 22:00Z) falls inside the 14 Nov day window, not the 13th", async () => {
+    db.mockImplementation(async (sql: string) => (sql.includes("COUNT(*)") ? [{ total: 0 }] : []));
+    await new ReceivingService().list({ page: 1, search: "", date: "2026-11-14" } as never);
+    const { replacements } = db.mock.calls[0][1];
+    const start = replacements.dateStart as Date;
+    const end = replacements.dateEnd as Date;
+    const stored = new Date("2026-11-13T22:00:00.000Z");
+    expect(db.mock.calls[0][0]).toContain(`o."shippingReceiveDate" >= :dateStart AND o."shippingReceiveDate" <= :dateEnd`);
+    expect(stored >= start && stored <= end).toBe(true);
+    /* and the previous day's window (13 Nov) excludes it */
+    db.mockClear();
+    await new ReceivingService().list({ page: 1, search: "", date: "2026-11-13" } as never);
+    const prev = db.mock.calls[0][1].replacements;
+    expect(stored >= (prev.dateStart as Date) && stored <= (prev.dateEnd as Date)).toBe(false);
   });
 });
 

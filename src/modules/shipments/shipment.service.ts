@@ -4,7 +4,8 @@ import { success } from "../../shared/result";
 import type { Response } from "express";
 import { shipmentLegacyGateway } from "./shipment.legacy-gateway";
 import { ShipmentRepository } from "./shipment.repo";
-import { normalizeOrderMutationPayload } from "../orders/order.helpers";
+import { normalizeOrderMutationPayload, toPlain } from "../orders/order.helpers";
+import { assertFinancialEditAllowed, SHIPMENT_FINANCIAL_FIELDS } from "../orders/order-financial-guard";
 import type {
   DeliveryAccountsListQuery,
   DeliveryAccountsListResponse,
@@ -448,6 +449,15 @@ export class ShipmentService {
     const existingShipment = typeof this.shipmentRepository.findShipmentEntity === "function"
       ? await this.shipmentRepository.findShipmentEntity(shipmentId)
       : null;
+    /* Same rule as the order routes (one shared helper): cost / shipping fees /
+       discount / down payment need orders_edit_financials unless unchanged.
+       receivedAmount is intentionally not guarded — Accounts edits it. */
+    assertFinancialEditAllowed(
+      payload,
+      user,
+      existingShipment ? toPlain(existingShipment) : null,
+      SHIPMENT_FINANCIAL_FIELDS,
+    );
     const shipment = await this.shipmentRepository.updateShipment(shipmentId, payload, user.id);
     if (!shipment) {
       throw new NotFoundError("Shipment not found");
@@ -462,6 +472,7 @@ export class ShipmentService {
     payload: ShipmentMutationPayload,
     user: ShipmentRequestUser,
   ): Promise<Result<{ message: string; updatedCount: number }>> {
+    assertFinancialEditAllowed(payload, user, null, SHIPMENT_FINANCIAL_FIELDS);
     const existingShipments = typeof this.shipmentRepository.findShipmentEntity === "function"
       ? await Promise.all(shipmentIds.map((shipmentId) => this.shipmentRepository.findShipmentEntity(shipmentId)))
       : [];

@@ -37,7 +37,7 @@ describe("OrderService", () => {
 
   it("throws unauthorized when a vendor tries to update someone else's note", async () => {
     const repository = {
-      findNoteById: jest.fn().mockResolvedValue({ id: 4, userId: 77 }),
+      findOrderNote: jest.fn().mockResolvedValue({ id: 4, userId: 77 }),
       findOrderEntity: jest.fn().mockResolvedValue({ id: 7 }),
     } as never;
     const service = new OrderService(repository, {} as never);
@@ -50,16 +50,75 @@ describe("OrderService", () => {
   it("uploads note attachments through the typed repository path", async () => {
     const repository = {
       createNoteAttachments: jest.fn().mockResolvedValue(undefined),
-      findNoteById: jest.fn().mockResolvedValue({ id: 4 }),
-    } as never;
-    const service = new OrderService(repository, {} as never);
+      findOrderEntity: jest.fn().mockResolvedValue({ id: 7 }),
+      findOrderNote: jest.fn().mockResolvedValue({ id: 4 }),
+    };
+    const service = new OrderService(repository as never, {} as never);
 
     await expect(
-      service.uploadFiles(4, ["/tmp/a.pdf"], ["a.pdf"], ["invoice"]),
+      service.uploadFiles(7, 4, ["/tmp/a.pdf"], ["a.pdf"], ["invoice"], { id: 1, userType: "1" } as never),
     ).resolves.toEqual({
       data: { message: "Files uploaded!" },
       ok: true,
     });
+    expect(repository.findOrderNote).toHaveBeenCalledWith(4, 7);
+  });
+
+  it("rejects a note upload when the note is not a regular note of the order in the URL", async () => {
+    const repository = {
+      createNoteAttachments: jest.fn(),
+      findOrderEntity: jest.fn().mockResolvedValue({ id: 7 }),
+      findOrderNote: jest.fn().mockResolvedValue(null),
+    };
+    const service = new OrderService(repository as never, {} as never);
+
+    await expect(
+      service.uploadFiles(7, 4, ["/tmp/a.pdf"], ["a.pdf"], [""], { id: 1, userType: "1" } as never),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(repository.createNoteAttachments).not.toHaveBeenCalled();
+  });
+
+  it("rejects a note upload for a missing order", async () => {
+    const repository = { createNoteAttachments: jest.fn(), findOrderEntity: jest.fn().mockResolvedValue(null), findOrderNote: jest.fn() };
+    const service = new OrderService(repository as never, {} as never);
+
+    await expect(
+      service.uploadFiles(7, 4, ["/tmp/a.pdf"], ["a.pdf"], [""], { id: 1, userType: "1" } as never),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(repository.createNoteAttachments).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 when a vendor uploads to a note of an order they do not own", async () => {
+    const repository = {
+      createNoteAttachments: jest.fn(),
+      findOrderEntity: jest.fn().mockResolvedValue({ id: 7 }),
+      findOrderNote: jest.fn().mockResolvedValue({ id: 4 }),
+      findVendorOwnedOrderIds: jest.fn().mockResolvedValue([]),
+    };
+    const service = new OrderService(repository as never, {} as never);
+
+    await expect(
+      service.uploadFiles(7, 4, ["/tmp/a.pdf"], ["a.pdf"], [""], { id: 5, userType: "2", vendorId: 3 } as never),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(repository.findVendorOwnedOrderIds).toHaveBeenCalledWith([7], 3);
+    expect(repository.createNoteAttachments).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 when a vendor adds or deletes a note on an order they do not own", async () => {
+    const repository = {
+      createOrderNote: jest.fn(),
+      deleteOrderNote: jest.fn(),
+      findOrderEntity: jest.fn().mockResolvedValue({ id: 7 }),
+      findOrderNote: jest.fn().mockResolvedValue({ id: 4, userId: 5 }),
+      findVendorOwnedOrderIds: jest.fn().mockResolvedValue([]),
+    };
+    const service = new OrderService(repository as never, {} as never);
+    const vendor = { id: 5, userType: "2", vendorId: 3 } as never;
+
+    await expect(service.addNote(7, "hi", vendor)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.deleteNote(7, 4, vendor)).rejects.toBeInstanceOf(NotFoundError);
+    expect(repository.createOrderNote).not.toHaveBeenCalled();
+    expect(repository.deleteOrderNote).not.toHaveBeenCalled();
   });
 
   it("creates an order note through the repository and sends a notification through the gateway", async () => {
@@ -293,7 +352,7 @@ describe("OrderService", () => {
     };
     const service = new OrderService(repository, legacyGateway as never);
 
-    await service.updateOrder(7, { totalPrice: 3000 }, { id: 1 } as never);
+    await service.updateOrder(7, { totalPrice: 3000 }, { id: 1, userType: "1" } as never);
 
     expect(legacyGateway.updateOrder).toHaveBeenCalledWith(
       7,
@@ -303,7 +362,7 @@ describe("OrderService", () => {
         totalPrice: 3000,
         toBeCollected: 2960,
       }),
-      { id: 1 },
+      { id: 1, userType: "1" },
     );
   });
 
@@ -447,7 +506,7 @@ describe("seller chat", () => {
     const service = new OrderService(repository, {} as never);
 
     await expect(
-      service.uploadSellerChatFiles(9, ["uploads/note/x.png"], ["x.png"], [""]),
+      service.uploadSellerChatFiles(7, 9, ["uploads/note/x.png"], ["x.png"], [""]),
     ).rejects.toBeInstanceOf(NotFoundError);
   });
 
@@ -459,9 +518,11 @@ describe("seller chat", () => {
     const service = new OrderService(repository as never, {} as never);
 
     await expect(
-      service.uploadSellerChatFiles(9, ["uploads/note/x.png"], ["x.png"], [""]),
+      service.uploadSellerChatFiles(7, 9, ["uploads/note/x.png"], ["x.png"], [""]),
     ).resolves.toEqual({ data: { message: "Files uploaded!" }, ok: true });
     expect(repository.createNoteAttachments).toHaveBeenCalledWith(9, ["uploads/note/x.png"], ["x.png"], [""]);
+    /* the message must be looked up bound to the order in the URL */
+    expect(repository.findSellerChatMessageById).toHaveBeenCalledWith(9, 7);
   });
 
   it("replaces the shared quick-reply list through the typed repository path", async () => {

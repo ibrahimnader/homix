@@ -75,10 +75,12 @@ export class OrderController {
   public uploadFiles = async (request: Request, response: Response): Promise<void> => {
     const result = unwrap(
       await this.orderService.uploadFiles(
+        Number(request.params.orderId),
         Number(request.params.noteId),
         request.filePaths ?? [],
         request.fileNames ?? [],
         request.descriptions ?? [],
+        request.user ?? { id: 0 },
       ),
     );
     response.status(200).json({ ...result, status: true });
@@ -95,6 +97,7 @@ export class OrderController {
   public uploadSellerChatFiles = async (request: Request, response: Response): Promise<void> => {
     const result = unwrap(
       await this.orderService.uploadSellerChatFiles(
+        Number(request.params.orderId),
         Number(request.params.messageId),
         request.filePaths ?? [],
         request.fileNames ?? [],

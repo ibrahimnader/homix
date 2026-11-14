@@ -1,4 +1,13 @@
+import { col, fn, Op } from "sequelize";
+
 import type { BaseRepository } from "../../shared/repository";
+import {
+  getNotificationCategory,
+  SHIPMENT_ENTITY_TYPES,
+  TICKET_ENTITY_TYPES,
+} from "./notification.category";
+import type { NotificationCategory, NotificationCounts } from "./notification.category";
+import { emptyNotificationCounts } from "./notification.category";
 import type {
   CreateNotificationInput,
   NotificationAttributes,
@@ -8,7 +17,10 @@ type LegacyNotificationModel = {
   create: (payload: CreateNotificationInput) => Promise<{ toJSON: () => NotificationAttributes }>;
   destroy: (options: { where: Readonly<Record<string, unknown>> }) => Promise<number>;
   findAll: (options: {
+    attributes?: unknown;
+    group?: unknown;
     order?: ReadonlyArray<readonly [string, string]>;
+    raw?: boolean;
     where?: Readonly<Record<string, unknown>>;
   }) => Promise<Array<{ toJSON: () => NotificationAttributes } | NotificationAttributes>>;
   update: (
@@ -22,7 +34,21 @@ const notificationModel = require("../../../app/modules/notification/notificatio
 const toNotification = (
   notification: { toJSON: () => NotificationAttributes } | NotificationAttributes,
 ): NotificationAttributes => {
-  return "toJSON" in notification ? notification.toJSON() : notification;
+  const plain = "toJSON" in notification ? notification.toJSON() : notification;
+  return { ...plain, category: getNotificationCategory(plain.entityType) };
+};
+
+/** `entityType` filter that selects exactly one category (the inverse of getNotificationCategory). */
+export const buildCategoryWhere = (category: NotificationCategory): Record<string, unknown> => {
+  if (category === "shipments") {
+    return { entityType: { [Op.in]: [...SHIPMENT_ENTITY_TYPES] } };
+  }
+
+  if (category === "tickets") {
+    return { entityType: { [Op.in]: [...TICKET_ENTITY_TYPES] } };
+  }
+
+  return { entityType: { [Op.notIn]: [...SHIPMENT_ENTITY_TYPES, ...TICKET_ENTITY_TYPES] } };
 };
 
 export class NotificationRepository
@@ -44,6 +70,25 @@ export class NotificationRepository
     });
 
     return notifications.map((notification) => toNotification(notification) as TResult);
+  }
+
+  /** Unread notifications of one user, bucketed per category. */
+  public async countUnreadByCategory(userId: number): Promise<NotificationCounts> {
+    const rows = (await notificationModel.findAll({
+      attributes: ["entityType", [fn("COUNT", col("id")), "count"]],
+      group: ["entityType"],
+      raw: true,
+      where: { readAt: null, userId },
+    })) as unknown as Array<{ count: number | string; entityType: string }>;
+
+    const counts = emptyNotificationCounts();
+    for (const row of rows) {
+      const amount = Number(row.count) || 0;
+      counts[getNotificationCategory(row.entityType)] += amount;
+      counts.total += amount;
+    }
+
+    return counts;
   }
 
   public async update<TResult = number>(

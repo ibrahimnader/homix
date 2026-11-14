@@ -23,6 +23,10 @@ const orderModel = {
   update: jest.fn(),
 };
 
+const orderLineModel = {
+  findAll: jest.fn().mockResolvedValue([]),
+};
+
 const productModel = {
   findAll: jest.fn(),
   findByPk: jest.fn(),
@@ -59,6 +63,10 @@ const shippingCompanyModel = {
 
 const vendorModel = {
   findAll: jest.fn(),
+};
+
+const customerModel = {
+  findByPk: jest.fn(),
 };
 
 const legacyShipmentService = {
@@ -101,14 +109,14 @@ jest.mock("../../infrastructure/database", () => ({
 }));
 
 jest.mock("../../../app/modules/order/order.model", () => orderModel);
-jest.mock("../../../app/modules/orderLines/orderline.model", () => ({}));
+jest.mock("../../../app/modules/orderLines/orderline.model", () => orderLineModel);
 jest.mock("../../../app/modules/product/product.model", () => productModel);
 jest.mock("../../../app/modules/shipments/shipmentInventory.model", () => shipmentInventoryModel);
 jest.mock("../../../app/modules/shipments/shipmentExpense.model", () => shipmentExpenseModel);
 jest.mock("../../../app/modules/shipments/shipmentReturn.model", () => shipmentReturnModel);
 jest.mock("../../../app/modules/shipments/shippingCompany.model", () => shippingCompanyModel);
 jest.mock("../../../app/modules/vendor/vendor.model", () => vendorModel);
-jest.mock("../../../app/modules/customer/customer.model", () => ({}));
+jest.mock("../../../app/modules/customer/customer.model", () => customerModel);
 jest.mock("../../../app/modules/notes/notes.model", () => ({
   create: jest.fn(),
   findByPk: jest.fn(),
@@ -236,7 +244,7 @@ const makeShipmentRecord = (overrides: Record<string, unknown> = {}) => {
 
   return {
     toJSON: () => ({ ...state }),
-    update: jest.fn(async (payload: Record<string, unknown>) => {
+    update: jest.fn(async (payload: Record<string, unknown>, _options?: Record<string, unknown>) => {
       Object.assign(state, payload);
     }),
   };
@@ -1142,6 +1150,60 @@ describe("shipmentRouter", () => {
     }));
   });
 
+  it("cascades a shipment status to the order status and confirmation, logging derived rows as automatic", async () => {
+    const shipmentRecord = makeShipmentRecord({ id: 9802, shipmentStatus: 2, status: 8, confirmationStatus: 2 });
+    orderModel.findByPk.mockResolvedValue(shipmentRecord);
+
+    const response = await request(app).put("/shipments/9802").send({ shipmentStatus: 15 });
+
+    expect(response.status).toBe(200);
+    expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({ confirmationStatus: 7, shipmentStatus: 15, status: 11 }));
+    expect(logModel.create).toHaveBeenCalledWith(expect.objectContaining({ action: "update", field: "status", from: "8", to: "11" }));
+    expect(logModel.create).toHaveBeenCalledWith(expect.objectContaining({ action: "update", field: "confirmationStatus", from: "2", to: "7" }));
+    expect(logModel.create).toHaveBeenCalledWith(expect.objectContaining({
+      action: "auto_sync", entityId: 9802, field: "autoSync", from: "shipmentStatus", to: "status:8->11",
+    }));
+    expect(logModel.create).toHaveBeenCalledWith(expect.objectContaining({
+      action: "auto_sync", from: "shipmentStatus", to: "confirmationStatus:2->7",
+    }));
+  });
+
+  it("maps returned-from-customer and replaced shipments to refunded and replaced orders (reopen from final too)", async () => {
+    for (const [shipmentStatus, orderStatus] of [[7, 6], [9, 7]] as const) {
+      const shipmentRecord = makeShipmentRecord({ id: 9802, shipmentStatus: 4, status: 5 });
+      orderModel.findByPk.mockResolvedValue(shipmentRecord);
+      const response = await request(app).put("/shipments/9802").send({ shipmentStatus });
+      expect(response.status).toBe(200);
+      expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({ shipmentStatus, status: orderStatus }));
+    }
+  });
+
+  it("does not overwrite an order status sent explicitly with the shipment status", async () => {
+    const shipmentRecord = makeShipmentRecord({ id: 9802, shipmentStatus: 2, status: 8, confirmationStatus: 7 });
+    orderModel.findByPk.mockResolvedValue(shipmentRecord);
+
+    await request(app).put("/shipments/9802").send({ shipmentStatus: 4, status: 3 });
+    expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({ shipmentStatus: 4, status: 3 }));
+    expect(logModel.create).not.toHaveBeenCalledWith(expect.objectContaining({ action: "auto_sync" }));
+  });
+
+  it("bulk status change derives the order status per row", async () => {
+    const records = [
+      makeShipmentRecord({ id: 9802, shipmentStatus: 2, status: 8 }),
+      makeShipmentRecord({ id: 9803, shipmentStatus: 5, status: 4 }),
+    ];
+    orderModel.findByPk.mockImplementation(async (id: number) => records.find((r) => r.toJSON().id === id) ?? null);
+
+    const response = await request(app).put("/shipments/bulk-update").send({ data: { shipmentStatus: 4 }, shipmentIds: [9802, 9803] });
+
+    expect(response.status).toBe(200);
+    records.forEach((record) => {
+      expect(record.update).toHaveBeenCalledWith(expect.objectContaining({ shipmentStatus: 4, status: 5 }));
+    });
+    expect(logModel.create).toHaveBeenCalledWith(expect.objectContaining({ action: "auto_sync", entityId: 9802, to: "status:8->5" }));
+    expect(logModel.create).toHaveBeenCalledWith(expect.objectContaining({ action: "auto_sync", entityId: 9803, to: "status:4->5" }));
+  });
+
   it("bulk-updates the shipping company for every selected shipment", async () => {
     const records = [makeShipmentRecord({ id: 9802 }), makeShipmentRecord({ id: 9803 })];
     orderModel.findByPk.mockImplementation(async (id: number) => records.find((r) => r.toJSON().id === id) ?? null);
@@ -1207,6 +1269,120 @@ describe("shipmentRouter", () => {
       receivedAmountManuallySet: true,
       shipmentType: "separate",
     }));
+  });
+
+  it("applies the customer block the edit form sends, in the same transaction as the order update", async () => {
+    const shipmentRecord = makeShipmentRecord({ customerId: 55, id: 9802, shipmentStatus: 2 });
+    const customerRecord = { update: jest.fn().mockResolvedValue(undefined) };
+    orderModel.findByPk.mockResolvedValue(shipmentRecord);
+    customerModel.findByPk.mockResolvedValue(customerRecord);
+
+    const response = await request(app).put("/shipments/9802").send({
+      customer: { first_name: " Mona ", last_name: "Ali", phone: "01000000000", address: "  12 Nile St " },
+      shipmentStatus: 2,
+    });
+
+    expect(response.status).toBe(200);
+    expect(sequelizeTransaction).toHaveBeenCalledTimes(1);
+    expect(customerModel.findByPk).toHaveBeenCalledWith(55, expect.objectContaining({ transaction: expect.anything() }));
+    expect(customerRecord.update).toHaveBeenCalledWith(
+      { address: "12 Nile St", firstName: "Mona", lastName: "Ali", phoneNumber: "01000000000" },
+      expect.objectContaining({ transaction: expect.anything() }),
+    );
+    /* the customer key must not leak into the order columns */
+    const [orderPayload, orderOptions] = shipmentRecord.update.mock.calls[0]!;
+    expect(orderPayload).not.toHaveProperty("customer");
+    expect(orderOptions).toEqual(expect.objectContaining({ transaction: expect.anything() }));
+  });
+
+  it("rejects a malformed customer block with 400 and writes nothing", async () => {
+    const shipmentRecord = makeShipmentRecord({ customerId: 55, id: 9802 });
+    orderModel.findByPk.mockResolvedValue(shipmentRecord);
+
+    const response = await request(app).put("/shipments/9802").send({ customer: { first_name: 5 } });
+
+    expect(response.status).toBe(400);
+    expect(shipmentRecord.update).not.toHaveBeenCalled();
+    expect(customerModel.findByPk).not.toHaveBeenCalled();
+  });
+
+  describe("orders_edit_financials on the shipment routes", () => {
+    const admin = { id: 1, userType: "1" };
+    const keyHolder = { id: 4, permissions: { finance_settle: true, orders_edit_financials: true, ship_edit: true }, userType: "3" };
+    const noKey = { id: 3, permissions: { finance_settle: true, ship_edit: true }, userType: "3" };
+    const people = {
+      admin: { expectOk: true, user: { id: 1, userType: "1" } },
+      keyHolder: { expectOk: true, user: keyHolder },
+      noKey: { expectOk: false, user: noKey },
+    } as const;
+    const stored = { downPayment: "200", id: 9802, shipmentStatus: 2, shippingFees: "50.00", totalDiscounts: "0" };
+
+    it.each(["costPrice", "shippingFees", "downPayment", "totalDiscounts"])("PUT /shipments/:id with a changed %s: admin and key holder 200, staff without key 403", async (field) => {
+      for (const [who, { expectOk, user }] of Object.entries(people)) {
+        mockAuthenticatedUser = user;
+        const record = makeShipmentRecord(stored);
+        orderModel.findByPk.mockResolvedValue(record);
+        orderModel.findAll.mockResolvedValue([]);
+        const response = await request(app).put("/shipments/9802").send({ [field]: 777 });
+        expect({ status: response.status, who }).toEqual({ status: expectOk ? 200 : 403, who });
+        if (!expectOk) expect(record.update).not.toHaveBeenCalled();
+      }
+    });
+
+    it("staff without the key can save the edit form when the money fields are unchanged (what ShipmentEdit re-sends)", async () => {
+      mockAuthenticatedUser = noKey;
+      const record = makeShipmentRecord(stored);
+      orderModel.findByPk.mockResolvedValue(record);
+
+      const response = await request(app).put("/shipments/9802").send({
+        downPayment: 200, notes: "x", scheduleStatus: 1, shipmentStatus: 3, shippingFees: 50, toBeCollected: 123,
+      });
+
+      expect(response.status).toBe(200);
+      expect(record.update).toHaveBeenCalled();
+    });
+
+    it("staff without the key can still edit receivedAmount on the shipment route (not guarded)", async () => {
+      mockAuthenticatedUser = noKey;
+      orderModel.findByPk.mockResolvedValue(makeShipmentRecord(stored));
+      expect((await request(app).put("/shipments/9802").send({ receivedAmount: 10 })).status).toBe(200);
+    });
+
+    it("a vendor is rejected on money fields even holding the key and if isNotVendor were bypassed (defence in depth)", async () => {
+      mockAuthenticatedUser = { id: 2, permissions: { orders_edit_financials: true, ship_edit: true }, userType: "2", vendorId: 9 };
+      orderModel.findByPk.mockResolvedValue(makeShipmentRecord(stored));
+      const response = await request(app).put("/shipments/9802").send({ shippingFees: 1 });
+      expect(response.status).toBe(403);
+    });
+
+    it("PUT /shipments/bulk-update: money fields are not in the allow-list, so they are dropped for everyone (including admin); the service guard also rejects them for staff without the key", async () => {
+      for (const { user } of Object.values(people)) {
+        mockAuthenticatedUser = user;
+        orderModel.findByPk.mockResolvedValue(makeShipmentRecord(stored));
+        const response = await request(app).put("/shipments/bulk-update").send({ data: { shipmentStatus: 3, shippingFees: 1, costPrice: 1 }, shipmentIds: [9802] });
+        expect(response.status).toBe(200);
+      }
+      const record = makeShipmentRecord(stored);
+      orderModel.findByPk.mockResolvedValue(record);
+      mockAuthenticatedUser = admin;
+      await request(app).put("/shipments/bulk-update").send({ data: { shipmentStatus: 3, shippingFees: 1 }, shipmentIds: [9802] });
+      expect(record.update.mock.calls.every(([payload]) => !("shippingFees" in payload))).toBe(true);
+    });
+
+    it("accounts: costPrice needs the key, receivedAmount does not", async () => {
+      const cases: Array<[typeof people[keyof typeof people], Record<string, unknown>, number]> = [
+        [people.noKey, { costPrice: 5 }, 403],
+        [people.noKey, { receivedAmount: 5 }, 200],
+        [people.keyHolder, { costPrice: 5 }, 200],
+        [people.admin, { costPrice: 5, receivedAmount: 5 }, 200],
+      ];
+      for (const [person, body, status] of cases) {
+        mockAuthenticatedUser = person.user;
+        orderModel.findByPk.mockResolvedValue(makeShipmentRecord({ ...stored, shipmentStatus: 4 }));
+        const response = await request(app).put("/shipments/accounts/deliveries/9802").send(body);
+        expect({ body, status: response.status }).toEqual({ body, status });
+      }
+    });
   });
 
   it("creates and updates a missing vendor-return row when the list exposed an order id", async () => {

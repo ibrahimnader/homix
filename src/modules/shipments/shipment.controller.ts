@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 
 import { unwrap } from "../../shared/result";
+import { assertFinancialEditAllowed } from "../orders/order-financial-guard";
 import type { ShipmentService } from "./shipment.service";
 
 export class ShipmentController {
@@ -126,6 +127,9 @@ export class ShipmentController {
   };
 
   public updateDeliveryAccount = async (request: Request, response: Response): Promise<void> => {
+    /* costPrice rewrites the order lines and totalCost, so it needs the financial key;
+       receivedAmount stays under finance_settle. */
+    assertFinancialEditAllowed(request.body, request.user, null, ["costPrice"]);
     response.status(200).json({ ...unwrap(await this.shipmentService.updateDeliveryAccount(Number(request.params.orderId), request.body)), status: true });
   };
 

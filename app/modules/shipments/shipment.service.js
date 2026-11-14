@@ -18,6 +18,8 @@ const {
   USER_TYPES,
   DELIVERY_STATUS,
   PAYMENT_STATUS,
+  MANUFACTURE_STATUS_ARABIC,
+  CONFIRMATION_STATUS_ARABIC,
 } = require("../../../config/constants");
 const {
   DELIVERY_BY_LABELS,
@@ -781,6 +783,9 @@ class ShipmentService {
       { header: "تاريخ التسليم الفعلي", key: "actualDeliveryDate" },
       { header: "عداد الأيام", key: "daysCounter" },
       { header: "الملاحظات", key: "notes" },
+      /* Appended after the fixed business-spec columns on purpose (same as the orders export). */
+      { header: "حالة التصنيع", key: "manufactureStatus" },
+      { header: "حالة التأكيد", key: "confirmationStatus" },
     ].map((column) => ({
       ...column,
       style: { alignment: { horizontal: "right" } },
@@ -861,6 +866,7 @@ class ShipmentService {
           actualDeliveryDate: formatExportDate(order.deliveryDate),
           amountToCollect,
           code: order.code,
+          confirmationStatus: CONFIRMATION_STATUS_ARABIC[order.confirmationStatus] || "",
           customerName: customer
             ? `${customer.firstName || ""} ${customer.lastName || ""}`.trim()
             : "",
@@ -873,6 +879,7 @@ class ShipmentService {
             ) ?? "",
           deliveryBy: DELIVERY_BY_LABELS[order.deliveryBy] || "",
           governorate: resolveGovernorateLabel(order.governorate),
+          manufactureStatus: MANUFACTURE_STATUS_ARABIC[order.manufactureStatus] || "",
           notes: order.notes || "",
           /* One row per shipment, so the SKU shown is the first line's — the
              same one the shipments table displays. */

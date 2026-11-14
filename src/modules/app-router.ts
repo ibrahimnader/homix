@@ -286,24 +286,37 @@ const swaggerOptions = {
         NotificationItem: {
           type: "object",
           properties: {
+            category: { enum: ["orders", "shipments", "tickets"], example: "orders", type: "string" },
             createdAt: { example: "2026-05-02T00:45:00.000Z", format: "date-time", type: "string" },
+            entityId: { example: 31668, type: "integer" },
+            entityType: { example: "order", type: "string" },
             id: { example: 17, type: "integer" },
-            isRead: { example: false, type: "boolean" },
-            message: { example: "طلب جديد رقم 31668", type: "string" },
-            type: { example: "order", type: "string" },
+            readAt: { example: null, format: "date-time", nullable: true, type: "string" },
+            text: { example: "تم اضافة طلب جديد رقم 31668", type: "string" },
+            userId: { example: 7, nullable: true, type: "integer" },
           },
-          required: ["id", "message"],
+          required: ["id", "text"],
         },
         NotificationListResponse: {
           type: "object",
           properties: {
-            data: {
+            counts: {
+              description: "Unread notifications per category",
+              properties: {
+                orders: { example: 3, type: "integer" },
+                shipments: { example: 1, type: "integer" },
+                tickets: { example: 0, type: "integer" },
+                total: { example: 4, type: "integer" },
+              },
+              type: "object",
+            },
+            notifications: {
               items: { $ref: "#/components/schemas/NotificationItem" },
               type: "array",
             },
             status: { example: true, type: "boolean" },
           },
-          required: ["data"],
+          required: ["notifications", "counts"],
         },
         UserSummary: {
           type: "object",

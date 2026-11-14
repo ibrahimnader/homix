@@ -39,7 +39,7 @@ receivingRouter.use(requirePermission("ship_receipts_view"));
  *     summary: All factories (id, name) for receipt filters; needs only ship_receipts_view
  *     tags: [Shipments]
  *     responses:
- *       200: { description: List of { id, name } ordered by name }
+ *       200: { description: "List of { id, name } ordered by name" }
  */
 receivingRouter.get(
   "/candidates",

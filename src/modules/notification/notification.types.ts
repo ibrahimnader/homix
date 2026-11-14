@@ -1,4 +1,8 @@
+import type { NotificationCategory, NotificationCounts } from "./notification.category";
+
 export interface NotificationAttributes {
+  /** Derived from entityType, see notification.category.ts. Not a stored column. */
+  category?: NotificationCategory;
   createdAt?: Date;
   entityId: number;
   entityType: string;
@@ -17,6 +21,7 @@ export interface CreateNotificationInput {
 }
 
 export interface NotificationResponse {
+  counts: NotificationCounts;
   notifications: NotificationAttributes[];
   status: true;
 }

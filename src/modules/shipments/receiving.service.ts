@@ -1,9 +1,11 @@
 import { QueryTypes, Transaction } from "sequelize";
 import moment from "moment-timezone";
+import { toDateRangeBoundary } from "./shipment.helpers";
 import { sequelize } from "../../infrastructure/database";
 import { ConflictError, NotFoundError, ValidationError } from "../../shared/errors";
 import { z } from "zod";
 import { ORDER_STATUS, SHIPMENTS_STATUS, DELIVERY_BY } from "../../../config/constants";
+import { buildAutoSyncLogRows, deriveStatusPatch } from "../orders/order-status-sync";
 import {
   receivingCreateSchema,
   receivingListSchema,
@@ -188,17 +190,21 @@ export class ReceivingService {
     like(filters.documentNumber, "documentNumber", `o."warehouseReceiptNumber"`);
     if (filters.documentState === "issued") clauses.push(`o."warehouseReceiptNumber" IS NOT NULL`);
     if (filters.documentState === "none") clauses.push(`o."warehouseReceiptNumber" IS NULL`);
+    /* Days are Cairo calendar days, like the shipments filters. shippingReceiveDate
+       is stored as Cairo midnight (the previous day 21:00/22:00Z), so comparing
+       ::date in the UTC session shifted every receipt one day back. */
     if (filters.date) {
-      replacements.date = filters.date;
-      clauses.push(`o."shippingReceiveDate"::date = :date`);
+      replacements.dateStart = toDateRangeBoundary(filters.date, "start");
+      replacements.dateEnd = toDateRangeBoundary(filters.date, "end");
+      clauses.push(`o."shippingReceiveDate" >= :dateStart AND o."shippingReceiveDate" <= :dateEnd`);
     }
     if (filters.dateFrom) {
-      replacements.dateFrom = filters.dateFrom;
-      clauses.push(`o."shippingReceiveDate"::date >= :dateFrom`);
+      replacements.dateFrom = toDateRangeBoundary(filters.dateFrom, "start");
+      clauses.push(`o."shippingReceiveDate" >= :dateFrom`);
     }
     if (filters.dateTo) {
-      replacements.dateTo = filters.dateTo;
-      clauses.push(`o."shippingReceiveDate"::date <= :dateTo`);
+      replacements.dateTo = toDateRangeBoundary(filters.dateTo, "end");
+      clauses.push(`o."shippingReceiveDate" <= :dateTo`);
     }
     return { where: clauses.join(" AND "), replacements };
   }
@@ -367,6 +373,10 @@ export class ReceivingService {
           deliveryBy: DELIVERY_BY.HOMIX,
           shippedFromInventory: true,
         };
+        /* Receipt sets order + shipment status explicitly; the shared sync adds the
+           confirmation column if the new order status implies one. */
+        const statusSync = deriveStatusPatch(order, changes);
+        Object.assign(changes, statusSync.patch);
         await Log.bulkCreate(
           Object.entries(changes)
             .filter(([field, value]) => String(order[field] ?? "") !== String(value))
@@ -379,6 +389,10 @@ export class ReceivingService {
               to: String(value),
               userId,
             })),
+          { transaction }
+        );
+        await Log.bulkCreate(
+          buildAutoSyncLogRows(orderId, statusSync.derived, userId).filter((row) => row.action !== "update"),
           { transaction }
         );
         await order.update(changes, { transaction });

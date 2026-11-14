@@ -56,6 +56,10 @@ const Log = require("../logs/log.model");
 const PREFIX = "H";
 const CUSTOM_PREFIX = "CU";
 const { resolveExpectedDeliveryDate } = require("../../../src/modules/orders/order-fines");
+const {
+  deriveStatusPatch,
+  buildAutoSyncLogRows,
+} = require("../../../src/modules/orders/order-status-sync");
 
 const normalizeNumber = (value) => {
   const parsedValue = Number(value);
@@ -1050,7 +1054,9 @@ class OrderService {
     }
     if (userId) {
       whereClause[Op.and].push(
-        sequelize.where(sequelize.col("Order.userId"), { [Op.eq]: userId }),
+        sequelize.where(sequelize.col("Order.userId"), {
+          [Op.in]: String(userId).split(",").map(Number),
+        }),
       );
     }
 
@@ -1760,6 +1766,11 @@ class OrderService {
         });
       }
     });
+    /* status / shipmentStatus / confirmationStatus drive each other (one hop,
+       explicit values in this payload win) — see order-status-sync. */
+    const statusSync = deriveStatusPatch(order, orderData);
+    Object.assign(orderData, statusSync.patch);
+    logs.push(...buildAutoSyncLogRows(order.id, statusSync.derived, user.id));
     if (orderData.status) {
       if (Number(order.status) !== Number(orderData.status)) {
         if (orderData.status == ORDER_STATUS.IN_PROGRESS) {
@@ -2025,6 +2036,32 @@ class OrderService {
 
     for (const order of orders) {
       const perOrderData = { ...orderData };
+
+      /* Linked statuses: derive the absent ones per order from what really
+         changes on that order (see order-status-sync). */
+      const statusSync = deriveStatusPatch(order, orderData);
+      Object.assign(perOrderData, statusSync.patch);
+      logs.push(...buildAutoSyncLogRows(order.id, statusSync.derived, user.id));
+      if (
+        statusSync.patch.status !== undefined
+        && Number(statusSync.patch.status) !== Number(order.status)
+      ) {
+        await OrderService.sendNotification(
+          order.id,
+          order.orderNumber,
+          {
+            orderId: order.id,
+            oldStatus: order.status,
+            newStatus: statusSync.patch.status,
+            user: {
+              firstName: user.firstName,
+              lastName: user.lastName,
+            },
+            type: "orderUpdate",
+          },
+          true,
+        );
+      }
 
       /* Same rule as the single-order update: the manufacturing date records the
          moment an order entered «قيد التصنيع», so it is written only on the

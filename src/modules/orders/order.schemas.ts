@@ -3,6 +3,14 @@ import { z } from "zod";
 import { DEFAULT_PAGE_NUMBER, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, ORDER_PRIORITY_KEYS } from "./order.constants";
 
 const csvNumberString = z.string().trim().min(1);
+/* Comma-separated list of positive ints ("1,2"); a single value ("7") still works.
+   Kept as a normalised string so it composes with the other csv filters. */
+const csvPositiveIntString = z.union([z.string(), z.number()]).transform((value) => String(value).trim()).pipe(
+  z.string().min(1).refine(
+    (value) => value.split(",").every((item) => /^[1-9]\d*$/.test(item.trim())),
+    "Expected a comma-separated list of positive integers",
+  ),
+).transform((value) => value.split(",").map((item) => item.trim()).join(","));
 const dateString = z.string().trim().refine((value) => !Number.isNaN(new Date(value).getTime()), {
   message: "Invalid date value",
 });
@@ -44,7 +52,7 @@ export const orderListQuerySchema = z.object({
   size: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
   startDate: dateString.optional(),
   status: csvNumberString.optional(),
-  userId: z.coerce.number().int().positive().optional(),
+  userId: csvPositiveIntString.optional(),
   vendorId: csvNumberString.optional(),
   vendorName: z.string().trim().optional(),
 });

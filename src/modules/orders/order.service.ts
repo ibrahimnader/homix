@@ -7,6 +7,7 @@ import type { DashboardMetricSnapshot } from "../dashboard/dashboard.types";
 import { orderLegacyGateway, type LegacyOrderGateway } from "./order.legacy-gateway";
 import { normalizeOrderMutationPayload, toNumber, toPlain, toText } from "./order.helpers";
 import { OrderRepository } from "./order.repo";
+import { assertFinancialEditAllowed } from "./order-financial-guard";
 import type { LegacyOrderResponse, OrderDetailsResponse, OrderFinancialReportQuery, OrderFinancialReportResponse, OrderListQuery, OrderListResponse, OrderMetaResponse, OrderMutationPayload, OrderRequestUser, OrderSummaryResponse } from "./order.types";
 import type { Response } from "express";
 
@@ -45,35 +46,13 @@ export const restrictVendorOrderPayload = (
   ) as OrderMutationPayload;
 };
 
-/**
- * Order financial fields (cost / shipping / discount / purchase deposit) may only be
- * changed by an admin or a non-vendor user holding `orders_edit_financials`.
- * Vendors never may, whatever their permission map says. A field that is sent but
- * equals the stored value is not a change (the full edit form re-sends every field).
- */
-export const ORDER_FINANCIAL_EDIT_PERMISSION = "orders_edit_financials";
-const ORDER_FINANCIAL_FIELDS = ["costPrice", "shippingFees", "totalDiscounts", "downPayment"] as const;
+export {
+  ORDER_FINANCIAL_EDIT_PERMISSION,
+  assertFinancialEditAllowed,
+  canEditOrderFinancials,
+} from "./order-financial-guard";
 
-export const canEditOrderFinancials = (user: OrderRequestUser): boolean => {
-  if (String(user?.userType) === String(USER_TYPES.VENDOR)) return false;
-  if (String(user?.userType) === String(USER_TYPES.ADMIN)) return true;
-  const permissions = (user as { permissions?: Record<string, unknown> } | undefined)?.permissions;
-  return Boolean(permissions && typeof permissions === "object" && permissions[ORDER_FINANCIAL_EDIT_PERMISSION]);
-};
-
-export const assertFinancialEditAllowed = (
-  payload: Record<string, unknown>,
-  user: OrderRequestUser,
-  existing?: Record<string, unknown> | null,
-): void => {
-  if (canEditOrderFinancials(user)) return;
-  const changed = ORDER_FINANCIAL_FIELDS.some((field) => {
-    if (!(field in payload) || payload[field] === undefined) return false;
-    if (!existing || field === "costPrice") return true;
-    return toNumber(payload[field]) !== toNumber(existing[field]);
-  });
-  if (changed) throw new ForbiddenError("ليس لديك صلاحية تعديل التفاصيل المالية للطلب");
-};
+const isVendorUser = (user: OrderRequestUser | undefined): boolean => String(user?.userType) === String(USER_TYPES.VENDOR);
 
 export class OrderService {
   private readonly dashboardAggregateService = new DashboardAggregateService({
@@ -91,6 +70,22 @@ export class OrderService {
     private readonly orderRepository: OrderRepository,
     private readonly legacyGateway: LegacyOrderGateway = orderLegacyGateway,
   ) {}
+
+  /**
+   * A vendor may only touch orders containing one of their own products. Anything
+   * else — missing or someone else's — is a plain 404, so existence never leaks
+   * (same convention as getOrderById). With several ids ALL must be owned: one
+   * foreign id rejects the whole request before anything is written. Staff pass.
+   */
+  private async assertVendorOwnsOrders(orderIds: number[], user: OrderRequestUser): Promise<void> {
+    if (!isVendorUser(user)) return;
+    const uniqueIds = [...new Set(orderIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+    const vendorId = Number((user as { vendorId?: unknown }).vendorId);
+    if (uniqueIds.length === 0) return;
+    if (!vendorId) throw new NotFoundError("Order not found");
+    const owned = await this.orderRepository.findVendorOwnedOrderIds(uniqueIds, vendorId);
+    if (owned.length !== uniqueIds.length) throw new NotFoundError("Order not found");
+  }
 
   public async listOrders(filters: OrderListQuery, vendorId?: number | null): Promise<Result<OrderListResponse>> {
     return success(await this.orderRepository.listOrders(filters, vendorId));
@@ -128,6 +123,7 @@ export class OrderService {
   }
 
   public async updateOrder(orderId: number, payload: OrderMutationPayload, user: OrderRequestUser): Promise<Result<unknown>> {
+    await this.assertVendorOwnsOrders([orderId], user);
     const existingOrder = await this.orderRepository.findOrderEntity(orderId);
     const scopedPayload = restrictVendorOrderPayload(payload, user);
     assertFinancialEditAllowed(payload as Record<string, unknown>, user, existingOrder ? toPlain(existingOrder) : null);
@@ -142,8 +138,11 @@ export class OrderService {
     user: OrderRequestUser,
   ): Promise<Result<{ message: string }>> {
     const orderIds = Array.isArray(payload.orderIds) ? payload.orderIds.map(Number).filter(Boolean) : [];
-    const orderData = { ...((payload.orderData as Record<string, unknown> | undefined) ?? {}) };
-    assertFinancialEditAllowed(orderData, user, null);
+    await this.assertVendorOwnsOrders(orderIds, user);
+    const rawOrderData = { ...((payload.orderData as Record<string, unknown> | undefined) ?? {}) };
+    assertFinancialEditAllowed(rawOrderData, user, null);
+    /* Same vendor whitelist as the single-order update: a vendor may only change manufactureStatus/notes. */
+    const orderData = restrictVendorOrderPayload(rawOrderData as OrderMutationPayload, user) as Record<string, unknown>;
     delete orderData.shippedFromInventory;
     if (orderData.deliveryBy !== undefined && orderData.deliveryBy !== null && orderData.deliveryBy !== "") {
       orderData.shippedFromInventory = Number(orderData.deliveryBy) === DELIVERY_BY.HOMIX;
@@ -182,6 +181,7 @@ export class OrderService {
   }
 
   public async addNote(orderId: number, text: string, user: OrderRequestUser): Promise<Result<unknown>> {
+    await this.assertVendorOwnsOrders([orderId], user);
     const order = await this.orderRepository.findOrderEntity(orderId);
     if (!order) throw new NotFoundError("Order not found");
     const newNote = await this.orderRepository.createOrderNote(orderId, Number(user.id), text);
@@ -205,9 +205,10 @@ export class OrderService {
   }
 
   public async updateNote(orderId: number, noteId: number, text: string, user: OrderRequestUser): Promise<Result<unknown>> {
+    await this.assertVendorOwnsOrders([orderId], user);
     const order = await this.orderRepository.findOrderEntity(orderId);
     if (!order) throw new NotFoundError("Order Line not found");
-    const note = await this.orderRepository.findNoteById(noteId);
+    const note = await this.orderRepository.findOrderNote(noteId, orderId);
     if (!note) throw new NotFoundError("Note not found");
     const noteRecord = note as { userId?: number | string };
     if (String(user.userType) === String(USER_TYPES.VENDOR) || String(user.id) !== String(noteRecord.userId)) {
@@ -217,9 +218,10 @@ export class OrderService {
   }
 
   public async deleteNote(orderId: number, noteId: number, user: OrderRequestUser): Promise<Result<{ message: string }>> {
+    await this.assertVendorOwnsOrders([orderId], user);
     const order = await this.orderRepository.findOrderEntity(orderId);
     if (!order) throw new NotFoundError("Order Line not found");
-    const note = await this.orderRepository.findNoteById(noteId);
+    const note = await this.orderRepository.findOrderNote(noteId, orderId);
     if (!note) throw new NotFoundError("Note not found");
     const noteRecord = note as { userId?: number | string };
     if (String(user.id) !== String(noteRecord.userId)) {
@@ -230,12 +232,18 @@ export class OrderService {
   }
 
   public async uploadFiles(
+    orderId: number,
     noteId: number,
     filePaths: string[],
     fileNames: string[],
     descriptions: string[],
+    user: OrderRequestUser,
   ): Promise<Result<{ message: string }>> {
-    const note = await this.orderRepository.findNoteById(noteId);
+    await this.assertVendorOwnsOrders([orderId], user);
+    const order = await this.orderRepository.findOrderEntity(orderId);
+    if (!order) throw new NotFoundError("Order not found");
+    /* The note must be a regular note of THIS order: not a seller-chat message, not another order's note. */
+    const note = await this.orderRepository.findOrderNote(noteId, orderId);
     if (!note) throw new NotFoundError("Note not found");
     await this.orderRepository.createNoteAttachments(noteId, filePaths, fileNames, descriptions);
     return success({ message: "Files uploaded!" });
@@ -254,12 +262,13 @@ export class OrderService {
   }
 
   public async uploadSellerChatFiles(
+    orderId: number,
     messageId: number,
     filePaths: string[],
     fileNames: string[],
     descriptions: string[],
   ): Promise<Result<{ message: string }>> {
-    const message = await this.orderRepository.findSellerChatMessageById(messageId);
+    const message = await this.orderRepository.findSellerChatMessageById(messageId, orderId);
     if (!message) throw new NotFoundError("Message not found");
     await this.orderRepository.createNoteAttachments(messageId, filePaths, fileNames, descriptions);
     return success({ message: "Files uploaded!" });

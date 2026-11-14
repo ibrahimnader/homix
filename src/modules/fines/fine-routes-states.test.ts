@@ -63,6 +63,30 @@ describe("error shape and Arabic messages", () => {
   });
 });
 
+describe("GET /fines/records date filters use inclusive Cairo days", () => {
+  test("from/to become Cairo start-of-day / end-of-day instants (winter +02:00 and summer +03:00)", async () => {
+    mockQuery.mockResolvedValue([]);
+    const winter = await request(appFor({ finance_view: true })).get("/fines/records?from=2026-11-14&to=2026-11-14");
+    expect(winter.status).toBe(200);
+    const [sql, options] = mockQuery.mock.calls[0];
+    expect(sql).toContain('r."appliedAt" >= :from');
+    expect(sql).toContain('r."appliedAt" <= :to');
+    /* 14 Nov 00:00 Cairo (UTC+2) = 13 Nov 22:00Z; 14 Nov 23:59:59.999 Cairo = 14 Nov 21:59:59.999Z */
+    expect((options.replacements.from as Date).toISOString()).toBe("2026-11-13T22:00:00.000Z");
+    expect((options.replacements.to as Date).toISOString()).toBe("2026-11-14T21:59:59.999Z");
+    mockQuery.mockClear();
+    await request(appFor({ finance_view: true })).get("/fines/records?from=2026-07-01&to=2026-07-01");
+    const summer = mockQuery.mock.calls[0][1].replacements;
+    expect((summer.from as Date).toISOString()).toBe("2026-06-30T21:00:00.000Z");
+    expect((summer.to as Date).toISOString()).toBe("2026-07-01T20:59:59.999Z");
+  });
+  test("no date filters leave the query unbounded", async () => {
+    mockQuery.mockResolvedValue([]);
+    await request(appFor({ finance_view: true })).get("/fines/records");
+    expect(mockQuery.mock.calls[0][0]).not.toContain(":from");
+  });
+});
+
 describe("POST /fines/records/:id/waive", () => {
   const body = { reason: "الصانع أثبت أن التأخير بسبب شركة الشحن" };
   test("waives an active record and recomputes orders.fine from non-waived records", async () => {

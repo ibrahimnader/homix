@@ -17,6 +17,7 @@
     "db:deploy-refactor": "tsx src/scripts/run-refactor-deploy-migration.ts",
     "db:deploy-dev2": "tsx src/scripts/run-dev2-deploy-migration.ts",
     "db:backfill-financial-invoices": "tsx src/scripts/backfill-financial-invoices.ts",
+    "db:refresh-old-invoices": "tsx src/scripts/refresh-old-invoices.ts",
     "db:migrate-factory-profile-fields": "node migrations/add-factory-profile-fields.js",
     "db:plan-constraints": "tsx src/scripts/plan-db-constraint-hardening.ts",
     "db:plan-drop-duplicates": "tsx src/scripts/plan-drop-duplicate-db-constraints.ts",

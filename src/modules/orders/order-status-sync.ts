@@ -1,4 +1,4 @@
-import { CONFIRMATION_STATUS, ORDER_STATUS, SHIPMENTS_STATUS } from "../../../config/constants";
+import { CLOSED_ORDER_STATUSES, CLOSED_SHIPMENT_STATUSES, CONFIRMATION_STATUS, ORDER_STATUS, SHIPMENTS_STATUS } from "../../../config/constants";
 
 /**
  * The three statuses of an `orders` row — `status` (order), `shipmentStatus` and
@@ -98,9 +98,26 @@ export const SHIPMENT_STATUS_RULES: Readonly<Record<number, StatusRule>> = (() =
   return rules;
 })();
 
-/** Matrix 3a: confirmation 2 (confirmed) -> order pending becomes confirmed. */
+/** Order statuses that mean "closed by cancel/reject": 4 and 9..17. Confirming reopens these. */
+const CANCELED_ORDER_STATUS_VALUES: ReadonlyArray<number> = [O.CANCELED, ...CLOSED_ORDER_STATUSES];
+/** Shipment statuses closed by cancel: 5 and 13..21. (6 "rejected" is deliberately excluded: no order status maps to it and
+ *  it is not in CLOSED_SHIPMENT_STATUSES, so it is not something a confirmation cancel closes.) */
+const CANCELED_SHIPMENT_STATUS_VALUES: ReadonlyArray<number> = [S.CANCELED, ...CLOSED_SHIPMENT_STATUSES];
+
+/**
+ * Matrix 3a: confirmation 2 (confirmed) ->
+ *  - order becomes confirmed (3) when it is pending (1) OR closed by cancel/reject (4, 9..17), so going back to
+ *    "confirmed" after a confirmation cancel reopens what the cancel closed (cancel -> confirm -> cancel -> confirm is stable);
+ *  - a cancelled shipment (5, 13..21) returns to pending (1).
+ * Delivered (5), returned/refunded (6), replaced (7) and in-inventory (8) orders, and shipment statuses 2, 4, 7, 9,
+ * are never touched: confirming must not regress them.
+ *
+ * Opposite direction (confirmation 7..11 -> 1, 3, 4, 5, 6): intentionally derives NOTHING. Reopening on those is
+ * not approved; only the explicit "confirmed" value reopens.
+ */
 export const CONFIRMATION_CONFIRMED_RULE: StatusRule = {
-  status: { value: O.CONFIRMED, onlyIfCurrentIn: [O.PENDING] },
+  status: { value: O.CONFIRMED, onlyIfCurrentIn: [O.PENDING, ...CANCELED_ORDER_STATUS_VALUES] },
+  shipmentStatus: { value: S.PENDING, onlyIfCurrentIn: CANCELED_SHIPMENT_STATUS_VALUES },
 };
 
 /** Matrix 3b: confirmation 7..11 (cancel) -> order + shipment cancel variant, by manufacture stage. */

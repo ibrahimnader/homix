@@ -56,6 +56,11 @@ describe("OrderService.updateOrder status sync", () => {
     [{ status: 3 }, { status: 1, confirmationStatus: 6 }, { status: 3, confirmationStatus: 2 }],
     // reopening from a final state propagates (no guard)
     [{ status: 3 }, { status: 4, shipmentStatus: 5, confirmationStatus: 1 }, { status: 3, confirmationStatus: 2 }],
+    // confirming after a confirmation cancel reopens the order and the cancelled shipment
+    [{ confirmationStatus: 2 }, { status: 9, shipmentStatus: 13, confirmationStatus: 7 }, { confirmationStatus: 2, status: 3, shipmentStatus: 1 }],
+    [{ confirmationStatus: 2 }, { status: 10, shipmentStatus: 14, confirmationStatus: 9, manufactureStatus: 3 }, { confirmationStatus: 2, status: 3, shipmentStatus: 1 }],
+    // ... but never a delivered order
+    [{ confirmationStatus: 2 }, { status: 5, shipmentStatus: 4, confirmationStatus: 7 }, { confirmationStatus: 2 }],
     // explicit shipmentStatus in the payload wins over the derived one
     [{ status: 5, shipmentStatus: 3 }, { status: 2, shipmentStatus: 1 }, { status: 5, shipmentStatus: 3 }],
   ])("payload %j on %j writes %j", async (payload, stored, expected) => {
@@ -114,6 +119,16 @@ describe("OrderService.BulkUpdate status sync", () => {
     await OrderService.BulkUpdate({ orderIds: [1, 2], orderData: { confirmationStatus: 7 } }, user);
     expect(early.update).toHaveBeenCalledWith(expect.objectContaining({ status: 9, shipmentStatus: 13 }));
     expect(late.update).toHaveBeenCalledWith(expect.objectContaining({ status: 10, shipmentStatus: 14 }));
+
+    // bulk confirm reopens cancelled orders and leaves delivered ones alone
+    const cancelled = makeOrder(7, { status: 9, shipmentStatus: 13, confirmationStatus: 7 });
+    const delivered = makeOrder(8, { status: 5, shipmentStatus: 4, confirmationStatus: 7 });
+    mockOrderFindAll.mockResolvedValue([cancelled, delivered]);
+    await OrderService.BulkUpdate({ orderIds: [7, 8], orderData: { confirmationStatus: 2 } }, user);
+    expect(cancelled.update).toHaveBeenCalledWith(expect.objectContaining({ status: 3, shipmentStatus: 1 }));
+    const deliveredWrite = delivered.update.mock.calls[0]![0];
+    expect(deliveredWrite.status).toBeUndefined();
+    expect(deliveredWrite.shipmentStatus).toBeUndefined();
 
     const explicit = makeOrder(3, { status: 2, manufactureStatus: 2 });
     mockOrderFindAll.mockResolvedValue([explicit]);

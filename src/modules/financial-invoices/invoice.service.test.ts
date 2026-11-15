@@ -425,3 +425,21 @@ describe("invoiced lines filters", () => {
     expect(await service(repo).vendorOptions()).toBe(rows);
   });
 });
+
+describe("company due kind on lines", () => {
+  test("dto exposes the stored kind, falling back by delivery type for unbackfilled lines; vendors keep it", async () => {
+    const own = makeRepo(invoice({ status: "reviewed", vendorId: 5 }));
+    own.state.lines = [lineRow({ companyDueKind: "vendorOwes" }), lineRow({ id: 12, orderId: 101, isWarehouseDelivery: true, companyDueKind: null })];
+    const detail = await service(own.repo).detail(1, {});
+    expect(detail.lines.map((l) => l.companyDueKind)).toEqual(["vendorOwes", "margin"]);
+  });
+
+  test("refresh stores the kind from the report and counts a kind-only change as a change", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow({ companyDueKind: null, companyDue: 1099, vendorDue: 1100, collectionTotal: 2299, warehouseCost: 1200, fines: 100 })];
+    const fresh = { ...reportOrder(100, 1100), collectionTotal: 2299, companyDue: 1099, companyDueKind: "margin", fines: 100, warehouseCost: 1200 };
+    const getReport = jest.fn().mockResolvedValue(report("2026-10-28T20:59:59.999Z", [fresh as never]));
+    expect((await service(repo, getReport).refreshDraft(1, actor)).refreshed).toBe(1);
+    expect(repo.refreshLineSnapshot).toHaveBeenCalledWith(11, expect.objectContaining({ companyDueKind: "margin" }), expect.anything());
+  });
+});

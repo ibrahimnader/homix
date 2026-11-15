@@ -114,6 +114,7 @@ export class InvoiceService {
       collectionOverride: line.collectionOverride === null || line.collectionOverride === undefined ? null : num(line.collectionOverride),
       collectionTotal: fromCents(effective.collection),
       companyDue: fromCents(effective.companyDue),
+      companyDueKind: line.companyDueKind ?? (line.isWarehouseDelivery ? "margin" : "vendorOwes"),
       companyDueOverride: line.companyDueOverride === null ? null : num(line.companyDueOverride),
       fines: fromCents(effective.fines),
       finesOverride: line.finesOverride === null ? null : num(line.finesOverride),
@@ -464,7 +465,8 @@ export class InvoiceService {
           && toCents(line.fines) === toCents(snapshot.fines)
           && toCents(line.vendorShippingCost) === toCents(snapshot.vendorShippingCost)
           && toCents(line.vendorDue) === toCents(snapshot.vendorDue)
-          && toCents(line.companyDue) === toCents(snapshot.companyDue);
+          && toCents(line.companyDue) === toCents(snapshot.companyDue)
+          && (snapshot.companyDueKind === null || (line.companyDueKind ?? null) === snapshot.companyDueKind);
         if (same) continue;
         await this.repo.refreshLineSnapshot(line.id, snapshot, transaction);
         changes.push({ companyDue: [num(line.companyDue), snapshot.companyDue], orderId, vendorDue: [num(line.vendorDue), snapshot.vendorDue] });

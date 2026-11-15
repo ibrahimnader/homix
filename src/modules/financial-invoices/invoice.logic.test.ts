@@ -138,3 +138,19 @@ describe("effectiveLineCents with cost/collection overrides", () => {
     expect(totals).toMatchObject({ collectionTotal: 2000, warehouseCost: 1000, vendorDueTotal: 900, companyDueTotal: 1000, finesTotal: 100 });
   });
 });
+
+describe("company due kinds", () => {
+  test("the snapshot keeps the report's kind (margin / vendorOwes) and defaults to null", () => {
+    const base = { collectionTotal: 100, companyDue: 40, fines: 0, orderId: 7, vendorDue: 60, warehouseCost: 60 };
+    expect(snapshotFromReportOrder({ ...base, companyDueKind: "margin", shipmentId: 7 })).toMatchObject({ companyDueKind: "margin" });
+    expect(snapshotFromReportOrder({ ...base, companyDueKind: "vendorOwes" })).toMatchObject({ companyDueKind: "vendorOwes" });
+    expect(snapshotFromReportOrder(base).companyDueKind).toBeNull();
+  });
+
+  test("company due never enters the invoice net, whatever its kind", () => {
+    const withCompany = (companyDue: string) => computeTotals([line({ companyDue, fines: "0", vendorDue: "100", vendorDueOverride: null })], [{ amount: "10", kind: "deduction", removedAt: null }]);
+    expect(withCompany("0").netAmount).toBe(90);
+    expect(withCompany("5000").netAmount).toBe(90);
+    expect(withCompany("5000").companyDueTotal).toBe(5000);
+  });
+});

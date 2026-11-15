@@ -102,15 +102,22 @@ export type OrderSummaryResponse = {
   cards: OrderSummaryCard[];
 };
 
+/** What an order's company due means: Homix's margin (Homix delivered) or a debt the vendor owes Homix (vendor delivered). */
+export type CompanyDueKind = "margin" | "vendorOwes";
+
 export type OrderFinancialReportVendorRow = {
   collectionTotal: number;
   companyDue: number;
   fines: number;
+  /** Σ companyDue of Homix-delivered orders (collection − cost) */
+  homixMargin: number;
   orders: OrderFinancialReportOrderRow[];
   ordersCount: number;
   vendorDue: number;
   vendorId: number | null;
   vendorName: string;
+  /** Σ companyDue of vendor-delivered orders (a debt the vendor owes Homix) */
+  vendorOwes: number;
   /** مجموع «شحن المورد» لطلبات هذا البائع */
   vendorShippingCost: number;
   warehouseCost: number;
@@ -119,6 +126,7 @@ export type OrderFinancialReportVendorRow = {
 export type OrderFinancialReportOrderRow = {
   collectionTotal: number;
   companyDue: number;
+  companyDueKind: CompanyDueKind;
   fines: number;
   id: number;
   operationNumber: string;
@@ -138,8 +146,10 @@ export type OrderFinancialReportSectionSummary = {
   collectionTotal: number;
   companyDue: number;
   fines: number;
+  homixMargin: number;
   ordersCount: number;
   vendorDue: number;
+  vendorOwes: number;
   /** مجموع «شحن المورد» — يخصّ تسليمات البائع فقط */
   vendorShippingCost: number;
   warehouseCost: number;
@@ -162,8 +172,12 @@ export type OrderFinancialReportResponse = {
   summary: {
     companyDue: number;
     fines: number;
+    /** Σ companyDue of Homix-delivered orders (collection − cost) */
+    homixMargin: number;
     totalSales: number;
     vendorDue: number;
+    /** Σ companyDue of vendor-delivered orders (owed by the vendor to Homix) */
+    vendorOwes: number;
     vendorsCount: number;
   };
   vendorDeliveries: OrderFinancialReportSection;

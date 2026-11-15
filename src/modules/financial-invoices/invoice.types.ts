@@ -50,6 +50,7 @@ export type LineRow = {
   companyDue: string | number;
   finesOverride: string | number | null;
   warehouseCostOverride?: string | number | null;
+  companyDueKind?: "margin" | "vendorOwes" | null;
   collectionOverride?: string | number | null;
   vendorDueOverride: string | number | null;
   companyDueOverride: string | number | null;
@@ -84,6 +85,8 @@ export type LineSnapshot = {
   vendorShippingCost: number;
   vendorDue: number;
   companyDue: number;
+  /** margin = Homix delivered (collection − cost); vendorOwes = vendor delivered (debt to Homix) */
+  companyDueKind: "margin" | "vendorOwes" | null;
 };
 
 export type InvoiceTotals = {

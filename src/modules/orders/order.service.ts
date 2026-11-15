@@ -309,7 +309,8 @@ export class OrderService {
       { label: "نوع الدورة", value: report.cycle.mode },
       { label: "إجمالي المبيعات", value: report.summary.totalSales },
       { label: "مستحق البائعين", value: report.summary.vendorDue },
-      { label: "مستحق الشركة", value: report.summary.companyDue },
+      { label: "هامش هوميكس", value: report.summary.homixMargin },
+      { label: "مستحق على الصانع", value: report.summary.vendorOwes },
       { label: "الغرامات", value: report.summary.fines },
       { label: "عدد البائعين", value: report.summary.vendorsCount },
     ].forEach((row) => {
@@ -327,7 +328,8 @@ export class OrderService {
         { header: "عدد الطلبات", key: "ordersCount", width: 18 },
         { header: "إجمالي التحصيل", key: "collectionTotal", width: 18 },
         { header: "مستحق البائع", key: "vendorDue", width: 18 },
-        { header: "مستحق الشركة", key: "companyDue", width: 18 },
+        { header: "هامش هوميكس", key: "homixMargin", width: 18 },
+        { header: "مستحق على الصانع", key: "vendorOwes", width: 18 },
         { header: "سعر التكلفة", key: "warehouseCost", width: 18 },
         { header: "الغرامات", key: "fines", width: 18 },
       ];
@@ -336,11 +338,12 @@ export class OrderService {
       worksheet.addRow({});
       worksheet.addRow({
         collectionTotal: section.summary.collectionTotal,
-        companyDue: section.summary.companyDue,
         fines: section.summary.fines,
+        homixMargin: section.summary.homixMargin,
         ordersCount: section.summary.ordersCount,
         vendorDue: section.summary.vendorDue,
         vendorName: "الإجمالي",
+        vendorOwes: section.summary.vendorOwes,
         warehouseCost: section.summary.warehouseCost,
       });
       worksheet.commit();

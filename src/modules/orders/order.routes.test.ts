@@ -440,6 +440,13 @@ describe("orderRouter", () => {
         warehouseCost: 1200,
       }),
     ]);
+    // kinds: order 7 is vendor delivered (debt), order 8 is Homix delivered (margin) — per order, per vendor row and per section
+    expect(response.body.data.fullInvoice.items[0].orders.map((order: { companyDueKind: string }) => order.companyDueKind)).toEqual(["vendorOwes", "margin"]);
+    expect(response.body.data.fullInvoice.items[0]).toMatchObject({ companyDue: 4499, homixMargin: 3800, vendorOwes: 699 });
+    expect(response.body.data.fullInvoice.summary).toMatchObject({ homixMargin: 3800, vendorOwes: 699 });
+    expect(response.body.data.vendorDeliveries.summary).toMatchObject({ homixMargin: 0, vendorOwes: 699 });
+    expect(response.body.data.warehouseDeliveries.summary).toMatchObject({ homixMargin: 3800, vendorOwes: 0 });
+    expect(response.body.data.summary).toMatchObject({ companyDue: 4499, homixMargin: 3800, vendorOwes: 699 });
     expect(response.body.data.vendorDeliveries.items[0].orders).toHaveLength(1);
     expect(response.body.data.vendorDeliveries.items[0].orders[0].id).toBe(7);
     expect(response.body.data.vendorDeliveries.items[0].orders[0]).toEqual(expect.objectContaining({
@@ -509,6 +516,10 @@ describe("orderRouter", () => {
     expect(warehouseOrders.map((order: { id: number }) => order.id)).toEqual([21, 23]);
     expect(warehouseOrders[0]).toMatchObject({ companyDue: 1099, vendorDue: 1100 });
     expect(response.body.data.summary.vendorDue).toBe(2100);
+    // company due of Homix-delivered orders is the margin; nothing is a vendor debt here
+    expect(Object.values(byId).map((order) => (order as { companyDueKind: string }).companyDueKind)).toEqual(["margin", "margin", "margin"]);
+    expect(response.body.data.summary).toMatchObject({ companyDue: 2799, homixMargin: 2799, vendorOwes: 0 });
+    expect(response.body.data.fullInvoice.items[0]).toMatchObject({ homixMargin: 2799, vendorOwes: 0 });
   });
 
   it("resolves billingDay 28 to the July 14, 2026 through July 28, 2026 cycle for a July 26, 2026 reference date", async () => {
@@ -593,6 +604,28 @@ describe("orderRouter", () => {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     expect(String(response.headers["content-disposition"])).toContain("financial-report.xlsx");
+  });
+
+  it("the financial export splits company due into Homix margin and vendor-owes columns", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ExcelJS = require("exceljs");
+    const response = await request(app)
+      .get("/orders/financialReport/export")
+      .query({ billingDay: 28, referenceDate: "2026-07-26" })
+      .buffer(true)
+      .parse((res, callback) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => callback(null, Buffer.concat(chunks)));
+      });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(response.body);
+    const headers = workbook.getWorksheet("full-invoice").getRow(1).values.filter(Boolean);
+    expect(headers).toEqual(expect.arrayContaining(["هامش هوميكس", "مستحق على الصانع", "سعر التكلفة"]));
+    expect(headers).not.toContain("مستحق الشركة");
+    const summaryLabels = workbook.getWorksheet("summary").getColumn(1).values.filter(Boolean);
+    expect(summaryLabels).toEqual(expect.arrayContaining(["هامش هوميكس", "مستحق على الصانع"]));
+    expect(summaryLabels).not.toContain("مستحق الشركة");
   });
 
   it("applies orderSource filter to the orders query", async () => {

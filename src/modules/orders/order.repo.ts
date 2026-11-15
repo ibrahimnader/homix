@@ -36,7 +36,7 @@ import {
   toPlain,
   toText,
 } from "./order.helpers";
-import type { OrderDetailsResponse, OrderDetailsView, OrderFinancialReportQuery, OrderFinancialReportResponse, OrderFinancialReportSection, OrderFinancialReportSectionSummary, OrderFinancialReportVendorRow, OrderListItem, OrderListQuery, OrderListResponse, OrderMetaResponse, OrderStatusHistoryItem, OrderSummaryResponse, OrderTimelineItem } from "./order.types";
+import type { CompanyDueKind, OrderDetailsResponse, OrderDetailsView, OrderFinancialReportQuery, OrderFinancialReportResponse, OrderFinancialReportSection, OrderFinancialReportSectionSummary, OrderFinancialReportVendorRow, OrderListItem, OrderListQuery, OrderListResponse, OrderMetaResponse, OrderStatusHistoryItem, OrderSummaryResponse, OrderTimelineItem } from "./order.types";
 import { calculateVendorDeliverySettlement, calculateWarehouseDeliverySettlement } from "./order-financial-settlement";
 import { listManagedOptions, MANAGED_OPTION_GROUP, replaceManagedOptions } from "../settings/managed-options";
 import { SHIPMENT_STATUS_LABELS } from "../shipments/shipment.constants";
@@ -451,8 +451,10 @@ const createFinancialSummary = (): OrderFinancialReportSectionSummary => ({
   collectionTotal: 0,
   companyDue: 0,
   fines: 0,
+  homixMargin: 0,
   ordersCount: 0,
   vendorDue: 0,
+  vendorOwes: 0,
   vendorShippingCost: 0,
   warehouseCost: 0,
 });
@@ -461,11 +463,13 @@ const createFinancialRow = (vendorId: number | null, vendorName: string): OrderF
   collectionTotal: 0,
   companyDue: 0,
   fines: 0,
+  homixMargin: 0,
   orders: [],
   ordersCount: 0,
   vendorDue: 0,
   vendorId,
   vendorName,
+  vendorOwes: 0,
   vendorShippingCost: 0,
   warehouseCost: 0,
 });
@@ -476,6 +480,7 @@ const appendFinancialRow = (
   values: {
     collectionTotal: number;
     companyDue: number;
+    companyDueKind: CompanyDueKind;
     fines: number;
     ordersCount: number;
     vendorDue: number;
@@ -483,6 +488,11 @@ const appendFinancialRow = (
     warehouseCost: number;
   },
 ): void => {
+  const isMargin = values.companyDueKind === "margin";
+  summary.homixMargin += isMargin ? values.companyDue : 0;
+  summary.vendorOwes += isMargin ? 0 : values.companyDue;
+  row.homixMargin += isMargin ? values.companyDue : 0;
+  row.vendorOwes += isMargin ? 0 : values.companyDue;
   summary.collectionTotal += values.collectionTotal;
   summary.companyDue += values.companyDue;
   summary.fines += values.fines;
@@ -1115,9 +1125,11 @@ export class OrderRepository {
         : calculateWarehouseDeliverySettlement({ collectionTotal, fines, productCost: warehouseCost });
       const reportCompanyDue = vendorSettlement?.companyDue ?? homixSettlement?.companyDue ?? 0;
       const reportVendorDue = vendorSettlement?.vendorDue ?? homixSettlement?.vendorDue ?? 0;
+      const companyDueKind: CompanyDueKind = isVendorDelivery ? "vendorOwes" : "margin";
       const orderDetail = {
         collectionTotal,
         companyDue: reportCompanyDue,
+        companyDueKind,
         fines,
         id: orderId,
         operationNumber: toText(plainOrder.code),
@@ -1138,6 +1150,7 @@ export class OrderRepository {
       appendFinancialRow(fullInvoiceSummary, fullRow, {
         collectionTotal,
         companyDue: reportCompanyDue,
+        companyDueKind,
         fines,
         ordersCount: 1,
         vendorDue: reportVendorDue,
@@ -1157,6 +1170,7 @@ export class OrderRepository {
         appendFinancialRow(vendorDeliveriesSummary, vendorRow, {
           collectionTotal: vendorCollectionTotal,
           companyDue: reportCompanyDue,
+          companyDueKind,
           fines,
           ordersCount: 1,
           vendorDue: reportVendorDue,
@@ -1172,6 +1186,7 @@ export class OrderRepository {
         appendFinancialRow(warehouseDeliveriesSummary, warehouseRow, {
           collectionTotal,
           companyDue: reportCompanyDue,
+          companyDueKind,
           fines,
           ordersCount: 1,
           vendorDue: reportVendorDue,
@@ -1209,6 +1224,8 @@ export class OrderRepository {
       fullInvoice,
       summary: {
         companyDue: fullInvoice.summary.companyDue,
+        homixMargin: fullInvoice.summary.homixMargin,
+        vendorOwes: fullInvoice.summary.vendorOwes,
         fines: fullInvoice.summary.fines,
         totalSales: fullInvoice.summary.collectionTotal,
         vendorDue: fullInvoice.summary.vendorDue,

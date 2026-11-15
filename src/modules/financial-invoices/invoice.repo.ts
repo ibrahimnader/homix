@@ -134,10 +134,10 @@ export class InvoiceRepository {
       const rows = await sequelize.query<{ orderId: number }>(
         `INSERT INTO financial_invoice_lines
            ("invoiceId", "orderId", "operationNumber", "orderNumber", "productCode", "paymentStatus", "paymentStatusLabel",
-            "isWarehouseDelivery", "collectionTotal", "warehouseCost", fines, "vendorShippingCost", "vendorDue", "companyDue",
+            "isWarehouseDelivery", "collectionTotal", "warehouseCost", fines, "vendorShippingCost", "vendorDue", "companyDue", "companyDueKind",
             state, "stateChangedAt", "stateChangedBy")
          VALUES (:invoiceId, :orderId, :operationNumber, :orderNumber, :productCode, :paymentStatus, :paymentStatusLabel,
-            :isWarehouseDelivery, :collectionTotal, :warehouseCost, :fines, :vendorShippingCost, :vendorDue, :companyDue,
+            :isWarehouseDelivery, :collectionTotal, :warehouseCost, :fines, :vendorShippingCost, :vendorDue, :companyDue, :companyDueKind,
             'included', NOW(), :actorId)
          ON CONFLICT ("orderId") WHERE state IN ('included', 'frozen', 'removed') DO NOTHING
          RETURNING "orderId"`,
@@ -152,7 +152,8 @@ export class InvoiceRepository {
   public async refreshLineSnapshot(lineId: number | string, snapshot: LineSnapshot, transaction: Tx): Promise<void> {
     await sequelize.query(
       `UPDATE financial_invoice_lines SET "collectionTotal" = :collectionTotal, "warehouseCost" = :warehouseCost, fines = :fines,
-         "vendorShippingCost" = :vendorShippingCost, "vendorDue" = :vendorDue, "companyDue" = :companyDue WHERE id = :lineId`,
+         "vendorShippingCost" = :vendorShippingCost, "vendorDue" = :vendorDue, "companyDue" = :companyDue,
+         "companyDueKind" = COALESCE(:companyDueKind, "companyDueKind") WHERE id = :lineId`,
       { replacements: { ...snapshot, lineId }, transaction, type: QueryTypes.UPDATE },
     );
   }

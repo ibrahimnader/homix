@@ -103,6 +103,17 @@ module.exports = {
           CHECK (("warehouseCostOverride" IS NULL OR "warehouseCostOverride" >= 0) AND ("collectionOverride" IS NULL OR "collectionOverride" >= 0));
       END IF;
     END $$`);
+    // company due has two meanings: Homix margin (Homix delivered) or a debt the vendor owes (vendor delivered)
+    await run('ALTER TABLE financial_invoice_lines ADD COLUMN IF NOT EXISTS "companyDueKind" VARCHAR(12)');
+    await run(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'financial_invoice_lines_company_due_kind_chk') THEN
+        ALTER TABLE financial_invoice_lines ADD CONSTRAINT financial_invoice_lines_company_due_kind_chk
+          CHECK ("companyDueKind" IS NULL OR "companyDueKind" IN ('margin', 'vendorOwes'));
+      END IF;
+    END $$`);
+    await run(`UPDATE financial_invoice_lines l
+      SET "companyDueKind" = CASE WHEN o."deliveryBy" = 1 THEN 'margin' ELSE 'vendorOwes' END
+      FROM orders o WHERE o.id = l."orderId" AND l."companyDueKind" IS NULL`);
 
     await run(`
       CREATE TABLE IF NOT EXISTS financial_invoice_adjustments (

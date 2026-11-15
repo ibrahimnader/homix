@@ -140,12 +140,13 @@ export const snapshotFromReportOrder = (order: {
   orderId?: number; id?: number; operationNumber?: string; orderNumber?: string; productCode?: string;
   paymentStatus?: number | null; paymentStatusLabel?: string; shipmentId?: number | null;
   collectionTotal?: number; warehouseCost?: number; fines?: number; vendorShippingCost?: number;
-  vendorDue?: number; companyDue?: number;
+  vendorDue?: number; companyDue?: number; companyDueKind?: "margin" | "vendorOwes";
 }): LineSnapshot => {
   const isWarehouseDelivery = order.shipmentId !== null && order.shipmentId !== undefined;
   return {
     collectionTotal: fromCents(toCents(order.collectionTotal)),
     companyDue: fromCents(toCents(order.companyDue)),
+    companyDueKind: order.companyDueKind ?? null,
     fines: fromCents(toCents(order.fines)),
     isWarehouseDelivery,
     operationNumber: String(order.operationNumber ?? ""),

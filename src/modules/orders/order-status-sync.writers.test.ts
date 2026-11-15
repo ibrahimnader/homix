@@ -59,6 +59,11 @@ describe("OrderService.updateOrder status sync", () => {
     // confirming after a confirmation cancel reopens the order and the cancelled shipment
     [{ confirmationStatus: 2 }, { status: 9, shipmentStatus: 13, confirmationStatus: 7 }, { confirmationStatus: 2, status: 3, shipmentStatus: 1 }],
     [{ confirmationStatus: 2 }, { status: 10, shipmentStatus: 14, confirmationStatus: 9, manufactureStatus: 3 }, { confirmationStatus: 2, status: 3, shipmentStatus: 1 }],
+    // going back to "no answer" / pending / call back later reopens a cancelled order to pending (1) with a pending shipment
+    [{ confirmationStatus: 4 }, { status: 9, shipmentStatus: 13, confirmationStatus: 7 }, { confirmationStatus: 4, status: 1, shipmentStatus: 1 }],
+    // ... and never regresses a confirmed/in-progress/delivered order
+    [{ confirmationStatus: 4 }, { status: 3, shipmentStatus: 1, confirmationStatus: 2 }, { confirmationStatus: 4 }],
+    [{ confirmationStatus: 6 }, { status: 5, shipmentStatus: 4, confirmationStatus: 7 }, { confirmationStatus: 6 }],
     // ... but never a delivered order
     [{ confirmationStatus: 2 }, { status: 5, shipmentStatus: 4, confirmationStatus: 7 }, { confirmationStatus: 2 }],
     // explicit shipmentStatus in the payload wins over the derived one
@@ -129,6 +134,15 @@ describe("OrderService.BulkUpdate status sync", () => {
     const deliveredWrite = delivered.update.mock.calls[0]![0];
     expect(deliveredWrite.status).toBeUndefined();
     expect(deliveredWrite.shipmentStatus).toBeUndefined();
+
+    // bulk "no answer" reopens cancelled orders only
+    const cancelled2 = makeOrder(11, { status: 10, shipmentStatus: 14, confirmationStatus: 7 });
+    const inProgress = makeOrder(12, { status: 2, shipmentStatus: 3, confirmationStatus: 2 });
+    mockOrderFindAll.mockResolvedValue([cancelled2, inProgress]);
+    await OrderService.BulkUpdate({ orderIds: [11, 12], orderData: { confirmationStatus: 3 } }, user);
+    expect(cancelled2.update).toHaveBeenCalledWith(expect.objectContaining({ status: 1, shipmentStatus: 1 }));
+    expect(inProgress.update.mock.calls[0]![0].status).toBeUndefined();
+    expect(inProgress.update.mock.calls[0]![0].shipmentStatus).toBeUndefined();
 
     const explicit = makeOrder(3, { status: 2, manufactureStatus: 2 });
     mockOrderFindAll.mockResolvedValue([explicit]);

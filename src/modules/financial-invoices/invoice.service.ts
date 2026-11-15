@@ -111,7 +111,8 @@ export class InvoiceService {
   public toLineDto(line: LineRow) {
     const effective = effectiveLineCents(line);
     return {
-      collectionTotal: num(line.collectionTotal),
+      collectionOverride: line.collectionOverride === null || line.collectionOverride === undefined ? null : num(line.collectionOverride),
+      collectionTotal: fromCents(effective.collection),
       companyDue: fromCents(effective.companyDue),
       companyDueOverride: line.companyDueOverride === null ? null : num(line.companyDueOverride),
       fines: fromCents(effective.fines),
@@ -121,9 +122,11 @@ export class InvoiceService {
       operationNumber: line.operationNumber,
       orderId: Number(line.orderId),
       orderNumber: line.orderNumber,
+      originalCollection: num(line.collectionTotal),
       originalCompanyDue: num(line.companyDue),
       originalFines: num(line.fines),
       originalVendorDue: num(line.vendorDue),
+      originalWarehouseCost: num(line.warehouseCost),
       overrideReason: line.overrideReason,
       paymentStatus: line.paymentStatus,
       paymentStatusLabel: line.paymentStatusLabel,
@@ -134,7 +137,8 @@ export class InvoiceService {
       vendorDue: fromCents(effective.vendorDue),
       vendorDueOverride: line.vendorDueOverride === null ? null : num(line.vendorDueOverride),
       vendorShippingCost: num(line.vendorShippingCost),
-      warehouseCost: num(line.warehouseCost),
+      warehouseCost: fromCents(effective.cost),
+      warehouseCostOverride: line.warehouseCostOverride === null || line.warehouseCostOverride === undefined ? null : num(line.warehouseCostOverride),
     };
   }
 
@@ -168,7 +172,7 @@ export class InvoiceService {
   /* ---------- reads ---------- */
 
   public async list(query: {
-    billingDay?: number; dueParty?: "vendor" | "homix"; invoiceFrom?: string; invoiceTo?: string; overdue?: boolean;
+    billingDay?: number; dueParty?: "vendor" | "homix"; invoiceCode?: string; invoiceFrom?: string; invoiceTo?: string; overdue?: boolean;
     page: number; receipt?: "uploaded" | "missing"; search?: string; size: number; statuses?: InvoiceStatus[];
     transferredFrom?: string; transferredTo?: string; vendorId?: number;
   }, scope: Scope) {
@@ -182,6 +186,7 @@ export class InvoiceService {
     const filters: InvoiceListFilters = {
       billingDay: query.billingDay,
       dueParty: query.dueParty,
+      invoiceCode: query.invoiceCode,
       invoiceFrom: query.invoiceFrom ? dayStart(query.invoiceFrom) : undefined,
       invoiceTo: query.invoiceTo ? dayEnd(query.invoiceTo) : undefined,
       overdueDays: OVERDUE_DAYS,
@@ -204,8 +209,12 @@ export class InvoiceService {
 
   /** Vendor view of a line: internal handling notes and pre-override amounts are not for vendors. */
   private toVendorLineDto<T extends ReturnType<InvoiceService["toLineDto"]>>(dto: T) {
-    const { overrideReason, stateReason, originalCompanyDue, originalFines, originalVendorDue, ...visible } = dto;
-    void [overrideReason, stateReason, originalCompanyDue, originalFines, originalVendorDue];
+    const {
+      overrideReason, stateReason, originalCollection, originalCompanyDue, originalFines, originalVendorDue, originalWarehouseCost,
+      collectionOverride, companyDueOverride, finesOverride, vendorDueOverride, warehouseCostOverride, ...visible
+    } = dto;
+    void [overrideReason, stateReason, originalCollection, originalCompanyDue, originalFines, originalVendorDue, originalWarehouseCost,
+      collectionOverride, companyDueOverride, finesOverride, vendorDueOverride, warehouseCostOverride];
     return visible;
   }
 
@@ -226,10 +235,58 @@ export class InvoiceService {
     };
   }
 
-  public async invoicedLines(query: { page: number; q?: string; size: number; vendorId?: number }, scope: Scope) {
+  /**
+   * One request per billing cycle for the live report: which vendors already have an invoice (and its status),
+   * plus only the lines the report cannot reproduce itself (see repo.listCycleOverlayLines) and the counted order ids.
+   * Vendors only ever receive their own reviewed/transferred invoices and counted lines (never drafts/frozen).
+   */
+  public async cycleOverview(query: { periodEnd: string; vendorId?: number }, scope: Scope) {
     const vendorId = scope.vendorId ? Number(scope.vendorId) : query.vendorId;
+    const invoices = await this.repo.listCycleInvoices({
+      periodEndFrom: dayStart(query.periodEnd),
+      periodEndTo: dayEnd(query.periodEnd),
+      statuses: scope.vendorId ? [...VENDOR_VISIBLE_STATUSES] : undefined,
+      vendorId,
+    });
+    const ids = invoices.map((row) => Number(row.id));
+    const [overlayRows, included] = await Promise.all([this.repo.listCycleOverlayLines(ids), this.repo.listIncludedOrderIds(ids)]);
+    const isStaff = !scope.vendorId;
+    const includedOrderIds: Record<string, number[]> = {};
+    for (const row of included) (includedOrderIds[String(row.invoiceId)] ??= []).push(Number(row.orderId));
+    return {
+      includedOrderIds,
+      invoices: invoices.map((row) => ({
+        adjustmentsTotal: num(row.adjustmentsTotal),
+        code: row.code,
+        id: Number(row.id),
+        netAmount: num(row.netAmount),
+        status: row.status,
+        statusLabel: INVOICE_STATUS_LABELS[row.status],
+        vendorId: Number(row.vendorId),
+      })),
+      lines: overlayRows
+        .filter((row) => isStaff || row.state === LINE_STATE.INCLUDED)
+        .map((row) => {
+          const dto = this.toLineDto(row);
+          return { ...(isStaff ? dto : this.toVendorLineDto(dto)), invoiceId: Number(row.invoiceId), outsideCycle: Boolean(row.outsideCycle), vendorId: Number(row.vendorId) };
+        }),
+    };
+  }
+
+  /** Staff-only list for the vendor filter (finance_view is enough; vendors never reach it). */
+  public vendorOptions() {
+    return this.repo.listVendorOptions();
+  }
+
+  public async invoicedLines(query: {
+    invoiceCode?: string; operationNumber?: string; orderNumber?: string; page: number; productCode?: string; q?: string; size: number; vendorId?: number[];
+  }, scope: Scope) {
+    // vendor users are always pinned to their own id, whatever list they send
+    const vendorIds = scope.vendorId ? [Number(scope.vendorId)] : query.vendorId;
     const { rows, total } = await this.repo.listInvoicedLines({
-      page: query.page, q: query.q, size: query.size, statuses: [...VENDOR_VISIBLE_STATUSES, ...(scope.vendorId ? [] : [INVOICE_STATUS.FROZEN])], vendorId,
+      invoiceCode: query.invoiceCode, operationNumber: query.operationNumber, orderNumber: query.orderNumber, page: query.page,
+      productCode: query.productCode, q: query.q, size: query.size,
+      statuses: [...VENDOR_VISIBLE_STATUSES, ...(scope.vendorId ? [] : [INVOICE_STATUS.FROZEN])], vendorIds,
     });
     return {
       items: rows.map((row) => ({
@@ -314,9 +371,7 @@ export class InvoiceService {
       { billingDay: input.billingDay, referenceDate: input.referenceDate, vendorId: input.vendorId },
       input.vendorId ?? null,
     );
-    if (new Date(report.cycle.endDate).getTime() >= this.now().getTime()) {
-      throw new ConflictError("دورة الفوترة لم تُغلق بعد — لا يمكن إصدار فواتيرها");
-    }
+    // the open (current) cycle is allowed: it holds DRAFTS that sync keeps topping up; review is blocked until the cycle ends
     const byVendor = new Map<number, LineSnapshot[]>();
     for (const item of report.fullInvoice.items) {
       if (!item.vendorId) continue; // unknown vendor cannot own an invoice
@@ -376,6 +431,55 @@ export class InvoiceService {
     });
   }
 
+  /**
+   * Draft only: re-runs the live report for the invoice's vendor/cycle and refreshes the system-computed numbers
+   * (cost, collection, fines, vendor/company due, vendor shipping) of the EXISTING lines. Manual overrides, their reasons,
+   * line states (frozen/deferred/removed) and adjustments are preserved. Never run automatically.
+   */
+  public async refreshDraft(id: number, actor: Actor) {
+    const probe = await this.repo.findInvoice(id);
+    if (!probe) throw new NotFoundError("الفاتورة غير موجودة");
+    this.assertDraft(probe);
+    const report = await this.getReport(
+      { billingDay: probe.billingDay as 13 | 28, referenceDate: cairoDay(probe.periodEnd), vendorId: Number(probe.vendorId) },
+      Number(probe.vendorId),
+    );
+    const item = report.fullInvoice.items.find((row) => Number(row.vendorId) === Number(probe.vendorId));
+    const fresh = new Map<number, LineSnapshot>((item?.orders ?? []).map((order) => [Number(order.orderId ?? order.id), snapshotFromReportOrder(order)]));
+    return this.repo.transaction(async (transaction) => {
+      const invoice = await this.mustFind(id, transaction);
+      this.assertDraft(invoice);
+      const lines = await this.repo.listLines(id, transaction);
+      const changes: Array<{ companyDue: [number, number]; orderId: number; vendorDue: [number, number] }> = [];
+      for (const line of lines) {
+        const orderId = Number(line.orderId);
+        let snapshot = fresh.get(orderId) ?? null;
+        // counted lines whose order is outside the cycle window (picked-up deferred / manually added) are looked up on their own
+        if (!snapshot && (line.state === LINE_STATE.INCLUDED || line.state === LINE_STATE.FROZEN)) {
+          snapshot = await this.lookupSnapshot(orderId, Number(invoice.vendorId), transaction);
+        }
+        if (!snapshot) continue;
+        const same = toCents(line.collectionTotal) === toCents(snapshot.collectionTotal)
+          && toCents(line.warehouseCost) === toCents(snapshot.warehouseCost)
+          && toCents(line.fines) === toCents(snapshot.fines)
+          && toCents(line.vendorShippingCost) === toCents(snapshot.vendorShippingCost)
+          && toCents(line.vendorDue) === toCents(snapshot.vendorDue)
+          && toCents(line.companyDue) === toCents(snapshot.companyDue);
+        if (same) continue;
+        await this.repo.refreshLineSnapshot(line.id, snapshot, transaction);
+        changes.push({ companyDue: [num(line.companyDue), snapshot.companyDue], orderId, vendorDue: [num(line.vendorDue), snapshot.vendorDue] });
+      }
+      const totals = await this.recomputeTotals(invoice.id, transaction);
+      if (changes.length > 0) {
+        await this.repo.insertEvent({
+          action: "invoice.refreshed", actorId: actor.id, detail: { changes: changes.slice(0, 100), refreshed: changes.length, netAmount: totals.netAmount },
+          invoiceId: invoice.id, toStatus: invoice.status, vendorId: invoice.vendorId,
+        }, transaction);
+      }
+      return { refreshed: changes.length, totals };
+    });
+  }
+
   /* ---------- status transitions ---------- */
 
   public async transition(id: number, to: InvoiceStatus, options: { transferAmount?: number }, actor: Actor) {
@@ -390,6 +494,9 @@ export class InvoiceService {
       const detail: Record<string, unknown> = {};
 
       if (from === "draft" && to === "reviewed") {
+        if (new Date(invoice.periodEnd).getTime() >= this.now().getTime()) {
+          throw new ConflictError("الدورة لم تنتهِ بعد — لا يمكن مراجعة الفاتورة");
+        }
         const totals = await this.recomputeTotals(invoice.id, transaction);
         if (totals.ordersCount === 0 && totals.adjustmentsTotal === 0) {
           throw new ConflictError("لا يمكن مراجعة فاتورة فارغة (لا طلبات محسوبة ولا تعديلات)");
@@ -480,7 +587,10 @@ export class InvoiceService {
   public async setOverrides(
     id: number,
     lineId: number,
-    patch: { companyDueOverride?: number | null; finesOverride?: number | null; reason?: string; vendorDueOverride?: number | null },
+    patch: {
+      collectionOverride?: number | null; companyDueOverride?: number | null; finesOverride?: number | null; reason?: string;
+      vendorDueOverride?: number | null; warehouseCostOverride?: number | null;
+    },
     actor: Actor,
   ) {
     return this.repo.transaction(async (transaction) => {
@@ -489,22 +599,30 @@ export class InvoiceService {
       const line = await this.repo.findLine(invoice.id, lineId, transaction);
       if (!line) throw new NotFoundError("الطلب غير موجود في الفاتورة");
       if (line.state === LINE_STATE.REMOVED || line.state === LINE_STATE.DEFERRED) throw new ConflictError("لا يمكن تعديل طلب محذوف أو مؤجّل");
-      const pick = (key: "companyDueOverride" | "finesOverride" | "vendorDueOverride") =>
-        patch[key] === undefined ? (line[key] === null ? null : num(line[key])) : patch[key]!;
+      type Key = "collectionOverride" | "companyDueOverride" | "finesOverride" | "vendorDueOverride" | "warehouseCostOverride";
+      const current = (key: Key): number | null => (line[key] === null || line[key] === undefined ? null : num(line[key]));
+      const pick = (key: Key): number | null => (patch[key] === undefined ? current(key) : patch[key]!);
       const next = {
+        collectionOverride: pick("collectionOverride"),
         companyDueOverride: pick("companyDueOverride"),
         finesOverride: pick("finesOverride"),
         overrideReason: patch.reason?.trim() || line.overrideReason,
         vendorDueOverride: pick("vendorDueOverride"),
+        warehouseCostOverride: pick("warehouseCostOverride"),
+      };
+      const before = {
+        collectionOverride: current("collectionOverride"), companyDueOverride: current("companyDueOverride"), finesOverride: current("finesOverride"),
+        vendorDueOverride: current("vendorDueOverride"), warehouseCostOverride: current("warehouseCostOverride"),
       };
       await this.repo.setLineOverrides(line.id, next, transaction);
       const totals = await this.recomputeTotals(invoice.id, transaction);
       await this.repo.insertEvent({
         action: "line.overridden", actorId: actor.id,
         detail: {
-          lineId, orderId: Number(line.orderId), reason: patch.reason ?? null,
-          from: { companyDueOverride: line.companyDueOverride, finesOverride: line.finesOverride, vendorDueOverride: line.vendorDueOverride },
-          to: next, netAmount: totals.netAmount,
+          lineId, orderId: Number(line.orderId), orderNumber: line.orderNumber, operationNumber: line.operationNumber, reason: patch.reason ?? null,
+          // only the fields this request touched, old -> new (null = automatic value)
+          changes: Object.fromEntries((Object.keys(before) as Key[]).filter((key) => patch[key] !== undefined).map((key) => [key, { from: before[key], to: next[key] }])),
+          from: before, to: next, netAmount: totals.netAmount,
         },
         invoiceId: invoice.id, vendorId: invoice.vendorId,
       }, transaction);

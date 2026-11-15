@@ -2,7 +2,7 @@ import { logger } from "../../shared/logger/logger";
 import {
   dropActorAndDuplicates,
   publishNotificationsSafely,
-  resolveOrderAudience,
+  resolveShipmentAudience,
 } from "../notification/notification.publisher";
 import type { NotificationRow } from "../notification/notification.publisher";
 import { SHIPMENT_STATUS_LABELS } from "./shipment.constants";
@@ -12,13 +12,14 @@ import { buildShipmentNumber } from "./shipment.helpers";
  * Shipment notifications (entityType "shipment", entityId = the order/shipment id; the bell shows them
  * in the "الشحنات" tab and opens /shipments/:id).
  *
- * Recipients: the same audience as the legacy ORDER notifications for that order
- * (every non-vendor user + the vendor users that own the order's products - see
- * resolveOrderAudience), minus the user who made the change (no self-notification).
+ * Recipients: the order's responsible user (orders.userId) + every admin + the vendor users that own the
+ * order's products (see resolveShipmentAudience; an order with no responsible user reaches admins and its
+ * vendors only), minus the user who made the change (no self-notification). The legacy ORDER notifications
+ * keep their own, wider audience.
  *
  * Dedupe rule: ONE shipment notification per recipient per change. A change that also changes the
  * ORDER status in the same operation (order edit / bulk edit in OrderService) already produced an
- * order notification for the very same audience, so those callers skip the shipment one
+ * order notification (whose audience covers this one), so those callers skip the shipment one
  * (`shouldNotifyShipmentStatusChange`). Shipment-side writers (shipment edit, bulk edit, returns,
  * receipts, reassignment) never send an order notification, so there the derived order/confirmation
  * changes of the status-linking sync are part of the single shipment change - not a second one.
@@ -97,7 +98,7 @@ export const notifyShipmentStatusChanges = async (
       return;
     }
 
-    const audience = await resolveOrderAudience([...effective.keys()]);
+    const audience = await resolveShipmentAudience([...effective.keys()]);
     const rows: NotificationRow[] = [];
     for (const [userId, orderIds] of audience.ordersByUser) {
       const userChanges = orderIds
@@ -137,7 +138,7 @@ export const notifyShipmentScheduled = async (
     if (!day) {
       return;
     }
-    const audience = await resolveOrderAudience([orderId]);
+    const audience = await resolveShipmentAudience([orderId]);
     const text = `${SHIPMENT_SCHEDULED_PREFIX} ${shipmentLabel(orderId, audience.orderNumbers.get(orderId))} بتاريخ ${day}`;
     const rows: NotificationRow[] = [...audience.ordersByUser.keys()].map((userId) => ({
       entityId: orderId,

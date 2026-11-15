@@ -9,6 +9,10 @@ const flag = z.enum(["true", "false", "1", "0"]).transform((value) => value === 
 const statusList = z.string().transform((value) => value.split(",").map((part) => part.trim()).filter(Boolean))
   .pipe(z.array(z.enum(INVOICE_STATUSES)));
 
+const text = z.string().trim().min(1).max(100);
+const idList = z.string().transform((value) => value.split(",").map((part) => part.trim()).filter(Boolean))
+  .pipe(z.array(z.coerce.number().int().positive()).min(1).max(200));
+
 const paging = {
   page: z.coerce.number().int().min(1).default(1),
   size: z.coerce.number().int().min(1).max(200).default(50),
@@ -22,6 +26,7 @@ export const invoiceListQuery = z.object({
   ...paging,
   billingDay: z.coerce.number().int().refine((value) => (BILLING_DAYS as readonly number[]).includes(value), "billingDay must be 13 or 28").optional(),
   dueParty: z.enum(["vendor", "homix"]).optional(),
+  invoiceCode: text.optional(),
   invoiceFrom: day.optional(),
   invoiceTo: day.optional(),
   overdue: flag.optional(),
@@ -33,10 +38,18 @@ export const invoiceListQuery = z.object({
   vendorId: id.optional(),
 });
 
+/** One billing cycle = the Cairo day its invoices end on (same value as the report's cycle.endDate). */
+export const cycleQuery = z.object({ periodEnd: day, vendorId: id.optional() });
+
 export const invoicedLinesQuery = z.object({
   ...paging,
-  q: z.string().trim().min(1).max(100).optional(),
-  vendorId: id.optional(),
+  invoiceCode: text.optional(),
+  operationNumber: text.optional(),
+  orderNumber: text.optional(),
+  productCode: text.optional(),
+  q: text.optional(),
+  /** one id or a comma separated list */
+  vendorId: idList.optional(),
 });
 
 export const activityQuery = z.object({ ...paging, invoiceId: id.optional() });
@@ -67,12 +80,14 @@ export const adjustmentBody = z.object({
 });
 
 export const lineOverrideBody = z.object({
+  collectionOverride: money.nullable().optional(),
   companyDueOverride: money.nullable().optional(),
   finesOverride: money.nullable().optional(),
   reason: z.string().trim().max(500).optional(),
   vendorDueOverride: money.nullable().optional(),
+  warehouseCostOverride: money.nullable().optional(),
 }).refine(
-  (value) => value.companyDueOverride !== undefined || value.finesOverride !== undefined || value.vendorDueOverride !== undefined,
+  (value) => [value.collectionOverride, value.companyDueOverride, value.finesOverride, value.vendorDueOverride, value.warehouseCostOverride].some((field) => field !== undefined),
   "لا توجد تعديلات",
 );
 

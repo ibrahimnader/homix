@@ -49,6 +49,8 @@ export type LineRow = {
   vendorDue: string | number;
   companyDue: string | number;
   finesOverride: string | number | null;
+  warehouseCostOverride?: string | number | null;
+  collectionOverride?: string | number | null;
   vendorDueOverride: string | number | null;
   companyDueOverride: string | number | null;
   overrideReason: string | null;

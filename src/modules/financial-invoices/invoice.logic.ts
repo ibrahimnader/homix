@@ -8,25 +8,66 @@ import type { AdjustmentRow, InvoiceRow, InvoiceTotals, LineRow, LineSnapshot } 
 const optionalCents = (value: unknown): number | null =>
   value === null || value === undefined || value === "" ? null : toCents(value);
 
-/** Effective (override-aware) per-line amounts in piasters. */
-export const effectiveLineCents = (line: Pick<LineRow, "fines" | "vendorDue" | "companyDue" | "finesOverride" | "vendorDueOverride" | "companyDueOverride">) => {
+type EffectiveInput = Pick<LineRow, "fines" | "vendorDue" | "companyDue" | "finesOverride" | "vendorDueOverride" | "companyDueOverride">
+  & Partial<Pick<LineRow, "warehouseCostOverride" | "collectionOverride" | "collectionTotal" | "warehouseCost" | "vendorShippingCost">>;
+
+/**
+ * A snapshot is "cost based" when its stored dues follow the approved sheet formula
+ * (vendorDue = max(0, cost - fines), companyDue = collection - cost). Older snapshots (selling-price rule) and
+ * vendor-delivered lines (balance settlement) are not, and keep their own logic when something is overridden.
+ */
+export const isCostBasedLine = (line: EffectiveInput): boolean => {
+  if (line.collectionTotal === undefined || line.warehouseCost === undefined) return false;
+  const cost = toCents(line.warehouseCost);
+  return toCents(line.vendorDue) === Math.max(cost - toCents(line.fines), 0)
+    && toCents(line.companyDue) === toCents(line.collectionTotal) - cost;
+};
+
+/**
+ * Effective (override-aware) per-line amounts in piasters.
+ *  cost / collection = override ?? snapshot
+ *  vendorDue  = vendorDueOverride  ?? derived
+ *  companyDue = companyDueOverride ?? derived
+ * derived (cost-based line)  : vendorDue = max(0, cost - fines), companyDue = collection - cost
+ * derived (any other line)   : snapshot dues; a fines override shifts vendorDue by the fines difference; a cost/collection
+ *                              override re-settles the balance (collection - cost - vendor shipping) like a vendor delivery.
+ */
+export const effectiveLineCents = (line: EffectiveInput) => {
   const fines = toCents(line.fines);
   const finesOverride = optionalCents(line.finesOverride);
+  const costOverride = optionalCents(line.warehouseCostOverride);
+  const collectionOverride = optionalCents(line.collectionOverride);
   const vendorDueOverride = optionalCents(line.vendorDueOverride);
   const companyDueOverride = optionalCents(line.companyDueOverride);
   const effectiveFines = finesOverride ?? fines;
-  const derivedVendorDue = finesOverride === null
-    ? toCents(line.vendorDue)
-    : Math.max(toCents(line.vendorDue) + fines - finesOverride, 0);
+  const cost = costOverride ?? toCents(line.warehouseCost);
+  const collection = collectionOverride ?? toCents(line.collectionTotal);
+  const costBased = isCostBasedLine(line);
+
+  let derivedVendorDue: number;
+  let derivedCompanyDue: number;
+  if (costBased) {
+    derivedVendorDue = Math.max(cost - effectiveFines, 0);
+    derivedCompanyDue = collection - cost;
+  } else if (costOverride !== null || collectionOverride !== null) {
+    const balance = collection - cost - toCents(line.vendorShippingCost);
+    derivedCompanyDue = Math.max(balance, 0);
+    derivedVendorDue = Math.max(Math.max(-balance, 0) - effectiveFines, 0);
+  } else {
+    derivedCompanyDue = toCents(line.companyDue);
+    derivedVendorDue = finesOverride === null ? toCents(line.vendorDue) : Math.max(toCents(line.vendorDue) + fines - finesOverride, 0);
+  }
   return {
-    companyDue: companyDueOverride ?? toCents(line.companyDue),
+    collection,
+    companyDue: companyDueOverride ?? derivedCompanyDue,
+    cost,
     fines: effectiveFines,
     vendorDue: vendorDueOverride ?? derivedVendorDue,
   };
 };
 
 export const computeTotals = (
-  lines: Array<Pick<LineRow, "state" | "fines" | "vendorDue" | "companyDue" | "finesOverride" | "vendorDueOverride" | "companyDueOverride" | "collectionTotal" | "warehouseCost" | "vendorShippingCost">>,
+  lines: Array<Pick<LineRow, "state" | "fines" | "vendorDue" | "companyDue" | "finesOverride" | "vendorDueOverride" | "companyDueOverride" | "collectionTotal" | "warehouseCost" | "vendorShippingCost"> & Partial<Pick<LineRow, "warehouseCostOverride" | "collectionOverride">>>,
   adjustments: Array<Pick<AdjustmentRow, "kind" | "amount" | "removedAt">>,
 ): InvoiceTotals => {
   let ordersCount = 0;
@@ -35,8 +76,8 @@ export const computeTotals = (
     if (line.state !== LINE_STATE.INCLUDED) continue;
     const effective = effectiveLineCents(line);
     ordersCount += 1;
-    collection += toCents(line.collectionTotal);
-    warehouse += toCents(line.warehouseCost);
+    collection += effective.collection;
+    warehouse += effective.cost;
     shipping += toCents(line.vendorShippingCost);
     fines += effective.fines;
     vendorDue += effective.vendorDue;

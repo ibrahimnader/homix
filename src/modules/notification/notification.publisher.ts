@@ -138,11 +138,15 @@ export type OrderAudience = {
 };
 
 /**
- * Who receives notifications about an order: exactly the legacy ORDER notification audience
+ * Who receives notifications about an order (ORDER notifications; shipments use resolveShipmentAudience): exactly the legacy ORDER notification audience
  * (OrderService.sendNotification) - every non-vendor user, plus vendor users whose vendorId owns
  * a product on one of the order's lines. A vendor therefore only ever gets their own orders.
  */
-export const resolveOrderAudience = async (orderIds: ReadonlyArray<number>): Promise<OrderAudience> => {
+export const resolveOrderAudience = async (
+  orderIds: ReadonlyArray<number>,
+  options: { staffScope?: "all" | "responsibleAndAdmins" } = {},
+): Promise<OrderAudience> => {
+  const responsibleAndAdminsOnly = options.staffScope === "responsibleAndAdmins";
   const ids = uniqueIds(orderIds);
   const audience: OrderAudience = { orderNumbers: new Map(), ordersByUser: new Map(), vendorUserIds: new Set() };
   if (ids.length === 0) {
@@ -151,7 +155,7 @@ export const resolveOrderAudience = async (orderIds: ReadonlyArray<number>): Pro
 
   const USER_TYPES = loadUserTypes();
   const [orders, lines, users] = await Promise.all([
-    loadOrderModel().findAll({ attributes: ["id", "orderNumber"], where: { id: { [Op.in]: ids } } }),
+    loadOrderModel().findAll({ attributes: ["id", "orderNumber", "userId"], where: { id: { [Op.in]: ids } } }),
     loadOrderLineModel().findAll({
       attributes: ["orderId"],
       include: [{ as: "product", attributes: ["vendorId"], model: loadProductModel(), required: true }],
@@ -163,9 +167,14 @@ export const resolveOrderAudience = async (orderIds: ReadonlyArray<number>): Pro
     }),
   ]);
 
+  const responsibleByOrder = new Map<number, number>();
   for (const order of orders) {
     const plain = toPlain(order);
     audience.orderNumbers.set(Number(plain.id), String(plain.orderNumber ?? "").trim());
+    const responsibleId = toId(plain.userId);
+    if (responsibleId !== null) {
+      responsibleByOrder.set(Number(plain.id), responsibleId);
+    }
   }
 
   const vendorsByOrder = new Map<number, Set<number>>();
@@ -185,8 +194,12 @@ export const resolveOrderAudience = async (orderIds: ReadonlyArray<number>): Pro
     if (userId === null) {
       continue;
     }
-    const visible = String(plain.userType) !== USER_TYPES.VENDOR
+    const isVendorUser = String(plain.userType) === USER_TYPES.VENDOR;
+    const staffVisible = !responsibleAndAdminsOnly || String(plain.userType) === USER_TYPES.ADMIN
       ? ids
+      : ids.filter((orderId) => responsibleByOrder.get(orderId) === userId);
+    const visible = !isVendorUser
+      ? staffVisible
       : ids.filter((orderId) => {
         const vendorId = toId(plain.vendorId);
         return vendorId !== null && vendorsByOrder.get(orderId)?.has(vendorId) === true;
@@ -201,6 +214,14 @@ export const resolveOrderAudience = async (orderIds: ReadonlyArray<number>): Pro
 
   return audience;
 };
+
+/**
+ * Who receives SHIPMENT notifications (status / schedule): the order's responsible user (`orders.userId`),
+ * every admin (userType "1"), and the vendor users owning a product on the order. Orders without a responsible
+ * user reach the admins (and their vendors) only. Other staff are not notified.
+ */
+export const resolveShipmentAudience = (orderIds: ReadonlyArray<number>): Promise<OrderAudience> =>
+  resolveOrderAudience(orderIds, { staffScope: "responsibleAndAdmins" });
 
 /** Vendor users (users.vendorId) of the vendors that own the order's products. */
 export const resolveOrderVendorUserIds = async (orderId: number): Promise<number[]> =>

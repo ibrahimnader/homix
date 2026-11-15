@@ -6,7 +6,7 @@ import { OrderRepository } from "../orders/order.repo";
 import { RECEIPT_FOLDER } from "./invoice.constants";
 import { InvoiceRepository } from "./invoice.repo";
 import {
-  activityQuery, addOrderBody, adjustmentBody, bulkTransitionBody, candidatesQuery, generateBody, invoiceAdjustmentParams,
+  activityQuery, addOrderBody, adjustmentBody, bulkTransitionBody, candidatesQuery, cycleQuery, generateBody, invoiceAdjustmentParams,
   invoiceIdParams, invoiceLineParams, invoiceListQuery, invoicedLinesQuery, lineActionBody, lineOverrideBody,
   reconciliationBody, reconciliationQuery, transitionBody,
 } from "./invoice.schemas";
@@ -72,6 +72,7 @@ export const invoiceRouter = express.Router();
  *       - { in: query, name: receipt, schema: { type: string, enum: [uploaded, missing] } }
  *       - { in: query, name: overdue, schema: { type: boolean } }
  *       - { in: query, name: search, schema: { type: string } }
+ *       - { in: query, name: invoiceCode, schema: { type: string }, description: "partial, case-insensitive invoice code" }
  *       - { in: query, name: page, schema: { type: integer } }
  *       - { in: query, name: size, schema: { type: integer } }
  *     responses:
@@ -85,14 +86,50 @@ invoiceRouter.get("/", view, validateRequest({ query: invoiceListQuery }), async
 
 /**
  * @swagger
+ * /financial-invoices/vendors:
+ *   get:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: Vendor options for the invoice filters (staff only)
+ *     responses:
+ *       200: { description: "{ status, data: [{ id, name }] }" }
+ */
+invoiceRouter.get("/vendors", staffOnly, view, asyncHandler(async (_request, response) => {
+  response.json({ status: true, data: await invoiceService.vendorOptions() });
+}));
+
+/**
+ * @swagger
+ * /financial-invoices/cycle:
+ *   get:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: Invoice status per vendor for one billing cycle + the overridden/uncounted lines (live report overlay)
+ *     description: Vendors only receive their own reviewed/transferred invoices and counted lines regardless of the filters sent.
+ *     parameters:
+ *       - { in: query, name: periodEnd, required: true, schema: { type: string, format: date }, description: "Cairo day the cycle ends on (report cycle.endDate)" }
+ *       - { in: query, name: vendorId, schema: { type: integer } }
+ *     responses:
+ *       200: { description: "{ status, data: { invoices, lines, includedOrderIds } }" }
+ */
+invoiceRouter.get("/cycle", view, validateRequest({ query: cycleQuery }), asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await invoiceService.cycleOverview(request.query as never, scopeOf(request)) });
+}));
+
+/**
+ * @swagger
  * /financial-invoices/lines:
  *   get:
  *     security: [{ bearerAuth: [] }]
  *     tags: [FinancialInvoices]
  *     summary: Invoiced orders («الطلبات المفوترة») — counted lines of reviewed/frozen/transferred invoices
  *     parameters:
- *       - { in: query, name: q, schema: { type: string }, description: operation / order / product code or invoice code }
- *       - { in: query, name: vendorId, schema: { type: integer } }
+ *       - { in: query, name: q, schema: { type: string }, description: "combined search: operation / order / product code or invoice code" }
+ *       - { in: query, name: operationNumber, schema: { type: string }, description: "partial, case-insensitive" }
+ *       - { in: query, name: orderNumber, schema: { type: string }, description: "partial, case-insensitive" }
+ *       - { in: query, name: productCode, schema: { type: string }, description: "partial, case-insensitive" }
+ *       - { in: query, name: invoiceCode, schema: { type: string }, description: "partial, case-insensitive" }
+ *       - { in: query, name: vendorId, schema: { type: string }, description: "vendor id or a comma separated list (ignored for vendor users, who only see their own)" }
  *     responses:
  *       200: { description: Paged invoiced order lines }
  */
@@ -157,7 +194,7 @@ invoiceRouter.post("/reconciliation", ...settle, validateRequest({ body: reconci
  *     security: [{ bearerAuth: [] }]
  *     tags: [FinancialInvoices]
  *     summary: Generate (or top up) draft invoices for a closed billing cycle from the live financial report
- *     description: Idempotent per (vendor, cycle). Refuses cycles that have not closed yet. Pass vendorId to create an invoice for a single vendor (even with no orders, e.g. to hold a manual adjustment).
+ *     description: Idempotent per (vendor, cycle). The open (current) cycle is allowed and creates drafts; review stays blocked until the cycle ends. Pass vendorId to create an invoice for a single vendor (even with no orders, e.g. to hold a manual adjustment).
  *     requestBody:
  *       required: true
  *       content:
@@ -216,6 +253,23 @@ invoiceRouter.post("/bulk-transition", ...settle, validateRequest({ body: bulkTr
  */
 invoiceRouter.get("/:id", view, validateRequest({ params: invoiceIdParams }), asyncHandler(async (request, response) => {
   response.json({ status: true, data: await invoiceService.detail(Number(request.params.id), scopeOf(request)) });
+}));
+
+/**
+ * @swagger
+ * /financial-invoices/{id}/refresh:
+ *   post:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: Draft only — recompute the system numbers of the existing lines from the live report (overrides, states and adjustments are kept)
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: integer } }
+ *     responses:
+ *       200: { description: "{ refreshed, totals }" }
+ *       409: { description: Invoice is not a draft }
+ */
+invoiceRouter.post("/:id/refresh", ...settle, validateRequest({ params: invoiceIdParams }), asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await invoiceService.refreshDraft(Number(request.params.id), actorOf(request)) });
 }));
 
 /**

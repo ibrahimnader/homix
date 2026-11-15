@@ -10,6 +10,7 @@ export type Tx = Transaction;
 export type InvoiceListFilters = {
   billingDay?: number;
   dueParty?: "vendor" | "homix";
+  invoiceCode?: string;
   invoiceFrom?: string;
   invoiceTo?: string;
   overdueOnly?: boolean;
@@ -147,14 +148,27 @@ export class InvoiceRepository {
     return inserted;
   }
 
+  /** Refreshes ONLY the system-computed snapshot numbers of a line; overrides, reason and state are never touched. */
+  public async refreshLineSnapshot(lineId: number | string, snapshot: LineSnapshot, transaction: Tx): Promise<void> {
+    await sequelize.query(
+      `UPDATE financial_invoice_lines SET "collectionTotal" = :collectionTotal, "warehouseCost" = :warehouseCost, fines = :fines,
+         "vendorShippingCost" = :vendorShippingCost, "vendorDue" = :vendorDue, "companyDue" = :companyDue WHERE id = :lineId`,
+      { replacements: { ...snapshot, lineId }, transaction, type: QueryTypes.UPDATE },
+    );
+  }
+
   public async setLineOverrides(
     lineId: number | string,
-    values: { companyDueOverride: number | null; finesOverride: number | null; overrideReason: string | null; vendorDueOverride: number | null },
+    values: {
+      collectionOverride: number | null; companyDueOverride: number | null; finesOverride: number | null; overrideReason: string | null;
+      vendorDueOverride: number | null; warehouseCostOverride: number | null;
+    },
     transaction: Tx,
   ): Promise<void> {
     await sequelize.query(
       `UPDATE financial_invoice_lines SET "finesOverride" = :finesOverride, "vendorDueOverride" = :vendorDueOverride,
-         "companyDueOverride" = :companyDueOverride, "overrideReason" = :overrideReason WHERE id = :lineId`,
+         "companyDueOverride" = :companyDueOverride, "overrideReason" = :overrideReason,
+         "warehouseCostOverride" = :warehouseCostOverride, "collectionOverride" = :collectionOverride WHERE id = :lineId`,
       { replacements: { ...values, lineId }, transaction, type: QueryTypes.UPDATE },
     );
   }
@@ -255,6 +269,7 @@ export class InvoiceRepository {
     if (filters.dueParty === "homix") conditions.push('i."netAmount" < 0');
     if (filters.receipt === "uploaded") conditions.push('i."receiptPath" IS NOT NULL');
     if (filters.receipt === "missing") conditions.push('i."receiptPath" IS NULL');
+    if (filters.invoiceCode) { conditions.push("i.code ILIKE :invoiceCode"); replacements.invoiceCode = `%${escapeLike(filters.invoiceCode)}%`; }
     if (filters.search) {
       conditions.push("(v.name ILIKE :search OR i.code ILIKE :search)");
       replacements.search = `%${escapeLike(filters.search)}%`;
@@ -280,6 +295,59 @@ export class InvoiceRepository {
     return { rows, total: Number(counts[0]?.total ?? 0) };
   }
 
+  /** Invoices whose cycle ends inside [periodEndFrom, periodEndTo] (one cycle), optionally one vendor / some statuses. */
+  public listCycleInvoices(filters: { periodEndFrom: string; periodEndTo: string; statuses?: InvoiceStatus[]; vendorId?: number }): Promise<InvoiceRow[]> {
+    const conditions = ['i."periodEnd" >= CAST(:periodEndFrom AS timestamptz)', 'i."periodEnd" <= CAST(:periodEndTo AS timestamptz)'];
+    const replacements: Record<string, unknown> = { periodEndFrom: filters.periodEndFrom, periodEndTo: filters.periodEndTo };
+    if (filters.vendorId) { conditions.push('i."vendorId" = :vendorId'); replacements.vendorId = filters.vendorId; }
+    if (filters.statuses?.length) { conditions.push("i.status IN (:statuses)"); replacements.statuses = filters.statuses; }
+    return sequelize.query<InvoiceRow>(
+      `SELECT ${INVOICE_COLUMNS} FROM financial_invoices i JOIN vendors v ON v.id = i."vendorId"
+       WHERE ${conditions.join(" AND ")} ORDER BY i."vendorId", i.id`,
+      { replacements, type: QueryTypes.SELECT },
+    );
+  }
+
+  /**
+   * Lines the live report cannot reproduce on its own: overridden amounts, lines that are not counted
+   * (frozen/deferred/removed) and lines whose order falls outside the invoice's own cycle window
+   * (deferred pick-ups, manually added orders).
+   */
+  public listCycleOverlayLines(invoiceIds: number[]): Promise<Array<LineRow & { outsideCycle: boolean; vendorId: number }>> {
+    if (invoiceIds.length === 0) return Promise.resolve([]);
+    return sequelize.query<LineRow & { outsideCycle: boolean; vendorId: number }>(
+      `SELECT l.*, i."vendorId",
+              (o.id IS NULL OR COALESCE(o."deliveryDate", o."updatedAt") < i."periodStart" OR COALESCE(o."deliveryDate", o."updatedAt") > i."periodEnd") AS "outsideCycle"
+       FROM financial_invoice_lines l
+       JOIN financial_invoices i ON i.id = l."invoiceId"
+       LEFT JOIN orders o ON o.id = l."orderId"
+       WHERE l."invoiceId" IN (:invoiceIds)
+         AND (l."finesOverride" IS NOT NULL OR l."vendorDueOverride" IS NOT NULL OR l."companyDueOverride" IS NOT NULL
+              OR l."warehouseCostOverride" IS NOT NULL OR l."collectionOverride" IS NOT NULL
+              OR l.state <> 'included'
+              OR o.id IS NULL OR COALESCE(o."deliveryDate", o."updatedAt") < i."periodStart" OR COALESCE(o."deliveryDate", o."updatedAt") > i."periodEnd")
+       ORDER BY l.id`,
+      { replacements: { invoiceIds }, type: QueryTypes.SELECT },
+    );
+  }
+
+  /** Order ids that are counted (state = included) on each of the given invoices. */
+  public listIncludedOrderIds(invoiceIds: number[]): Promise<Array<{ invoiceId: number | string; orderId: number }>> {
+    if (invoiceIds.length === 0) return Promise.resolve([]);
+    return sequelize.query<{ invoiceId: number | string; orderId: number }>(
+      `SELECT "invoiceId", "orderId" FROM financial_invoice_lines WHERE "invoiceId" IN (:invoiceIds) AND state = 'included' ORDER BY id`,
+      { replacements: { invoiceIds }, type: QueryTypes.SELECT },
+    );
+  }
+
+  /** Every non-deleted vendor with a name (filter dropdown). */
+  public listVendorOptions(): Promise<Array<{ id: number; name: string }>> {
+    return sequelize.query<{ id: number; name: string }>(
+      `SELECT id, name FROM vendors WHERE "deletedAt" IS NULL AND name IS NOT NULL AND TRIM(name) <> '' ORDER BY name, id`,
+      { type: QueryTypes.SELECT },
+    );
+  }
+
   /** Counts per status for the tabs (vendor scoping applied by the caller through vendorId/statuses). */
   public async countByStatus(vendorId: number | undefined, statuses: InvoiceStatus[] | undefined): Promise<Record<string, number>> {
     const rows = await sequelize.query<{ status: string; total: string }>(
@@ -294,11 +362,21 @@ export class InvoiceRepository {
 
   /** Invoiced orders (included lines of non-draft invoices). */
   public async listInvoicedLines(filters: {
-    page: number; q?: string; size: number; statuses: InvoiceStatus[]; vendorId?: number;
+    invoiceCode?: string; operationNumber?: string; orderNumber?: string; page: number; productCode?: string; q?: string; size: number;
+    statuses: InvoiceStatus[]; vendorIds?: number[];
   }): Promise<{ rows: Array<LineRow & { code: string | null; invoiceStatus: InvoiceStatus; periodEnd: string; vendorId: number; vendorName: string; transferredAt: string | null; receiptPath: string | null }>; total: number }> {
     const replacements: Record<string, unknown> = { statuses: filters.statuses };
     const conditions = ["l.state = 'included'", "i.status IN (:statuses)"];
-    if (filters.vendorId) { conditions.push('i."vendorId" = :vendorId'); replacements.vendorId = filters.vendorId; }
+    if (filters.vendorIds?.length) { conditions.push('i."vendorId" IN (:vendorIds)'); replacements.vendorIds = filters.vendorIds; }
+    const like = (column: string, key: string, value: string | undefined) => {
+      if (!value) return;
+      conditions.push(`${column} ILIKE :${key}`);
+      replacements[key] = `%${escapeLike(value)}%`;
+    };
+    like('l."operationNumber"', "operationNumber", filters.operationNumber);
+    like('l."orderNumber"', "orderNumber", filters.orderNumber);
+    like('l."productCode"', "productCode", filters.productCode);
+    like("i.code", "invoiceCode", filters.invoiceCode);
     if (filters.q) {
       conditions.push(`(l."operationNumber" ILIKE :q OR l."orderNumber" ILIKE :q OR l."productCode" ILIKE :q OR i.code ILIKE :q)`);
       replacements.q = `%${escapeLike(filters.q)}%`;

@@ -19,7 +19,7 @@ describe("money", () => {
 
 describe("effectiveLineCents", () => {
   test("uses stored values without overrides", () => {
-    expect(effectiveLineCents(line())).toEqual({ companyDue: 20000, fines: 5000, vendorDue: 75000 });
+    expect(effectiveLineCents(line())).toMatchObject({ companyDue: 20000, fines: 5000, vendorDue: 75000 });
   });
   test("a fines override shifts vendor due by the difference, floored at zero", () => {
     expect(effectiveLineCents(line({ finesOverride: "0" }))).toMatchObject({ fines: 0, vendorDue: 80000 });
@@ -27,7 +27,7 @@ describe("effectiveLineCents", () => {
   });
   test("explicit overrides win over derived values", () => {
     expect(effectiveLineCents(line({ finesOverride: "0", vendorDueOverride: "700", companyDueOverride: "10" })))
-      .toEqual({ companyDue: 1000, fines: 0, vendorDue: 70000 });
+      .toMatchObject({ companyDue: 1000, fines: 0, vendorDue: 70000 });
   });
 });
 
@@ -94,5 +94,47 @@ describe("snapshotFromReportOrder", () => {
     const base = { collectionTotal: 100, companyDue: 10, fines: 0, orderId: 7, vendorDue: 90, vendorShippingCost: 15, warehouseCost: 50 };
     expect(snapshotFromReportOrder({ ...base, shipmentId: 7 })).toMatchObject({ isWarehouseDelivery: true, orderId: 7, vendorShippingCost: 0 });
     expect(snapshotFromReportOrder({ ...base, shipmentId: null })).toMatchObject({ isWarehouseDelivery: false, vendorShippingCost: 15 });
+  });
+});
+
+describe("effectiveLineCents with cost/collection overrides", () => {
+  // cost based snapshot: 2,299 collected, 1,200 cost, 100 fines -> vendor 1,100, company 1,099
+  const costBased = (overrides: Partial<LineRow> = {}) => line({
+    collectionTotal: "2299", companyDue: "1099", fines: "100", vendorDue: "1100", warehouseCost: "1200", ...overrides,
+  });
+  const eff = (overrides: Partial<LineRow> = {}) => {
+    const e = effectiveLineCents(costBased(overrides));
+    return { collection: fromCents(e.collection), companyDue: fromCents(e.companyDue), cost: fromCents(e.cost), fines: fromCents(e.fines), vendorDue: fromCents(e.vendorDue) };
+  };
+
+  test("no overrides keeps the snapshot", () => {
+    expect(eff()).toEqual({ collection: 2299, companyDue: 1099, cost: 1200, fines: 100, vendorDue: 1100 });
+  });
+  test("cost override recalculates both dues", () => {
+    expect(eff({ warehouseCostOverride: 1000 })).toMatchObject({ cost: 1000, vendorDue: 900, companyDue: 1299 });
+  });
+  test("collection override only moves the company due", () => {
+    expect(eff({ collectionOverride: 2000 })).toMatchObject({ collection: 2000, vendorDue: 1100, companyDue: 800 });
+  });
+  test("fines override recalculates the vendor due from cost", () => {
+    expect(eff({ finesOverride: 0 })).toMatchObject({ fines: 0, vendorDue: 1200, companyDue: 1099 });
+    expect(eff({ finesOverride: 5000 }).vendorDue).toBe(0);
+  });
+  test("due overrides win over everything (and may be 0)", () => {
+    expect(eff({ warehouseCostOverride: 1000, finesOverride: 10, vendorDueOverride: 0, companyDueOverride: 5 })).toMatchObject({ vendorDue: 0, companyDue: 5, cost: 1000, fines: 10 });
+  });
+  test("all five overrides combined", () => {
+    expect(eff({ collectionOverride: 3000, companyDueOverride: 7, finesOverride: 50, vendorDueOverride: 999, warehouseCostOverride: 1500 }))
+      .toEqual({ collection: 3000, companyDue: 7, cost: 1500, fines: 50, vendorDue: 999 });
+  });
+  test("legacy (selling-price) snapshots keep the fines delta logic and re-settle on cost/collection overrides", () => {
+    const legacy = line({ collectionTotal: "1000", companyDue: "200", fines: "50", vendorDue: "750", warehouseCost: "600", finesOverride: 0 });
+    expect(fromCents(effectiveLineCents(legacy).vendorDue)).toBe(800);
+    const resettled = effectiveLineCents(line({ collectionTotal: "1000", companyDue: "200", fines: "0", vendorDue: "800", warehouseCost: "600", warehouseCostOverride: 1100, vendorShippingCost: "0" }));
+    expect([fromCents(resettled.companyDue), fromCents(resettled.vendorDue)]).toEqual([0, 100]);
+  });
+  test("computeTotals uses the effective cost and collection", () => {
+    const totals = computeTotals([costBased({ warehouseCostOverride: 1000, collectionOverride: 2000 })], []);
+    expect(totals).toMatchObject({ collectionTotal: 2000, warehouseCost: 1000, vendorDueTotal: 900, companyDueTotal: 1000, finesTotal: 100 });
   });
 });

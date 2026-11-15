@@ -8,6 +8,7 @@ import {
   SHIPMENT_STATUS_LABELS,
   SHIPMENT_TYPE_LABELS,
 } from "./shipment.constants";
+import { CANCELED_LIKE_ORDER_STATUSES, CLOSED_SHIPMENT_STATUSES, SHIPMENTS_STATUS } from "../../../config/constants";
 
 type PlainRecord = Record<string, unknown>;
 type Plainable = PlainRecord | { toJSON: () => PlainRecord };
@@ -253,4 +254,31 @@ export const getVariantBySku = (variantsValue: unknown, sku: string): PlainRecor
   }
 
   return null;
+};
+
+/* A sibling whose order was closed by cancel/reject (4, 9..17) or whose shipment
+   was cancelled/rejected (5, 6, 13..21) will never reach the warehouse, so it must
+   not hold the rest of the grouped delivery back. */
+const EXCLUDED_ORDER_STATUSES = new Set<number>(CANCELED_LIKE_ORDER_STATUSES as number[]);
+const EXCLUDED_SHIPMENT_STATUSES = new Set<number>([
+  SHIPMENTS_STATUS.CANCELED,
+  SHIPMENTS_STATUS.REJECTED,
+  ...(CLOSED_SHIPMENT_STATUSES as number[]),
+]);
+
+export const isExcludedFromGroupedShipment = (order: PlainRecord): boolean =>
+  EXCLUDED_ORDER_STATUSES.has(toNumber(order.status))
+  || EXCLUDED_SHIPMENT_STATUSES.has(toNumber(order.shipmentStatus));
+
+export type GroupedCompleteness = { complete: boolean; inWarehouseCount: number; relatedCount: number };
+
+/** Completeness of one grouped delivery from all its sibling orders; `null` when fewer than two countable items remain (no badge). */
+export const summarizeGroupedShipment = (
+  siblings: PlainRecord[],
+  hasReachedWarehouse: (order: PlainRecord) => boolean,
+): GroupedCompleteness | null => {
+  const counted = siblings.filter((order) => !isExcludedFromGroupedShipment(order));
+  if (counted.length <= 1) return null;
+  const inWarehouseCount = counted.filter(hasReachedWarehouse).length;
+  return { complete: inWarehouseCount === counted.length, inWarehouseCount, relatedCount: counted.length };
 };

@@ -14,7 +14,8 @@ import { CLOSED_ORDER_STATUSES, CLOSED_SHIPMENT_STATUSES, CONFIRMATION_STATUS, O
  *  - explicit wins: a field the payload really changes is never overwritten. A value that
  *    only repeats the stored value (the full edit form re-sends every field) is not a
  *    change, so it neither drives anything nor blocks a derived value.
- *  - no guard on final states: a change always propagates, including reopening.
+ *  - no guard on final states: a change always propagates, including reopening. Confirmation values 1, 3, 4, 5, 6 and 2
+ *    reopen a cancelled/rejected order (see the confirmation rules below) but never regress other statuses.
  *  - several changed fields: each changed field derives the targets that are still
  *    unset; priority is order status, then shipment status, then confirmation status.
  */
@@ -27,6 +28,8 @@ export type StatusTarget = {
   value: number;
   /** Only write when the stored value of that column is one of these (null = unset). */
   onlyIfCurrentIn?: ReadonlyArray<number | null>;
+  /** Only write when the stored value of ANOTHER column is one of these (e.g. reopen a shipment only on a cancelled order). */
+  onlyIfOtherCurrentIn?: { field: StatusField; values: ReadonlyArray<number | null> };
 };
 export type StatusRule = Partial<Record<StatusField, StatusTarget>>;
 export type StatusPatch = Partial<Record<StatusField, number>>;
@@ -112,13 +115,30 @@ const CANCELED_SHIPMENT_STATUS_VALUES: ReadonlyArray<number> = [S.CANCELED, ...C
  * Delivered (5), returned/refunded (6), replaced (7) and in-inventory (8) orders, and shipment statuses 2, 4, 7, 9,
  * are never touched: confirming must not regress them.
  *
- * Opposite direction (confirmation 7..11 -> 1, 3, 4, 5, 6): intentionally derives NOTHING. Reopening on those is
- * not approved; only the explicit "confirmed" value reopens.
  */
 export const CONFIRMATION_CONFIRMED_RULE: StatusRule = {
   status: { value: O.CONFIRMED, onlyIfCurrentIn: [O.PENDING, ...CANCELED_ORDER_STATUS_VALUES] },
   shipmentStatus: { value: S.PENDING, onlyIfCurrentIn: CANCELED_SHIPMENT_STATUS_VALUES },
 };
+
+/**
+ * Matrix 3a': confirmation 1 (pending), 3/4/5 (no answer, attempt 1/2/3) and 6 (call back later) ALSO reopen a
+ * cancelled/rejected order: order 4 or 9..17 -> 1 (pending), and its shipment 5 or 13..21 -> 1 (only while the order is
+ * cancelled/rejected). They never change an order that is pending, in progress, confirmed, delivered, returned,
+ * replaced or in inventory (manufacturing/delivered work is never regressed), nor those orders' shipments.
+ * Explicit payload values still win and it is one hop, like every other rule.
+ */
+export const CONFIRMATION_REOPEN_PENDING_RULE: StatusRule = {
+  status: { value: O.PENDING, onlyIfCurrentIn: CANCELED_ORDER_STATUS_VALUES },
+  shipmentStatus: {
+    value: S.PENDING,
+    onlyIfCurrentIn: CANCELED_SHIPMENT_STATUS_VALUES,
+    onlyIfOtherCurrentIn: { field: "status", values: CANCELED_ORDER_STATUS_VALUES },
+  },
+};
+export const CONFIRMATION_REOPEN_PENDING_VALUES: ReadonlyArray<number> = [
+  C.PENDING, C.NO_ANSWER_FIRST_ATTEMPT, C.NO_ANSWER_SECOND_ATTEMPT, C.NO_ANSWER_THIRD_ATTEMPT, C.CALL_BACK_LATER,
+];
 
 /** Matrix 3b: confirmation 7..11 (cancel) -> order + shipment cancel variant, by manufacture stage. */
 export const CONFIRMATION_CANCEL_VALUES: ReadonlyArray<number> = [
@@ -151,6 +171,7 @@ const ruleFor = (source: StatusField, value: number, manufactureStatus: number |
   if (source === "status") return ORDER_STATUS_RULES[value];
   if (source === "shipmentStatus") return SHIPMENT_STATUS_RULES[value];
   if (value === C.CONFIRMED) return CONFIRMATION_CONFIRMED_RULE;
+  if (CONFIRMATION_REOPEN_PENDING_VALUES.includes(value)) return CONFIRMATION_REOPEN_PENDING_RULE;
   if (CONFIRMATION_CANCEL_VALUES.includes(value)) {
     return BEFORE_MANUFACTURE_STATUSES.includes(manufactureStatus)
       ? CONFIRMATION_CANCEL_RULES.beforeManufacture
@@ -202,6 +223,7 @@ export const deriveStatusPatch = (
       if (!entry || target === source) continue;
       if (changed[target] !== undefined || patch[target] !== undefined) continue; // explicit wins / higher priority already derived
       if (entry.onlyIfCurrentIn && !entry.onlyIfCurrentIn.includes(current[target])) continue;
+      if (entry.onlyIfOtherCurrentIn && !entry.onlyIfOtherCurrentIn.values.includes(current[entry.onlyIfOtherCurrentIn.field])) continue;
       if (entry.value === current[target]) continue;
       patch[target] = entry.value;
       derived.push({ field: target, from: current[target], to: entry.value, source });

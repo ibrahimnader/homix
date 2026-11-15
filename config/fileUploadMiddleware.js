@@ -4,23 +4,38 @@ const fs = require("fs-extra");
 
 const { env } = require("../src/config/env");
 
+const MAX_FILE_BYTES = 16000000;
+const ALLOWED_EXTENSIONS = /^\.(jpe?g|png|gif|pdf)$/;
+const ALLOWED_MIME_TYPES = /^(image\/(jpeg|jpg|pjpeg|png|x-png|gif)|application\/pdf)$/;
+
+const UPLOAD_ERRORS = {
+  INVALID_FILE_TYPE: { status: 400, message: "الملف لازم يكون صورة (JPG/PNG/GIF) أو PDF" },
+  LIMIT_FILE_SIZE: { status: 413, message: "حجم الملف أكبر من 16 ميجا" },
+  SAVE_FAILED: { status: 500, message: "تعذر حفظ الملف على الخادم" },
+  UPLOAD_FAILED: { status: 500, message: "تعذر رفع الملف" },
+};
+
+/** JSON body (not plain text) so the frontend can show the real reason. */
+function sendUploadError(res, code) {
+  const known = UPLOAD_ERRORS[code] || UPLOAD_ERRORS.UPLOAD_FAILED;
+  return res.status(known.status).json({ status: false, code: UPLOAD_ERRORS[code] ? code : "UPLOAD_FAILED", message: known.message });
+}
+
 // Configure multer to store files in memory
 const storage = multer.memoryStorage();
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 16000000 }, // Limit file size to 16MB
+  limits: { fileSize: MAX_FILE_BYTES }, // Limit file size to 16MB
   fileFilter: function (req, file, cb) {
-    const filetypes = /jpeg|jpg|png|gif|pdf/;
-    const extname = filetypes.test(
-      path.extname(file.originalname).toLowerCase()
-    );
-    const mimetype = filetypes.test(file.mimetype);
+    const extname = ALLOWED_EXTENSIONS.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = ALLOWED_MIME_TYPES.test(String(file.mimetype || "").toLowerCase());
 
     if (mimetype && extname) {
       return cb(null, true);
-    } else {
-      cb("Error: Images and PDFs only!");
     }
+    const error = new Error("Images and PDFs only");
+    error.code = "INVALID_FILE_TYPE";
+    cb(error);
   },
 });
 function sanitizeFileName(fileName) {
@@ -61,7 +76,8 @@ function fileUploadMiddleware(folderName) {
   return (req, res, next) => {
     upload.array("files")(req, res, async (err) => {
       if (err) {
-        return res.status(500).send("Error uploading files.");
+        if (!UPLOAD_ERRORS[err.code]) console.error("Error uploading files:", err);
+        return sendUploadError(res, err.code);
       }
       const files = req.files;
 
@@ -95,7 +111,7 @@ function fileUploadMiddleware(folderName) {
           next();
         } catch (error) {
           console.error("Error saving files:", error);
-          res.status(500).send("Error saving files.");
+          sendUploadError(res, "SAVE_FAILED");
         }
       } else {
         // Downstream handlers index into these, so never leave them undefined

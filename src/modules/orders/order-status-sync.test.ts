@@ -112,8 +112,36 @@ describe("deriveStatusPatch: confirmation status as source", () => {
   it.each([[3], [4], [5], [6], [1]])("confirmation %i changes nothing", (confirmationStatus) => {
     expect(derive({ status: 1, confirmationStatus: 2 }, { confirmationStatus })).toEqual({});
   });
-  it.each([[1], [3], [4], [5], [6]])("leaving a cancel confirmation for %i does not reopen (not approved)", (confirmationStatus) => {
-    expect(derive({ status: 9, shipmentStatus: 13, confirmationStatus: 7 }, { confirmationStatus })).toEqual({});
+  const REOPEN_VALUES = [1, 3, 4, 5, 6];
+  const CANCELLED_ORDERS: Array<[number, number]> = [[4, 5], [9, 13], [10, 14], [11, 15], [12, 16], [13, 17], [14, 18], [15, 19], [16, 20], [17, 21]];
+  describe.each(REOPEN_VALUES)("confirmation %i reopens a cancelled/rejected order", (confirmationStatus) => {
+    it.each(CANCELLED_ORDERS)("order %i / shipment %i -> order 1 / shipment 1", (status, shipmentStatus) => {
+      expect(derive({ status, shipmentStatus, confirmationStatus: 7 }, { confirmationStatus })).toEqual({ status: 1, shipmentStatus: 1 });
+    });
+    it.each([1, 2, 3, 5, 6, 7, 8])("order %i (not cancelled) changes nothing", (status) => {
+      expect(derive({ status, shipmentStatus: 3, confirmationStatus: 7 }, { confirmationStatus })).toEqual({});
+      // a stray cancelled shipment on a non-cancelled order is not touched either
+      expect(derive({ status, shipmentStatus: 13, confirmationStatus: 7 }, { confirmationStatus })).toEqual({});
+    });
+    it("explicit order/shipment values in the payload win", () => {
+      expect(derive({ status: 9, shipmentStatus: 13, confirmationStatus: 7 }, { confirmationStatus, status: 3 })).toEqual({ shipmentStatus: 1 });
+      expect(derive({ status: 9, shipmentStatus: 13, confirmationStatus: 7 }, { confirmationStatus, shipmentStatus: 3 })).toEqual({ status: 1 });
+    });
+  });
+  it("cancel -> pending -> cancel -> confirm stays stable", () => {
+    let row: Row = { status: 2, shipmentStatus: 3, confirmationStatus: 2, manufactureStatus: 3 };
+    const step = (payload: Row) => { row = { ...row, ...payload, ...derive(row, payload) }; };
+    step({ confirmationStatus: 7 });
+    expect(row).toMatchObject({ status: 10, shipmentStatus: 14, confirmationStatus: 7 });
+    step({ confirmationStatus: 3 });
+    expect(row).toMatchObject({ status: 1, shipmentStatus: 1, confirmationStatus: 3 });
+    step({ confirmationStatus: 7 });
+    expect(row).toMatchObject({ status: 10, shipmentStatus: 14, confirmationStatus: 7 });
+    step({ confirmationStatus: 6 });
+    expect(row).toMatchObject({ status: 1, shipmentStatus: 1, confirmationStatus: 6 });
+    step({ confirmationStatus: 7 });
+    step({ confirmationStatus: 2 });
+    expect(row).toMatchObject({ status: 3, shipmentStatus: 1, confirmationStatus: 2 });
   });
   it.each([7, 8, 9, 10, 11])("cancel %i before manufacturing confirmation -> order 9 / shipment 13", (confirmationStatus) => {
     for (const manufactureStatus of [null, 1, 2]) {

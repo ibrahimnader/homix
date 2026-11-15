@@ -52,7 +52,9 @@ import {
   getShipmentStatusLabel,
   getShipmentTypeLabel,
   getVariantBySku,
+  isExcludedFromGroupedShipment,
   normalizeOperationCode,
+  summarizeGroupedShipment,
   toDateRangeBoundary,
   toIsoString,
   toNullableNumber,
@@ -1063,6 +1065,7 @@ export class ShipmentRepository {
       sellerName: toText(row.sellerName),
       shipmentStatusLabel: SHIPMENT_STATUS_LABELS[toNumber(row.shipmentStatus)] ?? "",
       inWarehouse: hasReachedWarehouse(row),
+      excluded: isExcludedFromGroupedShipment(row),
       current: toNumber(row.id) === orderId,
     }));
   }
@@ -1108,31 +1111,26 @@ export class ShipmentRepository {
       where: { orderNumber: { [Op.in]: groupedOrderNumbers } },
     });
 
-    const summaryByOrderNumber = new Map<string, { inWarehouseCount: number; relatedCount: number }>();
+    const siblingsByOrderNumber = new Map<string, Array<Record<string, unknown>>>();
+    const excludedIds = new Set<number>();
     for (const relatedOrder of relatedOrders as Array<Record<string, unknown>>) {
       const orderNumber = toText(relatedOrder.orderNumber);
-      const summary = summaryByOrderNumber.get(orderNumber) ?? { inWarehouseCount: 0, relatedCount: 0 };
-      summary.relatedCount += 1;
-      if (hasReachedWarehouse(relatedOrder)) {
-        summary.inWarehouseCount += 1;
+      const siblings = siblingsByOrderNumber.get(orderNumber) ?? [];
+      siblings.push(relatedOrder);
+      siblingsByOrderNumber.set(orderNumber, siblings);
+      if (isExcludedFromGroupedShipment(relatedOrder)) {
+        excludedIds.add(toNumber(relatedOrder.id));
       }
-      summaryByOrderNumber.set(orderNumber, summary);
     }
 
     return items.map((item) => {
-      const summary = summaryByOrderNumber.get(item.orderNumber);
-      if (!summary || !GROUPED_SHIPMENT_TYPES.has(item.shipmentType)) {
+      const siblings = siblingsByOrderNumber.get(item.orderNumber);
+      if (!siblings || !GROUPED_SHIPMENT_TYPES.has(item.shipmentType) || excludedIds.has(item.id)) {
         return item;
       }
 
-      return {
-        ...item,
-        groupedShipment: {
-          complete: summary.relatedCount > 0 && summary.inWarehouseCount === summary.relatedCount,
-          inWarehouseCount: summary.inWarehouseCount,
-          relatedCount: summary.relatedCount,
-        },
-      };
+      const summary = summarizeGroupedShipment(siblings, hasReachedWarehouse);
+      return summary ? { ...item, groupedShipment: summary } : item;
     });
   }
 

@@ -1,4 +1,4 @@
-import { calculateVendorDeliverySettlement } from "./order-financial-settlement";
+import { calculateVendorDeliverySettlement, calculateWarehouseDeliverySettlement } from "./order-financial-settlement";
 
 describe("calculateVendorDeliverySettlement", () => {
   it("makes a positive balance due to Homix", () => {
@@ -39,5 +39,26 @@ describe("calculateVendorDeliverySettlement", () => {
       productCost: "500.00",
       vendorShippingCost: "0",
     })).toEqual({ balance: 500, companyDue: 500, vendorDue: 0 });
+  });
+});
+
+describe("calculateWarehouseDeliverySettlement (Homix-delivered orders are cost based)", () => {
+  it("vendor due = cost - fines, company due = collection - cost (client example 2,299 / 1,200 / 100)", () => {
+    expect(calculateWarehouseDeliverySettlement({ collectionTotal: 2299, fines: 100, productCost: 1200 }))
+      .toEqual({ companyDue: 1099, vendorDue: 1100 });
+  });
+
+  it("never lets fines push the vendor due below zero", () => {
+    expect(calculateWarehouseDeliverySettlement({ collectionTotal: 2299, fines: 5000, productCost: 1200 }).vendorDue).toBe(0);
+  });
+
+  it("a missing/zero cost yields a zero vendor due (flagged in the UI), not the selling price", () => {
+    expect(calculateWarehouseDeliverySettlement({ collectionTotal: 2299, fines: 100, productCost: 0 }))
+      .toEqual({ companyDue: 2299, vendorDue: 0 });
+    expect(calculateWarehouseDeliverySettlement({ collectionTotal: 2299, productCost: undefined }).vendorDue).toBe(0);
+  });
+
+  it("ignores negative fines", () => {
+    expect(calculateWarehouseDeliverySettlement({ collectionTotal: 100, fines: -10, productCost: 60 }).vendorDue).toBe(60);
   });
 });

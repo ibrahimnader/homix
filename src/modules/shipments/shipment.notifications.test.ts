@@ -3,7 +3,7 @@ const mockAudience = jest.fn();
 jest.mock("../notification/notification.publisher", () => ({
   ...jest.requireActual("../notification/notification.publisher"),
   publishNotificationsSafely: (...args: unknown[]) => mockPublish(...args),
-  resolveOrderAudience: (...args: unknown[]) => mockAudience(...args),
+  resolveShipmentAudience: (...args: unknown[]) => mockAudience(...args),
 }));
 
 import {

@@ -624,6 +624,50 @@ describe("shipmentRouter", () => {
     expect(sequelizeQuery.mock.calls[1][1].replacements).toEqual({ orderNumber: "ON-9" });
   });
 
+  it("flags cancelled/rejected siblings as excluded in the grouped items", async () => {
+    sequelizeQuery.mockReset();
+    sequelizeQuery
+      .mockResolvedValueOnce([{ orderNumber: "ON-9" }])
+      .mockResolvedValueOnce([
+        { id: 5, code: "100", orderNumber: "ON-9", status: 1, shipmentStatus: 2, sku: "A", title: "كرسي", sellerName: "بائع" },
+        { id: 6, code: "101", orderNumber: "ON-9", status: 12, shipmentStatus: 1, sku: "B", title: "طاولة", sellerName: "بائع" },
+        { id: 7, code: "102", orderNumber: "ON-9", status: 1, shipmentStatus: 19, sku: "C", title: "دولاب", sellerName: "بائع" },
+        { id: 8, code: "103", orderNumber: "ON-9", status: 1, shipmentStatus: 1, sku: "D", title: "سرير", sellerName: "بائع" },
+      ]);
+
+    const response = await request(app).get("/shipments/5/grouped-items");
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.map((i: { id: number; excluded: boolean; inWarehouse: boolean }) => [i.id, i.excluded, i.inWarehouse]))
+      .toEqual([[5, false, true], [6, true, false], [7, true, false], [8, false, false]]);
+  });
+
+  it("computes groupedShipment on the list ignoring cancelled siblings", async () => {
+    orderModel.findAll.mockReset();
+    orderModel.findAll.mockResolvedValue([
+      { id: 9802, orderNumber: "31667", status: 1, shipmentStatus: 2 },
+      { id: 9803, orderNumber: "31667", status: 1, shipmentStatus: 3 },
+      { id: 9804, orderNumber: "31667", status: 4, shipmentStatus: 1 },
+      { id: 9805, orderNumber: "31667", status: 1, shipmentStatus: 21 },
+    ]);
+    const response = await request(app).get("/shipments").query({ page: 1, size: 20 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.items[0].groupedShipment).toEqual({ complete: true, inWarehouseCount: 2, relatedCount: 2 });
+  });
+
+  it("returns no badge for a cancelled shipment's own row", async () => {
+    orderModel.findAll.mockReset();
+    orderModel.findAll.mockResolvedValue([
+      { id: 9802, orderNumber: "31667", status: 4, shipmentStatus: 2 },
+      { id: 9803, orderNumber: "31667", status: 1, shipmentStatus: 2 },
+    ]);
+    orderModel.findAndCountAll.mockResolvedValueOnce({ count: 1, rows: [makeShipment({ id: 9802, status: 4 })] });
+    const response = await request(app).get("/shipments").query({ page: 1, size: 20 });
+
+    expect(response.body.data.items[0].groupedShipment).toBeNull();
+  });
+
   it("404s grouped items for an unknown shipment", async () => {
     sequelizeQuery.mockReset();
     sequelizeQuery.mockResolvedValueOnce([]);

@@ -15,9 +15,14 @@ const spies = {
   activity: jest.spyOn(invoiceService, "activity").mockResolvedValue({ page: 1, rows: [], size: 50, total: 0 } as never),
   addAdjustment: jest.spyOn(invoiceService, "addAdjustment").mockResolvedValue({ netAmount: 1 } as never),
   bulkTransition: jest.spyOn(invoiceService, "bulkTransition").mockResolvedValue({ results: [], succeeded: 0 } as never),
+  cycleOverview: jest.spyOn(invoiceService, "cycleOverview").mockResolvedValue({ includedOrderIds: {}, invoices: [], lines: [] } as never),
   detail: jest.spyOn(invoiceService, "detail").mockResolvedValue({ adjustments: [], invoice: {}, lines: [] } as never),
   generate: jest.spyOn(invoiceService, "generate").mockResolvedValue({ invoices: [] } as never),
+  invoicedLines: jest.spyOn(invoiceService, "invoicedLines").mockResolvedValue({ items: [] } as never),
+  vendorOptions: jest.spyOn(invoiceService, "vendorOptions").mockResolvedValue([{ id: 1, name: "ركة" }] as never),
   list: jest.spyOn(invoiceService, "list").mockResolvedValue({ items: [] } as never),
+  refreshDraft: jest.spyOn(invoiceService, "refreshDraft").mockResolvedValue({ refreshed: 0 } as never),
+  setOverrides: jest.spyOn(invoiceService, "setOverrides").mockResolvedValue({} as never),
   setReceipt: jest.spyOn(invoiceService, "setReceipt").mockResolvedValue(undefined as never),
   transition: jest.spyOn(invoiceService, "transition").mockResolvedValue({ id: 1 } as never),
 };
@@ -99,4 +104,54 @@ test("receipt upload requires a file and records it for the actor", async () => 
   expect((await request(finance).post("/financial-invoices/1/receipt")).status).toBe(400);
   expect((await request(finance).post("/financial-invoices/1/receipt").set("x-test-file", "1")).status).toBe(200);
   expect(spies.setReceipt).toHaveBeenCalledWith(1, { name: "r.pdf", path: "uploads/financial-receipts/r-1.pdf" }, { id: 7 });
+});
+
+test("cycle overview: needs finance_view, validates periodEnd and scopes vendors by the token", async () => {
+  expect((await request(appFor({ id: 1, permissions: {}, userType: "3" })).get("/financial-invoices/cycle?periodEnd=2026-10-28")).status).toBe(403);
+  expect((await request(finance).get("/financial-invoices/cycle")).status).toBe(400);
+  expect((await request(finance).get("/financial-invoices/cycle?periodEnd=28-10-2026")).status).toBe(400);
+  expect(spies.cycleOverview).not.toHaveBeenCalled();
+  expect((await request(finance).get("/financial-invoices/cycle?periodEnd=2026-10-28&vendorId=4")).status).toBe(200);
+  expect(spies.cycleOverview).toHaveBeenCalledWith({ periodEnd: "2026-10-28", vendorId: 4 }, {});
+  await request(vendor).get("/financial-invoices/cycle?periodEnd=2026-10-28&vendorId=99");
+  expect(spies.cycleOverview).toHaveBeenLastCalledWith({ periodEnd: "2026-10-28", vendorId: 99 }, { vendorId: 5 });
+  expect((await request(orphanVendor).get("/financial-invoices/cycle?periodEnd=2026-10-28")).status).toBe(403);
+  expect(spies.detail).not.toHaveBeenCalled();
+});
+
+test("refresh is staff-only with finance_settle; overrides accept cost/collection and reject negatives", async () => {
+  expect((await request(vendor).post("/financial-invoices/1/refresh")).status).toBe(403);
+  expect((await request(viewer).post("/financial-invoices/1/refresh")).status).toBe(403);
+  expect((await request(finance).post("/financial-invoices/1/refresh")).status).toBe(200);
+  expect(spies.refreshDraft).toHaveBeenCalledWith(1, { id: 7 });
+  expect((await request(finance).patch("/financial-invoices/1/lines/2").send({ warehouseCostOverride: 10, collectionOverride: null })).status).toBe(200);
+  expect(spies.setOverrides).toHaveBeenCalledWith(1, 2, { collectionOverride: null, warehouseCostOverride: 10 }, { id: 7 });
+  expect((await request(finance).patch("/financial-invoices/1/lines/2").send({ warehouseCostOverride: -1 })).status).toBe(400);
+  expect((await request(finance).patch("/financial-invoices/1/lines/2").send({})).status).toBe(400);
+});
+
+test("invoiced lines: separate filters and a vendor id list are validated and parsed", async () => {
+  await request(finance).get("/financial-invoices/lines?operationNumber=OP-1&orderNumber=316&productCode=rka&invoiceCode=INV-2026&vendorId=3,4&q=old");
+  expect(spies.invoicedLines).toHaveBeenCalledWith(
+    expect.objectContaining({ invoiceCode: "INV-2026", operationNumber: "OP-1", orderNumber: "316", productCode: "rka", q: "old", vendorId: [3, 4] }), {});
+  expect((await request(finance).get("/financial-invoices/lines?vendorId=abc")).status).toBe(400);
+  expect((await request(finance).get("/financial-invoices/lines?operationNumber=")).status).toBe(400);
+});
+
+test("invoiced lines: a vendor token is the scope, whatever vendor list is sent", async () => {
+  await request(vendor).get("/financial-invoices/lines?vendorId=99,100");
+  expect(spies.invoicedLines).toHaveBeenCalledWith(expect.objectContaining({ vendorId: [99, 100] }), { vendorId: 5 });
+});
+
+test("vendor options: staff with finance_view only, never vendors", async () => {
+  expect((await request(vendor).get("/financial-invoices/vendors")).status).toBe(403);
+  expect((await request(appFor({ id: 1, permissions: {}, userType: "3" })).get("/financial-invoices/vendors")).status).toBe(403);
+  const ok = await request(finance).get("/financial-invoices/vendors");
+  expect(ok.status).toBe(200);
+  expect(ok.body.data).toEqual([{ id: 1, name: "ركة" }]);
+});
+
+test("archive list accepts a separate invoiceCode filter", async () => {
+  await request(finance).get("/financial-invoices?invoiceCode=INV-9&vendorId=4");
+  expect(spies.list).toHaveBeenCalledWith(expect.objectContaining({ invoiceCode: "INV-9", vendorId: 4 }), {});
 });

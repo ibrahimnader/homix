@@ -1,5 +1,6 @@
 import express from "express";
 
+import { ForbiddenError } from "../../shared/errors";
 import { asyncHandler, validateRequest } from "../../shared/http";
 import { OrderController } from "./order.controller";
 import { OrderRepository } from "./order.repo";
@@ -24,6 +25,17 @@ const verifyToken = require("../../../app/middlewares/protectApi");
 const isNotVendor = require("../../../app/middlewares/isNotVendor");
 const requirePermission = require("../../../app/middlewares/requirePermission");
 const fileUploadMiddleware = require("../../../config/fileUploadMiddleware");
+
+const { USER_TYPES } = require("../../../config/constants");
+
+/** Vendors can never create orders, whatever their permissions. Real 403 JSON (the legacy isNotVendor answers 200).
+ *  Not applied to the unauthenticated Shopify webhook. */
+const staffOnlyCreate: express.RequestHandler = (request, _response, next) => {
+  if (String((request.user as { userType?: unknown } | undefined)?.userType) === String(USER_TYPES.VENDOR)) {
+    throw new ForbiddenError("البائع لا يملك صلاحية إنشاء الطلبات");
+  }
+  next();
+};
 
 const orderRepository = new OrderRepository();
 const orderService = new OrderService(orderRepository);
@@ -300,7 +312,7 @@ orderRouter.get(
 // Deliberately no verifyToken: Shopify authenticates with an HMAC signature.
 orderRouter.post("/webhook", asyncHandler(handleShopifyOrderWebhook));
 
-orderRouter.post("/", verifyToken, requirePermission("orders_create"), validateRequest({ body: orderMutationSchema }), asyncHandler(orderController.createOrder));
+orderRouter.post("/", verifyToken, staffOnlyCreate, requirePermission("orders_create"), validateRequest({ body: orderMutationSchema }), asyncHandler(orderController.createOrder));
 
 /**
  * @swagger
@@ -597,7 +609,7 @@ orderRouter.put("/bulk-update", verifyToken, requirePermission("orders_edit"), v
  *             schema:
  *               $ref: '#/components/schemas/GenericMessageResponse'
  */
-orderRouter.post("/import", verifyToken, requirePermission("orders_create"), asyncHandler(orderController.importOrders));
+orderRouter.post("/import", verifyToken, staffOnlyCreate, requirePermission("orders_create"), asyncHandler(orderController.importOrders));
 
 /**
  * @swagger

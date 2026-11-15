@@ -269,6 +269,15 @@ const STEPS: Step[] = [
         ON financial_invoice_lines ("orderId") WHERE state IN ('included', 'frozen', 'removed')`,
       `CREATE INDEX IF NOT EXISTS financial_invoice_lines_invoice_state_idx ON financial_invoice_lines ("invoiceId", state)`,
       `CREATE INDEX IF NOT EXISTS financial_invoice_lines_order_idx ON financial_invoice_lines ("orderId")`,
+      // invoice-level overrides of the order's cost / collection (the order itself is never touched)
+      `ALTER TABLE financial_invoice_lines ADD COLUMN IF NOT EXISTS "warehouseCostOverride" NUMERIC(14,2)`,
+      `ALTER TABLE financial_invoice_lines ADD COLUMN IF NOT EXISTS "collectionOverride" NUMERIC(14,2)`,
+      `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'financial_invoice_lines_cost_overrides_chk') THEN
+          ALTER TABLE financial_invoice_lines ADD CONSTRAINT financial_invoice_lines_cost_overrides_chk
+            CHECK (("warehouseCostOverride" IS NULL OR "warehouseCostOverride" >= 0) AND ("collectionOverride" IS NULL OR "collectionOverride" >= 0));
+        END IF;
+      END $$`,
       `CREATE TABLE IF NOT EXISTS financial_invoice_adjustments (
         id BIGSERIAL PRIMARY KEY,
         "invoiceId" BIGINT NOT NULL REFERENCES financial_invoices(id),

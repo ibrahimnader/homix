@@ -106,6 +106,7 @@ export class OrderService {
   }
 
   public async createOrder(payload: OrderMutationPayload, user?: OrderRequestUser): Promise<Result<{ message: string }>> {
+    if (user && String(user.userType) === String(USER_TYPES.VENDOR)) throw new ForbiddenError("البائع لا يملك صلاحية إنشاء الطلبات");
     const normalizedPayload = normalizeOrderMutationPayload(payload);
     await this.legacyGateway.saveImportedOrders([normalizedPayload], false, user);
     await this.refreshAggregateForDates([normalizedPayload.orderDate]);
@@ -327,7 +328,7 @@ export class OrderService {
         { header: "إجمالي التحصيل", key: "collectionTotal", width: 18 },
         { header: "مستحق البائع", key: "vendorDue", width: 18 },
         { header: "مستحق الشركة", key: "companyDue", width: 18 },
-        { header: "تكلفة المخزن", key: "warehouseCost", width: 18 },
+        { header: "سعر التكلفة", key: "warehouseCost", width: 18 },
         { header: "الغرامات", key: "fines", width: 18 },
       ];
 

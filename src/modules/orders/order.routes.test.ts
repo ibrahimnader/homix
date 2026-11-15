@@ -399,9 +399,9 @@ describe("orderRouter", () => {
     expect(response.body.status).toBe(true);
     expect(response.body.data.cycle.billingDay).toBe(13);
     expect(response.body.data.summary.totalSales).toBe(8000);
-    expect(response.body.data.summary.companyDue).toBe(1399);
+    expect(response.body.data.summary.companyDue).toBe(4499);
     expect(response.body.data.summary.fines).toBe(300);
-    expect(response.body.data.summary.vendorDue).toBe(4100);
+    expect(response.body.data.summary.vendorDue).toBe(1000);
     expect(response.body.data.fullInvoice.summary.warehouseCost).toBe(2400);
     expect(response.body.data.vendorDeliveries.summary.ordersCount).toBe(1);
     expect(response.body.data.warehouseDeliveries.summary.ordersCount).toBe(1);
@@ -425,7 +425,7 @@ describe("orderRouter", () => {
       }),
       expect.objectContaining({
         collectionTotal: 5000,
-        companyDue: 700,
+        companyDue: 3800,
         fines: 200,
         id: 8,
         operationNumber: "3001",
@@ -435,7 +435,7 @@ describe("orderRouter", () => {
         productCode: "RKA-001",
         productId: 812,
         shipmentId: 8,
-        vendorDue: 4100,
+        vendorDue: 1000,
         vendorShippingCost: 200,
         warehouseCost: 1200,
       }),
@@ -484,6 +484,31 @@ describe("orderRouter", () => {
       warehouseCost: 1200,
       companyDue: 699,
     }));
+  });
+
+  it("settles every Homix-delivered order on cost: delivered shipment, not-yet-delivered shipment and zero cost", async () => {
+    const lines = (cost: string) => [{
+      cost, quantity: 1, sku: "RKA-001",
+      product: { id: 812, vendor: { id: 3, name: "ركنة للأثاث", shippingCost: 200 } },
+    }];
+    orderModel.findAll.mockResolvedValue([
+      makeOrder({ commission: "0", deliveryBy: 1, deliveryDate: "2026-07-10T00:00:00.000Z", fine: "100", id: 21, orderLines: lines("1200"), shipmentStatus: 4, status: 5, totalCost: "1200", totalPrice: "2299" }),
+      makeOrder({ commission: "0", deliveryBy: 1, deliveryDate: "2026-07-10T00:00:00.000Z", fine: "0", id: 22, orderLines: lines("1000"), shipmentStatus: 2, status: 5, totalCost: "1000", totalPrice: "1800" }),
+      makeOrder({ commission: "0", deliveryBy: 1, deliveryDate: "2026-07-10T00:00:00.000Z", fine: "50", id: 23, orderLines: lines("0"), shipmentStatus: 4, status: 5, totalCost: "0", totalPrice: "900" }),
+    ]);
+
+    const response = await request(app).get("/orders/financialReport").query({ billingDay: 13, referenceDate: "2026-07-16" });
+
+    expect(response.status).toBe(200);
+    const byId = Object.fromEntries(response.body.data.fullInvoice.items[0].orders.map((order: { id: number }) => [order.id, order]));
+    expect(byId[21]).toMatchObject({ companyDue: 1099, vendorDue: 1100, warehouseCost: 1200 });
+    expect(byId[22]).toMatchObject({ companyDue: 800, vendorDue: 1000, shipmentId: null });
+    expect(byId[23]).toMatchObject({ companyDue: 900, vendorDue: 0, warehouseCost: 0 });
+    // the warehouse tab section uses the very same numbers, so its "net required" equals the invoice vendor due
+    const warehouseOrders = response.body.data.warehouseDeliveries.items[0].orders;
+    expect(warehouseOrders.map((order: { id: number }) => order.id)).toEqual([21, 23]);
+    expect(warehouseOrders[0]).toMatchObject({ companyDue: 1099, vendorDue: 1100 });
+    expect(response.body.data.summary.vendorDue).toBe(2100);
   });
 
   it("resolves billingDay 28 to the July 14, 2026 through July 28, 2026 cycle for a July 26, 2026 reference date", async () => {

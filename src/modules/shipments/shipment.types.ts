@@ -200,17 +200,19 @@ export type GroupedShipmentItem = {
   sellerName: string;
   shipmentStatusLabel: string;
   inWarehouse: boolean;
+  /** `true` للطلب الملغي/المرفوض: لا يُحتسب في اكتمال المجموعة. */
+  excluded: boolean;
   /** `true` للطلب الذي فُتحت منه النافذة. */
   current: boolean;
 };
 
 /** ملخّص مجموعة التوصيل المجمع الظاهر كأيقونة بجوار الشحنة. */
 export type GroupedShipmentInfo = {
-  /** عدد الطلبات المرتبطة بنفس رقم الأوردر (متضمناً هذا الطلب). */
+  /** عدد الطلبات المرتبطة بنفس رقم الأوردر (متضمناً هذا الطلب) بدون الملغي/المرفوض. */
   relatedCount: number;
   /** كم منها وصل المخزن بالفعل. */
   inWarehouseCount: number;
-  /** `true` حين تكون كل الطلبات المرتبطة في المخزن. */
+  /** `true` حين تكون كل الطلبات المحتسبة في المخزن. */
   complete: boolean;
 };
 

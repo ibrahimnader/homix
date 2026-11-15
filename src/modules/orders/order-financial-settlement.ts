@@ -28,3 +28,24 @@ export const calculateVendorDeliverySettlement = ({
     vendorDue: currency(Math.max(grossVendorDue - Math.max(currency(fines), 0), 0)),
   };
 };
+
+/**
+ * Orders Homix delivers (deliveryBy = HOMIX, delivered or not yet) are settled on the product COST price,
+ * never on the selling price: vendorDue = max(0, cost - fines); companyDue = collection - cost
+ * (Homix keeps the margin; no commission). Same rule as the warehouse settlement tab and the approved invoice sheet.
+ */
+export const calculateWarehouseDeliverySettlement = ({
+  collectionTotal,
+  fines,
+  productCost,
+}: {
+  collectionTotal: unknown;
+  fines?: unknown;
+  productCost: unknown;
+}): { companyDue: number; vendorDue: number } => {
+  const cost = currency(productCost);
+  return {
+    companyDue: currency(currency(collectionTotal) - cost),
+    vendorDue: currency(Math.max(cost - Math.max(currency(fines), 0), 0)),
+  };
+};

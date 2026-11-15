@@ -42,6 +42,7 @@ const makeRepo = (current: InvoiceRow = invoice()) => {
     listLines: jest.fn(async () => state.lines),
     listPickableDeferred: jest.fn(async () => [] as LineRow[]),
     nextInvoiceSequence: jest.fn(async () => 7),
+    refreshLineSnapshot: jest.fn(async () => undefined),
     removeAdjustment: jest.fn(),
     setLineOverrides: jest.fn(async () => undefined),
     setLineState: jest.fn(async () => undefined),
@@ -56,11 +57,23 @@ const service = (repo: unknown, getReport = jest.fn()) =>
   new InvoiceService({ getReport, now: () => NOW, removeStoredFile: jest.fn(async () => undefined), repo: repo as never });
 
 describe("generate", () => {
-  test("refuses a cycle that has not closed yet", async () => {
-    const { repo } = makeRepo();
+  test("allows the open cycle: creates a draft that can be topped up", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow()];
     const getReport = jest.fn(async () => report("2026-11-28T21:59:59.999Z"));
-    await expect(service(repo, getReport).generate({ billingDay: 28 }, actor)).rejects.toThrow(/لم تُغلق/);
-    expect(repo.upsertDraft).not.toHaveBeenCalled();
+    const result = await service(repo, getReport).generate({ billingDay: 28 }, actor);
+    expect(result.invoices).toEqual([expect.objectContaining({ created: true, vendorId: 5 })]);
+    expect(repo.upsertDraft).toHaveBeenCalled();
+  });
+
+  test("review (single and bulk) is blocked with 409 until the cycle end has passed", async () => {
+    const open = makeRepo(invoice({ periodEnd: "2026-11-28T21:59:59.999Z", status: "draft" }));
+    open.state.lines = [lineRow()];
+    await expect(service(open.repo).transition(1, "reviewed", {}, actor)).rejects.toThrow(/الدورة لم تنتهِ بعد/);
+    const bulk = await service(open.repo).bulkTransition([1], "reviewed", actor);
+    expect(bulk.results[0]).toMatchObject({ id: 1, ok: false });
+    expect(bulk.succeeded).toBe(0);
+    expect(open.repo.updateInvoiceFields).not.toHaveBeenCalled();
   });
 
   test("creates a draft per vendor, snapshots lines, recomputes totals and audits", async () => {
@@ -258,5 +271,157 @@ describe("receipt and reconciliation", () => {
     const result = await svc.recordReconciliation({ bankTotal: 3000 }, actor);
     expect(result).toMatchObject({ bankTotal: 3000, count: 2, difference: -100, systemTotal: 3100 });
     expect(repo.insertEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "reconciliation.recorded", actorId: 9 }), expect.anything());
+  });
+});
+
+describe("cycleOverview (live report overlay)", () => {
+  const cycleRepo = (invoices: InvoiceRow[], lines: Array<LineRow & { outsideCycle: boolean; vendorId: number }>, included: Array<{ invoiceId: number; orderId: number }> = []) => {
+    const { repo } = makeRepo();
+    return Object.assign(repo, {
+      listCycleInvoices: jest.fn(async () => invoices),
+      listCycleOverlayLines: jest.fn(async () => lines),
+      listIncludedOrderIds: jest.fn(async () => included),
+    });
+  };
+  const overlayLine = (overrides: Partial<LineRow> = {}) => ({ ...lineRow({ finesOverride: 0, fines: 50, overrideReason: "سبب داخلي", vendorDue: 750, ...overrides }), outsideCycle: false, vendorId: 5 });
+
+  test("staff get status per vendor, effective line amounts, internal reasons and the counted order ids", async () => {
+    const repo = cycleRepo(
+      [invoice({ id: 1, status: "draft", vendorId: 5 }), invoice({ id: 2, status: "frozen", vendorId: 6 })],
+      [overlayLine(), overlayLine({ id: 12, state: "frozen", stateReason: "مراجعة" })],
+      [{ invoiceId: 1, orderId: 100 }, { invoiceId: 1, orderId: 101 }],
+    );
+    const result = await service(repo).cycleOverview({ periodEnd: "2026-10-28" }, {});
+    expect(result.invoices.map((row) => [row.vendorId, row.status])).toEqual([[5, "draft"], [6, "frozen"]]);
+    expect(result.lines).toHaveLength(2);
+    expect(result.lines[0]).toMatchObject({ fines: 0, finesOverride: 0, invoiceId: 1, overrideReason: "سبب داخلي", vendorDue: 800, vendorId: 5 });
+    expect(result.includedOrderIds).toEqual({ 1: [100, 101] });
+    expect(repo.listCycleInvoices).toHaveBeenCalledWith(expect.objectContaining({ statuses: undefined, vendorId: undefined }));
+  });
+
+  test("the cycle is looked up by the Cairo day the invoices end on", async () => {
+    const repo = cycleRepo([], []);
+    await service(repo).cycleOverview({ periodEnd: "2026-10-28", vendorId: 5 }, {});
+    expect(repo.listCycleInvoices).toHaveBeenCalledWith({
+      periodEndFrom: "2026-10-27T21:00:00.000Z", periodEndTo: "2026-10-28T20:59:59.999Z", statuses: undefined, vendorId: 5,
+    });
+    expect(repo.listCycleOverlayLines).toHaveBeenCalledWith([]);
+  });
+
+  test("vendors: forced to their own reviewed/transferred invoices, counted lines only, no internal notes", async () => {
+    const repo = cycleRepo(
+      [invoice({ id: 3, status: "reviewed", vendorId: 5 })],
+      [overlayLine({ invoiceId: 3 }), overlayLine({ id: 12, state: "deferred", stateReason: "داخلي" })],
+    );
+    const result = await service(repo).cycleOverview({ periodEnd: "2026-10-28", vendorId: 99 }, { vendorId: 5 });
+    expect(repo.listCycleInvoices).toHaveBeenCalledWith(expect.objectContaining({ statuses: ["reviewed", "transferred"], vendorId: 5 }));
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0]).not.toHaveProperty("overrideReason");
+    expect(result.lines[0]).not.toHaveProperty("stateReason");
+    expect(result.lines[0]).not.toHaveProperty("originalFines");
+  });
+});
+
+describe("cost/collection overrides and draft refresh", () => {
+  test("a cost override is saved with old -> new audit detail and recomputes totals", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow({ warehouseCostOverride: 500 })];
+    await service(repo).setOverrides(1, 11, { collectionOverride: 1500 }, actor);
+    expect(repo.setLineOverrides).toHaveBeenCalledWith(11, expect.objectContaining({ collectionOverride: 1500, warehouseCostOverride: 500 }), expect.anything());
+    expect(repo.insertEvent).toHaveBeenCalledWith(expect.objectContaining({
+      action: "line.overridden",
+      detail: expect.objectContaining({ changes: { collectionOverride: { from: null, to: 1500 } } }),
+    }), expect.anything());
+    expect(repo.updateTotals).toHaveBeenCalled();
+  });
+
+  test("null clears a cost override", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow({ warehouseCostOverride: 500 })];
+    await service(repo).setOverrides(1, 11, { warehouseCostOverride: null }, actor);
+    expect(repo.setLineOverrides).toHaveBeenCalledWith(11, expect.objectContaining({ warehouseCostOverride: null }), expect.anything());
+  });
+
+  test.each(["reviewed", "frozen", "transferred"] as const)("cost/collection overrides and refresh are refused (409) on %s invoices", async (status) => {
+    const { repo, state } = makeRepo(invoice({ status }));
+    state.lines = [lineRow()];
+    const getReport = jest.fn();
+    await expect(service(repo, getReport).setOverrides(1, 11, { warehouseCostOverride: 1 }, actor)).rejects.toThrow(/مقفلة/);
+    await expect(service(repo, getReport).refreshDraft(1, actor)).rejects.toThrow(/مقفلة/);
+    expect(getReport).not.toHaveBeenCalled();
+    expect(repo.setLineOverrides).not.toHaveBeenCalled();
+  });
+
+  test("refresh updates system numbers only: overrides, reasons, states and adjustments are not touched", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [
+      lineRow({ finesOverride: 0, id: 11, orderId: 100, overrideReason: "سبب", vendorDue: 800, warehouseCostOverride: 700 }),
+      lineRow({ id: 12, orderId: 101, state: "frozen", vendorDue: 800 }),
+    ];
+    const fresh = (orderId: number) => ({ ...reportOrder(orderId, 1100), companyDue: 1099, collectionTotal: 2299, fines: 100, warehouseCost: 1200 });
+    const getReport = jest.fn().mockResolvedValue(report("2026-10-28T20:59:59.999Z", [fresh(100), fresh(101)]));
+    const result = await service(repo, getReport).refreshDraft(1, actor);
+    expect(result.refreshed).toBe(2);
+    const refreshed = repo.refreshLineSnapshot.mock.calls.map((call: unknown[]) => call[0]);
+    expect(refreshed).toEqual([11, 12]);
+    expect(repo.refreshLineSnapshot).toHaveBeenCalledWith(11, expect.objectContaining({ vendorDue: 1100, warehouseCost: 1200, collectionTotal: 2299 }), expect.anything());
+    // overrides / states / adjustments have their own repo calls and none of them ran
+    expect(repo.setLineOverrides).not.toHaveBeenCalled();
+    expect(repo.setLineState).not.toHaveBeenCalled();
+    expect(repo.insertAdjustment).not.toHaveBeenCalled();
+    expect(repo.removeAdjustment).not.toHaveBeenCalled();
+    expect(repo.insertEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "invoice.refreshed", detail: expect.objectContaining({ refreshed: 2 }) }), expect.anything());
+  });
+
+  test("refresh without changes writes no audit event", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow()];
+    const getReport = jest.fn().mockResolvedValue(report("2026-10-28T20:59:59.999Z", [reportOrder(100)]));
+    expect((await service(repo, getReport).refreshDraft(1, actor)).refreshed).toBe(0);
+    expect(repo.insertEvent).not.toHaveBeenCalled();
+  });
+
+  test("vendors never receive overrides, originals or reasons (detail and cycle overview)", async () => {
+    const lineWithAll = lineRow({ collectionOverride: 1, finesOverride: 2, overrideReason: "x", vendorDueOverride: 3, warehouseCostOverride: 4, companyDueOverride: 5 });
+    const own = makeRepo(invoice({ status: "reviewed", vendorId: 5 }));
+    own.state.lines = [lineWithAll];
+    const detail = await service(own.repo).detail(1, { vendorId: 5 });
+    for (const key of ["collectionOverride", "finesOverride", "vendorDueOverride", "companyDueOverride", "warehouseCostOverride", "overrideReason", "originalFines", "originalWarehouseCost", "originalCollection"]) {
+      expect(detail.lines[0]).not.toHaveProperty(key);
+    }
+    // the amounts shown are still the effective ones
+    expect(detail.lines[0]).toMatchObject({ collectionTotal: 1, warehouseCost: 4 });
+    const staff = await service(own.repo).detail(1, {});
+    expect(staff.lines[0]).toMatchObject({ collectionOverride: 1, warehouseCostOverride: 4, originalWarehouseCost: 600 });
+  });
+});
+
+describe("invoiced lines filters", () => {
+  const withRepo = () => {
+    const { repo } = makeRepo();
+    const listInvoicedLines = jest.fn(async () => ({ rows: [], total: 0 }));
+    return { listInvoicedLines, repo: Object.assign(repo, { listInvoicedLines }) };
+  };
+
+  test("staff filters reach the repository, vendor ids as a list", async () => {
+    const { listInvoicedLines, repo } = withRepo();
+    await service(repo).invoicedLines({ invoiceCode: "INV", operationNumber: "OP", orderNumber: "31", page: 1, productCode: "RK", size: 10, vendorId: [3, 4] }, {});
+    expect(listInvoicedLines).toHaveBeenCalledWith(expect.objectContaining({
+      invoiceCode: "INV", operationNumber: "OP", orderNumber: "31", productCode: "RK", vendorIds: [3, 4],
+      statuses: ["reviewed", "transferred", "frozen"],
+    }));
+  });
+
+  test("vendor users are pinned to their own vendor and never see frozen invoices", async () => {
+    const { listInvoicedLines, repo } = withRepo();
+    await service(repo).invoicedLines({ page: 1, size: 10, vendorId: [99] }, { vendorId: 5 });
+    expect(listInvoicedLines).toHaveBeenCalledWith(expect.objectContaining({ statuses: ["reviewed", "transferred"], vendorIds: [5] }));
+  });
+
+  test("vendor options come straight from the repository", async () => {
+    const { repo } = makeRepo();
+    const rows = [{ id: 1, name: "أ" }];
+    Object.assign(repo, { listVendorOptions: jest.fn(async () => rows) });
+    expect(await service(repo).vendorOptions()).toBe(rows);
   });
 });

@@ -18,6 +18,7 @@ import {
   resolveAdminUserIds,
   resolveOrderAudience,
   resolveOrderVendorUserIds,
+  resolveShipmentAudience,
 } from "./notification.publisher";
 
 const row = (userId: number, text = "t") => ({ entityId: 5, entityType: "shipment", text, userId });
@@ -114,6 +115,51 @@ describe("resolveOrderAudience", () => {
     const audience = await resolveOrderAudience([]);
     expect(audience.ordersByUser.size).toBe(0);
     expect(mockOrderFindAll).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveShipmentAudience (responsible user + admins + owning vendors)", () => {
+  beforeEach(() => {
+    mockOrderFindAll.mockResolvedValue([
+      { id: 10, orderNumber: "100", userId: 2 },
+      { id: 11, orderNumber: "101", userId: null },
+      { id: 12, orderNumber: "102", userId: 6 },
+    ]);
+    mockOrderLineFindAll.mockResolvedValue([
+      { orderId: 10, product: { vendorId: 7 } },
+      { orderId: 11, product: { vendorId: 8 } },
+      { orderId: 12, product: { vendorId: 7 } },
+    ]);
+    mockUserFindAll.mockResolvedValue([
+      { id: 1, userType: "1", vendorId: null }, // admin
+      { id: 2, userType: "3", vendorId: null }, // responsible for order 10
+      { id: 5, userType: "3", vendorId: null }, // other staff: never notified
+      { id: 6, userType: "4", vendorId: null }, // responsible for order 12
+      { id: 3, userType: "2", vendorId: 7 }, // vendor of orders 10 and 12
+      { id: 4, userType: "2", vendorId: 9 }, // vendor owning nothing
+    ]);
+  });
+
+  it("notifies admins on every order, the responsible user only on their orders, vendors on their own", async () => {
+    const audience = await resolveShipmentAudience([10, 11, 12]);
+    expect(audience.ordersByUser.get(1)).toEqual([10, 11, 12]);
+    expect(audience.ordersByUser.get(2)).toEqual([10]);
+    expect(audience.ordersByUser.get(6)).toEqual([12]);
+    expect(audience.ordersByUser.get(3)).toEqual([10, 12]);
+    expect(audience.ordersByUser.has(5)).toBe(false);
+    expect(audience.ordersByUser.has(4)).toBe(false);
+    expect([...audience.vendorUserIds]).toEqual([3]);
+  });
+
+  it("an order with no responsible user reaches admins and its vendors only", async () => {
+    const audience = await resolveShipmentAudience([11]);
+    expect([...audience.ordersByUser.keys()]).toEqual([1]);
+  });
+
+  it("a user who is both responsible and admin appears once", async () => {
+    mockOrderFindAll.mockResolvedValue([{ id: 10, orderNumber: "100", userId: 1 }]);
+    const audience = await resolveShipmentAudience([10]);
+    expect([...audience.ordersByUser.keys()].filter((id) => id === 1)).toHaveLength(1);
   });
 });
 

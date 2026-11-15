@@ -37,7 +37,7 @@ import {
   toText,
 } from "./order.helpers";
 import type { OrderDetailsResponse, OrderDetailsView, OrderFinancialReportQuery, OrderFinancialReportResponse, OrderFinancialReportSection, OrderFinancialReportSectionSummary, OrderFinancialReportVendorRow, OrderListItem, OrderListQuery, OrderListResponse, OrderMetaResponse, OrderStatusHistoryItem, OrderSummaryResponse, OrderTimelineItem } from "./order.types";
-import { calculateVendorDeliverySettlement } from "./order-financial-settlement";
+import { calculateVendorDeliverySettlement, calculateWarehouseDeliverySettlement } from "./order-financial-settlement";
 import { listManagedOptions, MANAGED_OPTION_GROUP, replaceManagedOptions } from "../settings/managed-options";
 import { SHIPMENT_STATUS_LABELS } from "../shipments/shipment.constants";
 
@@ -1093,15 +1093,6 @@ export class OrderRepository {
         ? collectionTotal
         : toNumber(plainOrder.toBeCollected);
       const fines = toNumber(plainOrder.fine);
-      const companyCommission = toNumber(plainOrder.commission);
-      const vendorDue = Math.max(
-        toNumber(plainOrder.totalVendorDue) || (collectionTotal - companyCommission - fines),
-        0,
-      );
-      const companyDue = Math.max(
-        toNumber(plainOrder.totalCompanyDue) || companyCommission,
-        0,
-      );
       const warehouseCost = getFinancialOrderCost(plainOrder, orderLines);
       const paymentStatus = toNumber(plainOrder.paymentStatus) || null;
       const orderId = toNumber(plainOrder.id);
@@ -1118,8 +1109,12 @@ export class OrderRepository {
             vendorShippingCost,
           })
         : null;
-      const reportCompanyDue = vendorSettlement?.companyDue ?? companyDue;
-      const reportVendorDue = vendorSettlement?.vendorDue ?? vendorDue;
+      // every order Homix delivers (also "delivered but shipment not yet delivered") is cost-based
+      const homixSettlement = isVendorDelivery
+        ? null
+        : calculateWarehouseDeliverySettlement({ collectionTotal, fines, productCost: warehouseCost });
+      const reportCompanyDue = vendorSettlement?.companyDue ?? homixSettlement?.companyDue ?? 0;
+      const reportVendorDue = vendorSettlement?.vendorDue ?? homixSettlement?.vendorDue ?? 0;
       const orderDetail = {
         collectionTotal,
         companyDue: reportCompanyDue,
@@ -1176,10 +1171,10 @@ export class OrderRepository {
         warehouseDeliveryRows.set(vendorKey, warehouseRow);
         appendFinancialRow(warehouseDeliveriesSummary, warehouseRow, {
           collectionTotal,
-          companyDue,
+          companyDue: reportCompanyDue,
           fines,
           ordersCount: 1,
-          vendorDue,
+          vendorDue: reportVendorDue,
           // شحن المورد لا ينطبق على التسليم من المخزن
           vendorShippingCost: 0,
           warehouseCost,

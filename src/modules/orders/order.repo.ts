@@ -581,6 +581,23 @@ export class OrderRepository {
     return orderModel.findByPk(orderId);
   }
 
+  /** Invoice statuses (reviewed / frozen / transferred) of the active financial-invoice lines each order sits on. */
+  public async findInvoiceLockedOrders(orderIds: number[]): Promise<Map<number, string[]>> {
+    const result = new Map<number, string[]>();
+    if (orderIds.length === 0) return result;
+    const rows = await sequelize.query(
+      `SELECT l."orderId" AS "orderId", i.status AS status
+       FROM financial_invoice_lines l JOIN financial_invoices i ON i.id = l."invoiceId"
+       WHERE l."orderId" IN (:orderIds) AND l.state IN ('included', 'frozen') AND i.status IN ('reviewed', 'frozen', 'transferred')`,
+      { replacements: { orderIds }, type: "SELECT" },
+    ) as Array<{ orderId: number | string; status: string }>;
+    for (const row of rows) {
+      const key = Number(row.orderId);
+      result.set(key, [...(result.get(key) ?? []), String(row.status)]);
+    }
+    return result;
+  }
+
   public async findOrderEntities(orderIds: number[]): Promise<unknown[]> {
     if (orderIds.length === 0) {
       return [];

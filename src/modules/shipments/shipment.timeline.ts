@@ -30,7 +30,7 @@ export const SHIPMENT_TIMELINE_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 /** Actions that are never shipment events regardless of field (order lifecycle + status-link markers). */
-const EXCLUDED_ACTIONS: ReadonlySet<string> = new Set(["create", "notify", "delete", "auto_sync"]);
+const EXCLUDED_ACTIONS: ReadonlySet<string> = new Set(["create", "notify", "delete", "auto_sync", "regression_confirmed"]);
 
 export const isShipmentTimelineLog = (log: { action?: unknown; field?: unknown }): boolean => {
   const action = typeof log.action === "string" ? log.action : "";

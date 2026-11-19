@@ -590,6 +590,18 @@ orderRouter.get("/", verifyToken, requirePermission("orders_view"), validateRequ
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/GenericMessageResponse'
+ *       409:
+ *         description: REGRESSION_NEEDS_CONFIRMATION - resend with confirmRegression true
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
+ *       403:
+ *         description: REGRESSION_FORBIDDEN - vendors cannot regress an order
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
  */
 orderRouter.put("/bulk-update", verifyToken, requirePermission("orders_edit"), validateRequest({ body: orderBulkUpdateSchema }), asyncHandler(orderController.bulkUpdate));
 
@@ -682,8 +694,24 @@ orderRouter.get("/:orderId", verifyToken, requirePermission("orders_view"), vali
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/OrderMutationRequest'
+ *             type: object
+ *             additionalProperties: true
+ *             description: Order fields to change. confirmRegression (boolean, optional) confirms an edit that moves a delivered/returned/replaced/in-inventory or invoiced order backwards.
+ *             properties:
+ *               confirmRegression: { type: boolean }
  *     responses:
+ *       409:
+ *         description: REGRESSION_NEEDS_CONFIRMATION - resend with confirmRegression true
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
+ *       403:
+ *         description: REGRESSION_FORBIDDEN (vendor) or missing financial permission
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
  *       200:
  *         description: Updated order payload
  *         content:

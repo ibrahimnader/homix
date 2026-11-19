@@ -1219,9 +1219,51 @@ const swaggerOptions = {
           },
           required: ["data", "status"],
         },
+        OrderRegressionConflictResponse: {
+          type: "object",
+          description: "409 REGRESSION_NEEDS_CONFIRMATION (or 403 REGRESSION_FORBIDDEN for vendors): the edit would move a delivered/returned/replaced/in-inventory order, or one on a reviewed/frozen/transferred financial invoice, to an earlier state. Resend with confirmRegression: true to apply it.",
+          properties: {
+            code: { enum: ["REGRESSION_NEEDS_CONFIRMATION", "REGRESSION_FORBIDDEN"], type: "string" },
+            message: { description: "Arabic text listing what would change", type: "string" },
+            status: { example: false, type: "boolean" },
+            details: {
+              type: "object",
+              properties: {
+                regressions: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      orderId: { example: 7, type: "integer" },
+                      orderNumber: { example: "H9802", type: "string" },
+                      reasons: { items: { enum: ["delivered", "returned", "replaced", "in_inventory", "invoice_reviewed", "invoice_frozen", "invoice_transferred"], type: "string" }, type: "array" },
+                      reasonLabels: { items: { type: "string" }, type: "array" },
+                      changes: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            field: { enum: ["status", "shipmentStatus", "manufactureStatus"], type: "string" },
+                            fieldLabel: { type: "string" },
+                            from: { type: "integer" },
+                            fromLabel: { type: "string" },
+                            to: { type: "integer" },
+                            toLabel: { type: "string" },
+                            origin: { enum: ["explicit", "derived"], type: "string" },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
         OrderBulkUpdateRequest: {
           type: "object",
           properties: {
+            confirmRegression: { description: "true confirms edits that move delivered/returned/replaced/in-inventory or invoiced orders backwards (ignored for vendors)", type: "boolean" },
             orderData: {
               additionalProperties: true,
               type: "object",

@@ -112,28 +112,10 @@ const MANUFACTURE_CANCEL_VALUES: ReadonlyArray<number> = [
   M.CANCELED_BEFORE_MFG_CONFIRMATION, M.CANCELED_AFTER_MFG_CONFIRMATION_72H, M.CANCELED_NO_RESPONSE, M.CANCELED_CHANGED_MIND,
   M.CANCELED_SPECIAL, M.CANCELED_DELAY, M.CANCELED_FAKE_ORDER, M.REJECTED_MISMATCH, M.REJECTED_NOT_SUITABLE,
 ];
-const M_OPEN: ReadonlyArray<number | null> = [null, M.Accepted, M.IN_PRODUCTION, M.READY_FOR_DELIVERY, M.DELIVERED, M.FAILED_TO_DELIVER];
-/** Guard for writing a manufacture stage: never move a more advanced stage back (cancel/return variants are explicit and unguarded). */
-const MANUFACTURE_TARGET_GUARD: Readonly<Record<number, ReadonlyArray<number | null>>> = {
-  [M.IN_PRODUCTION]: [null, M.Accepted],
-  [M.READY_FOR_DELIVERY]: [null, M.Accepted, M.IN_PRODUCTION],
-  [M.DELIVERED]: [null, M.Accepted, M.IN_PRODUCTION, M.READY_FOR_DELIVERY],
-  [M.FAILED_TO_DELIVER]: [null, M.Accepted, M.IN_PRODUCTION, M.READY_FOR_DELIVERY, M.DELIVERED],
-  [M.DELIVERED_SUCCESSFULLY]: M_OPEN,
-  [M.IN_WAREHOUSE]: [...M_OPEN, M.DELIVERED_SUCCESSFULLY],
-  [M.RETURNED]: [...M_OPEN, M.DELIVERED_SUCCESSFULLY, M.IN_WAREHOUSE],
-  [M.EXCHANGED]: [...M_OPEN, M.DELIVERED_SUCCESSFULLY, M.IN_WAREHOUSE, M.RETURNED],
-};
-const SCHEDULE_OPEN: ReadonlyArray<number | null> = [
-  null, SC.SCHEDULED, SC.NO_RESPONSE_FIRST_ATTEMPT, SC.POSTPONED, SC.CALL_LATER, SC.NO_RESPONSE_SECOND_ATTEMPT, SC.NO_RESPONSE_THIRD_ATTEMPT,
-];
-/** Confirmation/schedule counterparts of a guarded cancel are written only together with it (order not delivered/returned/replaced/in inventory). */
-const withOrderGuard = (target: StatusTarget, values: ReadonlyArray<number | null>): StatusTarget =>
-  ({ ...target, onlyIfOtherCurrentIn: { field: "status", values } });
-const manufactureTarget = (value: number): StatusTarget => {
-  const guard = MANUFACTURE_TARGET_GUARD[value];
-  return guard ? { value, onlyIfCurrentIn: guard } : { value };
-};
+/* Explicit changes carry no "never regress" guard: whatever a user sets explicitly, the linked columns follow, even backwards
+   (e.g. manufacture 2 on a delivered order sets order 2). The protection against doing that by accident is the regression
+   confirmation on the order edit endpoints (see order-regression-guard.ts). Derived values stay one hop. */
+const manufactureTarget = (value: number): StatusTarget => ({ value });
 
 /** Matrix 1: order status -> {shipment, manufacture, schedule, confirmation}. Statuses absent here (1) derive nothing. */
 export const ORDER_STATUS_RULES: Readonly<Record<number, StatusRule>> = (() => {
@@ -148,7 +130,7 @@ export const ORDER_STATUS_RULES: Readonly<Record<number, StatusRule>> = (() => {
     rules[Number(orderStatus)] = { ...rules[Number(orderStatus)], manufactureStatus: manufactureTarget(manufactureStatus) };
   }
   for (const [orderStatus, scheduleStatus] of Object.entries(SCHEDULE_STATUS_BY_ORDER_STATUS)) {
-    rules[Number(orderStatus)] = { ...rules[Number(orderStatus)], scheduleStatus: { value: scheduleStatus, onlyIfCurrentIn: SCHEDULE_OPEN } };
+    rules[Number(orderStatus)] = { ...rules[Number(orderStatus)], scheduleStatus: { value: scheduleStatus } };
   }
   rules[O.IN_PROGRESS] = { manufactureStatus: manufactureTarget(M.IN_PRODUCTION) };
   rules[O.CONFIRMED] = { confirmationStatus: { value: C.CONFIRMED, onlyIfCurrentIn: UNCONFIRMED_CONFIRMATION } };
@@ -156,7 +138,7 @@ export const ORDER_STATUS_RULES: Readonly<Record<number, StatusRule>> = (() => {
 })();
 
 /** Matrix 2: shipment status -> order status (+ confirmation / manufacture / schedule counterparts).
- *  Shipment 8 and 10 (-> manufacture 5 only) and 11 (-> schedule 1 only) derive no order change. */
+ *  Shipment 3, 10, 12 -> manufacture only, 11 -> schedule 1 only; 1, 6, 8 derive nothing. */
 export const SHIPMENT_STATUS_RULES: Readonly<Record<number, StatusRule>> = (() => {
   const rules: Record<number, StatusRule> = {};
   for (const [orderStatus, shipmentStatus] of Object.entries(SHIPMENT_STATUS_BY_ORDER_STATUS)) {
@@ -167,61 +149,34 @@ export const SHIPMENT_STATUS_RULES: Readonly<Record<number, StatusRule>> = (() =
       status: { value: Number(orderStatus) },
       ...(confirmation !== undefined ? { confirmationStatus: { value: confirmation } } : {}),
       ...(manufacture !== undefined ? { manufactureStatus: manufactureTarget(manufacture) } : {}),
-      ...(schedule !== undefined ? { scheduleStatus: { value: schedule, onlyIfCurrentIn: SCHEDULE_OPEN } } : {}),
+      ...(schedule !== undefined ? { scheduleStatus: { value: schedule } } : {}),
     };
   }
   rules[S.READY_FOR_DELIVERY] = { manufactureStatus: manufactureTarget(M.READY_FOR_DELIVERY) };
   rules[S.OUT_FOR_DELIVERY] = { manufactureStatus: manufactureTarget(M.DELIVERED) };
   rules[S.FAILED_DELIVERY] = { manufactureStatus: manufactureTarget(M.FAILED_TO_DELIVER) };
-  rules[S.SCHEDULED] = { scheduleStatus: { value: SC.SCHEDULED, onlyIfCurrentIn: [null] } };
+  rules[S.SCHEDULED] = { scheduleStatus: { value: SC.SCHEDULED } };
   return rules;
 })();
 
-const NOT_FINAL_ORDER_FOR_CANCEL: ReadonlyArray<number | null> = [null, O.PENDING, O.IN_PROGRESS, O.CONFIRMED, O.CANCELED, ...CLOSED_ORDER_STATUSES];
-const NOT_FINAL_SHIPMENT_FOR_CANCEL: ReadonlyArray<number | null> = [
-  null, S.PENDING, S.READY_FOR_DELIVERY, S.CANCELED, S.REJECTED, S.FAILED_DELIVERY, S.SCHEDULED, S.OUT_FOR_DELIVERY, ...CLOSED_SHIPMENT_STATUSES,
-];
-
-/** Matrix 4: manufacture stage -> order + shipment (+ confirmation / schedule counterparts). Guards keep delivered/returned work from
- *  being regressed or cancelled by a vendor-side change; stages 1, 3, 4, 5 never touch the order. */
+/** Matrix 4: manufacture stage -> order + shipment (+ confirmation / schedule counterparts). Stages 1 and 8..16 etc. as in
+ *  the order matrix; 2 -> order 2, 3 -> shipment 3, 4 -> shipment 12, 5 -> shipment 10; stage 1 derives nothing. */
 export const MANUFACTURE_STATUS_RULES: Readonly<Record<number, StatusRule>> = (() => {
   const rules: Record<number, StatusRule> = {
-    [M.IN_PRODUCTION]: { status: { value: O.IN_PROGRESS, onlyIfCurrentIn: [O.PENDING, O.CONFIRMED] } },
-    [M.READY_FOR_DELIVERY]: { shipmentStatus: { value: S.READY_FOR_DELIVERY, onlyIfCurrentIn: [null, S.PENDING, S.SCHEDULED] } },
-    [M.DELIVERED]: { shipmentStatus: { value: S.OUT_FOR_DELIVERY, onlyIfCurrentIn: [null, S.PENDING, S.READY_FOR_DELIVERY, S.SCHEDULED] } },
-    [M.FAILED_TO_DELIVER]: {
-      shipmentStatus: { value: S.FAILED_DELIVERY, onlyIfCurrentIn: [null, S.PENDING, S.READY_FOR_DELIVERY, S.SCHEDULED, S.OUT_FOR_DELIVERY] },
-    },
-  };
-  const shipmentGuards: Record<number, ReadonlyArray<number | null>> = {
-    [O.DELIVERED]: [null, S.PENDING, S.IN_WAREHOUSE, S.READY_FOR_DELIVERY, S.FAILED_DELIVERY, S.SCHEDULED, S.OUT_FOR_DELIVERY],
-    [O.IN_INVENTORY]: [null, S.PENDING, S.READY_FOR_DELIVERY, S.FAILED_DELIVERY, S.SCHEDULED, S.OUT_FOR_DELIVERY],
-    [O.REFUNDED]: [null, S.PENDING, S.IN_WAREHOUSE, S.READY_FOR_DELIVERY, S.DELIVERED, S.FAILED_DELIVERY, S.SCHEDULED, S.OUT_FOR_DELIVERY],
-    [O.REPLACED]: [
-      null, S.PENDING, S.IN_WAREHOUSE, S.READY_FOR_DELIVERY, S.DELIVERED, S.RETURNED_FROM_CUSTOMER, S.FAILED_DELIVERY, S.SCHEDULED, S.OUT_FOR_DELIVERY,
-    ],
-  };
-  const orderGuards: Record<number, ReadonlyArray<number | null>> = {
-    [O.DELIVERED]: [null, O.PENDING, O.IN_PROGRESS, O.CONFIRMED, O.IN_INVENTORY],
-    [O.IN_INVENTORY]: [null, O.PENDING, O.IN_PROGRESS, O.CONFIRMED],
-    [O.REFUNDED]: [null, O.PENDING, O.IN_PROGRESS, O.CONFIRMED, O.DELIVERED, O.IN_INVENTORY],
-    [O.REPLACED]: [null, O.PENDING, O.IN_PROGRESS, O.CONFIRMED, O.DELIVERED, O.IN_INVENTORY, O.REFUNDED],
+    [M.IN_PRODUCTION]: { status: { value: O.IN_PROGRESS } },
+    [M.READY_FOR_DELIVERY]: { shipmentStatus: { value: S.READY_FOR_DELIVERY } },
+    [M.DELIVERED]: { shipmentStatus: { value: S.OUT_FOR_DELIVERY } },
+    [M.FAILED_TO_DELIVER]: { shipmentStatus: { value: S.FAILED_DELIVERY } },
   };
   for (const [orderStatusKey, manufactureStatus] of Object.entries(MANUFACTURE_STATUS_BY_ORDER_STATUS)) {
     const orderStatus = Number(orderStatusKey);
     const confirmation = CONFIRMATION_STATUS_BY_ORDER_STATUS[orderStatus];
     const schedule = SCHEDULE_STATUS_BY_ORDER_STATUS[orderStatus];
-    const isCancel = MANUFACTURE_CANCEL_VALUES.includes(manufactureStatus);
     rules[manufactureStatus] = {
-      status: { value: orderStatus, onlyIfCurrentIn: isCancel ? NOT_FINAL_ORDER_FOR_CANCEL : orderGuards[orderStatus] },
-      shipmentStatus: {
-        value: SHIPMENT_STATUS_BY_ORDER_STATUS[orderStatus]!,
-        onlyIfCurrentIn: isCancel ? NOT_FINAL_SHIPMENT_FOR_CANCEL : shipmentGuards[orderStatus],
-      },
-      ...(confirmation !== undefined ? { confirmationStatus: withOrderGuard({ value: confirmation }, NOT_FINAL_ORDER_FOR_CANCEL) } : {}),
-      ...(schedule !== undefined
-        ? { scheduleStatus: withOrderGuard({ value: schedule, onlyIfCurrentIn: SCHEDULE_OPEN }, NOT_FINAL_ORDER_FOR_CANCEL) }
-        : {}),
+      status: { value: orderStatus },
+      shipmentStatus: { value: SHIPMENT_STATUS_BY_ORDER_STATUS[orderStatus]! },
+      ...(confirmation !== undefined ? { confirmationStatus: { value: confirmation } } : {}),
+      ...(schedule !== undefined ? { scheduleStatus: { value: schedule } } : {}),
     };
   }
   return rules;
@@ -230,20 +185,15 @@ export const MANUFACTURE_STATUS_RULES: Readonly<Record<number, StatusRule>> = ((
 /** Matrix 5: schedule status -> shipment / order / manufacture / confirmation. Scheduled (1) books the shipment; the
  *  three cancel reasons (4 delay, 5 changed mind, 6 no response) cancel it like the matching order cancel variant. */
 export const SCHEDULE_STATUS_RULES: Readonly<Record<number, StatusRule>> = (() => {
-  const rules: Record<number, StatusRule> = {
-    [SC.SCHEDULED]: { shipmentStatus: { value: S.SCHEDULED, onlyIfCurrentIn: [null, S.PENDING, S.READY_FOR_DELIVERY, S.FAILED_DELIVERY] } },
-  };
+  const rules: Record<number, StatusRule> = { [SC.SCHEDULED]: { shipmentStatus: { value: S.SCHEDULED } } };
   for (const [orderStatusKey, scheduleStatus] of Object.entries(SCHEDULE_STATUS_BY_ORDER_STATUS)) {
     const orderStatus = Number(orderStatusKey);
     const confirmation = CONFIRMATION_STATUS_BY_ORDER_STATUS[orderStatus];
     rules[scheduleStatus] = {
-      status: { value: orderStatus, onlyIfCurrentIn: NOT_FINAL_ORDER_FOR_CANCEL },
-      shipmentStatus: { value: SHIPMENT_STATUS_BY_ORDER_STATUS[orderStatus]!, onlyIfCurrentIn: NOT_FINAL_SHIPMENT_FOR_CANCEL },
-      manufactureStatus: withOrderGuard(
-        { value: MANUFACTURE_STATUS_BY_ORDER_STATUS[orderStatus]!, onlyIfCurrentIn: [...M_OPEN, M.IN_WAREHOUSE] },
-        NOT_FINAL_ORDER_FOR_CANCEL,
-      ),
-      ...(confirmation !== undefined ? { confirmationStatus: withOrderGuard({ value: confirmation }, NOT_FINAL_ORDER_FOR_CANCEL) } : {}),
+      status: { value: orderStatus },
+      shipmentStatus: { value: SHIPMENT_STATUS_BY_ORDER_STATUS[orderStatus]! },
+      manufactureStatus: manufactureTarget(MANUFACTURE_STATUS_BY_ORDER_STATUS[orderStatus]!),
+      ...(confirmation !== undefined ? { confirmationStatus: { value: confirmation } } : {}),
     };
   }
   return rules;

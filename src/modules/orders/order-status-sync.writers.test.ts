@@ -308,8 +308,8 @@ describe("PoDate («تاريخ التصنيع») stamping from order status 2 OR
     await OrderService.BulkUpdate({ orderIds: [1, 2], orderData: { manufactureStatus: 2 } }, user);
     expect(writtenOf(a)).toMatchObject({ status: 2, manufactureStatus: 2 });
     expect(writtenOf(a).PoDate).toBeInstanceOf(Date);
-    // a delivered order is not pulled back to status 2 by the vendor-side stage, but the stage itself still moves into 2 -> stamped
-    expect(writtenOf(b).status).toBeUndefined();
+    // explicit changes follow even backwards: the delivered order goes back to status 2 (the endpoint guard asks for confirmation first)
+    expect(writtenOf(b).status).toBe(2);
     expect(writtenOf(b).PoDate).toBeInstanceOf(Date);
   });
 });

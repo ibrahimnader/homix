@@ -43,5 +43,6 @@ export const errorMiddleware = (
     code: appError.code,
     message: appError.message,
     status: appError.status,
+    ...(appError.details !== undefined ? { details: appError.details } : {}),
   });
 };

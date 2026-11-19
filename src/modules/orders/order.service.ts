@@ -1,4 +1,4 @@
-import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError } from "../../shared/errors";
+import { AppError, ConflictError, ForbiddenError, NotFoundError, UnauthorizedError } from "../../shared/errors";
 import type { Result } from "../../shared/result";
 import { success } from "../../shared/result";
 import { DELIVERY_BY, USER_TYPES } from "../../../config/constants";
@@ -8,6 +8,10 @@ import { orderLegacyGateway, type LegacyOrderGateway } from "./order.legacy-gate
 import { normalizeOrderMutationPayload, toNumber, toPlain, toText } from "./order.helpers";
 import { OrderRepository } from "./order.repo";
 import { assertFinancialEditAllowed } from "./order-financial-guard";
+import {
+  buildRegressionAuditEntry, buildRegressionMessage, CONFIRM_REGRESSION_FIELD, findOrderRegressions, REGRESSION_AUDIT_ACTION,
+  REGRESSION_FORBIDDEN_CODE, REGRESSION_NEEDS_CONFIRMATION_CODE, type OrderRegression,
+} from "./order-regression-guard";
 import type { LegacyOrderResponse, OrderDetailsResponse, OrderFinancialReportQuery, OrderFinancialReportResponse, OrderListQuery, OrderListResponse, OrderMetaResponse, OrderMutationPayload, OrderRequestUser, OrderSummaryResponse } from "./order.types";
 import type { Response } from "express";
 
@@ -123,24 +127,64 @@ export class OrderService {
     return success(await this.orderRepository.getFinancialReport(query, vendorId));
   }
 
-  public async updateOrder(orderId: number, payload: OrderMutationPayload, user: OrderRequestUser): Promise<Result<unknown>> {
+  /**
+   * Regression safety net (see order-regression-guard): refuses 409 when the edit would move a delivered / returned / replaced /
+   * in-inventory or invoiced order backwards and the request does not carry confirmRegression; vendors are refused 403 outright.
+   * Returns the confirmed regressions so the caller can audit them after the write succeeds.
+   */
+  private async assertRegressionConfirmed(
+    orders: unknown[],
+    data: Record<string, unknown>,
+    confirmRegression: boolean,
+    user: OrderRequestUser,
+  ): Promise<OrderRegression[]> {
+    const regressions = await findOrderRegressions(orders, data, (ids) => this.orderRepository.findInvoiceLockedOrders(ids));
+    if (regressions.length === 0) return [];
+    const message = buildRegressionMessage(regressions);
+    if (isVendorUser(user)) throw new AppError(message, 403, REGRESSION_FORBIDDEN_CODE, { regressions });
+    if (!confirmRegression) throw new AppError(message, 409, REGRESSION_NEEDS_CONFIRMATION_CODE, { regressions });
+    return regressions;
+  }
+
+  private async auditConfirmedRegressions(regressions: OrderRegression[], user: OrderRequestUser): Promise<void> {
+    for (const regression of regressions) {
+      await this.orderRepository.createOrderLog({
+        action: REGRESSION_AUDIT_ACTION,
+        entityId: regression.orderId,
+        entityType: "order",
+        userId: Number(user.id),
+        ...buildRegressionAuditEntry(regression),
+      });
+    }
+  }
+
+  public async updateOrder(orderId: number, rawPayload: OrderMutationPayload, user: OrderRequestUser): Promise<Result<unknown>> {
     await this.assertVendorOwnsOrders([orderId], user);
+    const { [CONFIRM_REGRESSION_FIELD]: confirmFlag, ...payload } = rawPayload as Record<string, unknown>;
+    const confirmRegression = !isVendorUser(user) && (confirmFlag === true || confirmFlag === "true");
     const existingOrder = await this.orderRepository.findOrderEntity(orderId);
-    const scopedPayload = restrictVendorOrderPayload(payload, user);
+    const scopedPayload = restrictVendorOrderPayload(payload as OrderMutationPayload, user);
     assertFinancialEditAllowed(payload as Record<string, unknown>, user, existingOrder ? toPlain(existingOrder) : null);
     const normalizedPayload = normalizeOrderMutationPayload(scopedPayload, toPlain(existingOrder));
+    const confirmedRegressions = existingOrder
+      ? await this.assertRegressionConfirmed([existingOrder], normalizedPayload as Record<string, unknown>, confirmRegression, user)
+      : [];
     const response = ensureLegacySuccess(await this.legacyGateway.updateOrder(orderId, normalizedPayload, user));
+    await this.auditConfirmedRegressions(confirmedRegressions, user);
     await this.refreshAggregateForDates([existingOrder ? this.getOrderDate(existingOrder) : null, normalizedPayload.orderDate, this.getOrderDate(response.data)]);
     return success(response.data ?? {});
   }
 
   public async bulkUpdate(
-    payload: OrderMutationPayload,
+    rawPayload: OrderMutationPayload,
     user: OrderRequestUser,
   ): Promise<Result<{ message: string }>> {
+    const { [CONFIRM_REGRESSION_FIELD]: topLevelFlag, ...payload } = rawPayload as Record<string, unknown>;
     const orderIds = Array.isArray(payload.orderIds) ? payload.orderIds.map(Number).filter(Boolean) : [];
     await this.assertVendorOwnsOrders(orderIds, user);
-    const rawOrderData = { ...((payload.orderData as Record<string, unknown> | undefined) ?? {}) };
+    const { [CONFIRM_REGRESSION_FIELD]: nestedFlag, ...rawOrderData } = { ...((payload.orderData as Record<string, unknown> | undefined) ?? {}) };
+    const confirmRegression = !isVendorUser(user)
+      && [topLevelFlag, nestedFlag].some((flag) => flag === true || flag === "true");
     assertFinancialEditAllowed(rawOrderData, user, null);
     /* Same vendor whitelist as the single-order update: a vendor may only change manufactureStatus/notes. */
     const orderData = restrictVendorOrderPayload(rawOrderData as OrderMutationPayload, user) as Record<string, unknown>;
@@ -150,7 +194,9 @@ export class OrderService {
     }
     const existingOrders = await this.orderRepository.findOrderEntities(orderIds);
     const normalizedPayload = { ...payload, orderData };
+    const confirmedRegressions = await this.assertRegressionConfirmed(existingOrders, orderData, confirmRegression, user);
     const response = ensureLegacySuccess(await this.legacyGateway.bulkUpdate(normalizedPayload, user));
+    await this.auditConfirmedRegressions(confirmedRegressions, user);
     const nextOrderDate = this.getBulkOrderDate(normalizedPayload);
     await this.refreshAggregateForDates([
       ...existingOrders.map((order) => this.getOrderDate(order)),

@@ -341,6 +341,10 @@ export const buildLogMessage = (log: PlainRecord, context?: LogMessageContext): 
     return "تم حذف الطلب";
   }
 
+  if (action === "regression_confirmed") {
+    return "تم تأكيد الرجوع بحالة الطلب إلى حالة سابقة";
+  }
+
   if (field === "status" && toNumber(log.to) === ORDER_STATUS.IN_PROGRESS) {
     return "بدأ التصنيع";
   }

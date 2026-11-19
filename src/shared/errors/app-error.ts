@@ -2,9 +2,12 @@ export class AppError extends Error {
   public readonly statusCode: number;
   public readonly status = false;
   public readonly code: string;
+  /** Optional machine-readable payload returned to the client next to code/message. */
+  public readonly details?: unknown;
 
-  public constructor(message: string, statusCode: number, code: string) {
+  public constructor(message: string, statusCode: number, code: string, details?: unknown) {
     super(message);
+    this.details = details;
     this.name = this.constructor.name;
     this.statusCode = statusCode;
     this.code = code;

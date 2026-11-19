@@ -78,9 +78,16 @@ export const orderExportQuerySchema = orderListQuerySchema.omit({
   financialStatus: z.string().trim().optional(),
 });
 
-export const orderMutationSchema = z.record(z.string(), z.unknown());
+const confirmRegressionSchema = z.union([z.boolean(), z.literal("true"), z.literal("false")]);
+
+/** `confirmRegression` (optional boolean) confirms an edit that moves a delivered/returned/replaced/in-inventory or invoiced order backwards. */
+export const orderMutationSchema = z.record(z.string(), z.unknown()).refine(
+  (value) => value.confirmRegression === undefined || confirmRegressionSchema.safeParse(value.confirmRegression).success,
+  { message: "confirmRegression must be a boolean" },
+);
 
 export const orderBulkUpdateSchema = z.object({
+  confirmRegression: confirmRegressionSchema.optional(),
   orderData: orderMutationSchema,
   orderIds: z.array(z.coerce.number().int().positive()).min(1),
 });

@@ -286,25 +286,25 @@ describe("manufactureStatus and scheduleStatus links", () => {
     expect(deriveAll(row({ manufactureStatus: 2 }), { status: 4 }).manufactureStatus).toBeUndefined();
     expect(deriveAll(row({ manufactureStatus: 2 }), { status: 3 }).manufactureStatus).toBeUndefined();
   });
-  it("order -> manufacture never moves a more advanced stage back", () => {
-    expect(deriveAll(row({ manufactureStatus: 3 }), { status: 2 }).manufactureStatus).toBeUndefined();
-    expect(deriveAll(row({ manufactureStatus: 6 }), { status: 2 }).manufactureStatus).toBeUndefined();
-    expect(deriveAll(row({ manufactureStatus: 7 }), { status: 5 }).manufactureStatus).toBeUndefined();
-    expect(deriveAll(row({ manufactureStatus: 17 }), { status: 8 }).manufactureStatus).toBeUndefined();
+  it("order -> manufacture follows even backwards (no regress guard for explicit changes)", () => {
+    expect(deriveAll(row({ manufactureStatus: 3 }), { status: 2 }).manufactureStatus).toBe(2);
+    expect(deriveAll(row({ manufactureStatus: 6 }), { status: 2 }).manufactureStatus).toBe(2);
+    expect(deriveAll(row({ manufactureStatus: 7 }), { status: 5 }).manufactureStatus).toBe(6);
+    expect(deriveAll(row({ manufactureStatus: 17 }), { status: 8 }).manufactureStatus).toBe(7);
   });
-  it.each([
-    [2, 2, [1, 3]], [6, 5, [1, 2, 3, 8]], [7, 8, [1, 2, 3]], [17, 6, [1, 2, 3, 5, 8]], [18, 7, [1, 2, 3, 5, 6, 8]],
-  ])("manufacture %i -> order %i only from %j", (manufacture, expectedOrder, allowed) => {
+  it.each([[2, 2], [6, 5], [7, 8], [17, 6], [18, 7]])("manufacture %i -> order %i from any order status (except itself)", (manufacture, expectedOrder) => {
     for (const status of [1, 2, 3, 4, 5, 6, 7, 8]) {
       const patch = deriveAll(row({ status, manufactureStatus: 1 }), { manufactureStatus: manufacture });
-      if ((allowed as number[]).includes(status) && status !== expectedOrder) expect(patch.status).toBe(expectedOrder);
-      else expect(patch.status).toBeUndefined();
+      expect(patch.status).toBe(status === expectedOrder ? undefined : expectedOrder);
     }
   });
+  it("manufacture 2 on a delivered order sets order 2 (regression, confirmed by the endpoint guard)", () => {
+    expect(deriveAll(row({ status: 5, shipmentStatus: 4, manufactureStatus: 6 }), { manufactureStatus: 2 })).toEqual({ status: 2 });
+  });
   it.each([[8, 9, 13], [9, 10, 14], [10, 11, 15], [11, 12, 16], [12, 13, 17], [13, 14, 18], [14, 15, 19], [15, 16, 20], [16, 17, 21]])(
-    "manufacture %i cancels order %i / shipment %i from an open order, not from a delivered one", (manufacture, order, shipment) => {
+    "manufacture %i cancels order %i / shipment %i, even from a delivered order", (manufacture, order, shipment) => {
       expect(deriveAll(row({ status: 2, shipmentStatus: 3 }), { manufactureStatus: manufacture })).toMatchObject({ status: order, shipmentStatus: shipment });
-      expect(deriveAll(row({ status: 5, shipmentStatus: 4 }), { manufactureStatus: manufacture })).toEqual({});
+      expect(deriveAll(row({ status: 5, shipmentStatus: 4 }), { manufactureStatus: manufacture })).toMatchObject({ status: order, shipmentStatus: shipment });
     });
   it("manufacture cancel carries the confirmation counterpart of the order cancel variant", () => {
     expect(deriveAll(row({ status: 2, confirmationStatus: 2 }), { manufactureStatus: 10 })).toMatchObject({ status: 11, confirmationStatus: 7 });
@@ -323,9 +323,9 @@ describe("manufactureStatus and scheduleStatus links", () => {
     expect(deriveAll(row({ shipmentStatus: 1, manufactureStatus: 2 }), { manufactureStatus: 3 })).toEqual({ shipmentStatus: 3 });
     expect(deriveAll(row({ shipmentStatus: 3, manufactureStatus: 3 }), { manufactureStatus: 4 })).toEqual({ shipmentStatus: 12 });
     expect(deriveAll(row({ shipmentStatus: 12, manufactureStatus: 4 }), { manufactureStatus: 5 })).toEqual({ shipmentStatus: 10 });
-    // never regresses: a delivered shipment is not pulled back to ready-for-delivery
-    expect(deriveAll(row({ shipmentStatus: 4, manufactureStatus: 2 }), { manufactureStatus: 3 })).toEqual({});
-    expect(deriveAll(row({ manufactureStatus: 6 }), { shipmentStatus: 3 })).toEqual({});
+    // explicit changes follow even backwards: a delivered shipment goes back to ready-for-delivery, delivered stage back to 3
+    expect(deriveAll(row({ shipmentStatus: 4, manufactureStatus: 2 }), { manufactureStatus: 3 })).toEqual({ shipmentStatus: 3 });
+    expect(deriveAll(row({ manufactureStatus: 6 }), { shipmentStatus: 3 })).toEqual({ manufactureStatus: 3 });
   });
   it("shipment cancel/return variants drive the manufacture stage", () => {
     expect(deriveAll(row({ status: 2, shipmentStatus: 3, manufactureStatus: 2 }), { shipmentStatus: 14 })).toMatchObject({ status: 10, manufactureStatus: 9 });
@@ -359,20 +359,21 @@ describe("manufactureStatus and scheduleStatus links", () => {
       expect(deriveAll(row({ status: 2, shipmentStatus: 3, manufactureStatus: 3 }), { scheduleStatus: 6 }))
         .toEqual({ status: 11, shipmentStatus: 15, manufactureStatus: 10, confirmationStatus: 7 });
     });
-    it("a delivered order is never cancelled by a schedule change", () => {
-      expect(deriveAll(row({ status: 5, shipmentStatus: 4, manufactureStatus: 6 }), { scheduleStatus: 6 })).toEqual({});
+    it("a schedule cancel also cancels a delivered order (the endpoint guard asks for confirmation)", () => {
+      expect(deriveAll(row({ status: 5, shipmentStatus: 4, manufactureStatus: 6 }), { scheduleStatus: 6 }))
+        .toEqual({ status: 11, shipmentStatus: 15, manufactureStatus: 10, confirmationStatus: 7 });
     });
-    it("schedule 1 books the shipment (11) only from pending/ready/failed; 2, 3, 7, 8, 9 derive nothing", () => {
+    it("schedule 1 books the shipment (11) from any shipment status; 2, 3, 7, 8, 9 derive nothing", () => {
       expect(deriveAll(row({ shipmentStatus: 3 }), { scheduleStatus: 1 })).toEqual({ shipmentStatus: 11 });
-      expect(deriveAll(row({ shipmentStatus: 4 }), { scheduleStatus: 1 })).toEqual({});
+      expect(deriveAll(row({ shipmentStatus: 4 }), { scheduleStatus: 1 })).toEqual({ shipmentStatus: 11 });
       for (const schedule of [2, 3, 7, 8, 9]) expect(deriveAll(row({ shipmentStatus: 3 }), { scheduleStatus: schedule })).toEqual({});
     });
-    it("shipment 11 sets schedule 1 only when empty; shipment cancel 15/16/18 set the schedule cancel reason", () => {
+    it("shipment 11 sets schedule 1; shipment cancel 15/16/18 and order 11/12/14 set the schedule cancel reason", () => {
       expect(deriveAll(row({ shipmentStatus: 1 }), { shipmentStatus: 11 })).toEqual({ scheduleStatus: 1 });
-      expect(deriveAll(row({ shipmentStatus: 1, scheduleStatus: 3 }), { shipmentStatus: 11 })).toEqual({});
+      expect(deriveAll(row({ shipmentStatus: 1, scheduleStatus: 3 }), { shipmentStatus: 11 })).toEqual({ scheduleStatus: 1 });
       expect(deriveAll(row({ status: 2, shipmentStatus: 3, scheduleStatus: 3 }), { shipmentStatus: 15 })).toMatchObject({ status: 11, scheduleStatus: 6 });
       expect(deriveAll(row({ status: 2, shipmentStatus: 3, scheduleStatus: 1 }), { status: 12 })).toMatchObject({ scheduleStatus: 5 });
-      expect(deriveAll(row({ status: 2, shipmentStatus: 3, scheduleStatus: 4 }), { status: 12 }).scheduleStatus).toBeUndefined();
+      expect(deriveAll(row({ status: 2, shipmentStatus: 3, scheduleStatus: 4 }), { status: 12 }).scheduleStatus).toBe(5);
     });
   });
 

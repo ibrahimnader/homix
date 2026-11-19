@@ -15,6 +15,7 @@ import {
 import { CLOSED_SHIPMENT_STATUSES, DELIVERY_BY, ORDER_SOURCE_ARABIC, ORDER_SOURCE, ORDER_STATUS, PAYMENT_STATUS, SHIPMENT_SCHEDULE_STATUS_ARABIC, USER_TYPES } from "../../../config/constants";
 import { applyCostPriceToLines, parseCostPriceInput } from "../orders/order-cost-price";
 import { buildAutoSyncLogRows, deriveStatusPatch } from "../orders/order-status-sync";
+import { lookupInvoiceLockedOrders } from "../orders/order-regression-gate";
 import {
   ACCOUNTING_STATUS,
   ACCOUNT_STATUS_LABELS,
@@ -2446,6 +2447,18 @@ export class ShipmentRepository {
        service callers get the same normalisation and rejection. */
     const parsed = shipmentCustomerEditSchema.parse(raw);
     return Object.keys(parsed).length > 0 ? parsed : null;
+  }
+
+  /** Invoice statuses (reviewed / frozen / transferred) of the active financial-invoice lines each order sits on. */
+  public findInvoiceLockedOrders(orderIds: number[]): Promise<Map<number, string[]>> {
+    return lookupInvoiceLockedOrders(orderIds);
+  }
+
+  /** Audit rows of confirmed status regressions (action regression_confirmed). */
+  public async createRegressionAuditLogs(rows: Array<Record<string, unknown>>): Promise<void> {
+    for (const row of rows) {
+      await logModel.create(row);
+    }
   }
 
   public async updateShipment(shipmentId: number, payload: Record<string, unknown>, userId?: number): Promise<unknown | null> {

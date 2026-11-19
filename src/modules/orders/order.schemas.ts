@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { confirmRegressionSchema } from "./order-regression-guard";
 import { DEFAULT_PAGE_NUMBER, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, ORDER_PRIORITY_KEYS } from "./order.constants";
 
 const csvNumberString = z.string().trim().min(1);
@@ -77,8 +78,6 @@ export const orderExportQuerySchema = orderListQuerySchema.omit({
 }).extend({
   financialStatus: z.string().trim().optional(),
 });
-
-const confirmRegressionSchema = z.union([z.boolean(), z.literal("true"), z.literal("false")]);
 
 /** `confirmRegression` (optional boolean) confirms an edit that moves a delivered/returned/replaced/in-inventory or invoiced order backwards. */
 export const orderMutationSchema = z.record(z.string(), z.unknown()).refine(

@@ -6,6 +6,10 @@ import { ConflictError, NotFoundError, ValidationError } from "../../shared/erro
 import { z } from "zod";
 import { ORDER_STATUS, SHIPMENTS_STATUS, DELIVERY_BY } from "../../../config/constants";
 import { buildAutoSyncLogRows, deriveStatusPatch } from "../orders/order-status-sync";
+import {
+  assertRegressionsAllowed, isRegressionConfirmed, lookupInvoiceLockedOrders, regressionAuditRows, type RegressionUser,
+} from "../orders/order-regression-gate";
+import { findOrderRegressions } from "../orders/order-regression-guard";
 import { notifyShipmentStatusChanges } from "./shipment.notifications";
 import {
   receivingCreateSchema,
@@ -351,8 +355,8 @@ export class ReceivingService {
     for (const { day } of dates) await aggregates.refreshRange(day, day);
   }
 
-  async receive(input: z.infer<typeof receivingCreateSchema>, userId: number) {
-    const result = await this.receiveInTransaction(input, userId);
+  async receive(input: z.infer<typeof receivingCreateSchema>, userId: number, requestUser?: RegressionUser) {
+    const result = await this.receiveInTransaction(input, userId, requestUser);
     /* After the commit: one aggregated notification per recipient (a receipt covers many orders). */
     await notifyShipmentStatusChanges(
       input.orderIds.map((orderId) => ({ orderId, toStatus: SHIPMENTS_STATUS.IN_WAREHOUSE })),
@@ -361,7 +365,7 @@ export class ReceivingService {
     return result;
   }
 
-  private async receiveInTransaction(input: z.infer<typeof receivingCreateSchema>, userId: number) {
+  private async receiveInTransaction(input: z.infer<typeof receivingCreateSchema>, userId: number, requestUser?: RegressionUser) {
     return sequelize.transaction(async (transaction) => {
       await select(
         `SELECT id FROM orders WHERE id IN (:ids) ORDER BY id FOR UPDATE`,
@@ -388,8 +392,19 @@ export class ReceivingService {
 
       const Order = require("../../../app/modules/order/order.model");
       const Log = require("../../../app/modules/logs/log.model");
+      /* Regression safety net: the receipt sets order = in inventory + shipment = in warehouse. Every order is checked
+         BEFORE the first write, so a refused receipt (409, vendors 403) leaves nothing behind. */
+      const orders = new Map<number, any>();
+      for (const orderId of input.orderIds) orders.set(orderId, await Order.findByPk(orderId, { transaction }));
+      const regressions = await findOrderRegressions(
+        [...orders.values()],
+        { status: ORDER_STATUS.IN_INVENTORY, shipmentStatus: SHIPMENTS_STATUS.IN_WAREHOUSE },
+        (ids) => lookupInvoiceLockedOrders(ids, transaction),
+      );
+      const confirmed = assertRegressionsAllowed(regressions, isRegressionConfirmed(requestUser, input.confirmRegression), requestUser);
+      if (confirmed.length > 0) await Log.bulkCreate(regressionAuditRows(confirmed, userId), { transaction });
       for (const orderId of input.orderIds) {
-        const order = await Order.findByPk(orderId, { transaction });
+        const order = orders.get(orderId);
         const manufactureDate = order.PoDate
           ? moment(order.PoDate).tz("Africa/Cairo").format("YYYY-MM-DD")
           : null;

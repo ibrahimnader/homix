@@ -13,16 +13,18 @@ import { reassignmentRouter } from "./reassignment.routes";
 // eslint-disable-next-line import/first
 import { notifyShipmentStatusChanges } from "./shipment.notifications";
 
-const appFor = (permissions: Record<string, boolean>) => {
+const appFor = (permissions: Record<string, boolean>, userType = "4") => {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    req.user = { id: 7, userType: "4", permissions } as never;
+    req.user = { id: 7, userType, permissions } as never;
     next();
   });
   app.use("/reassignments", reassignmentRouter);
   app.use((error: any, _req: any, res: any, _next: any) =>
-    res.status(error.name === "ZodError" ? 400 : 500).json({ status: false }));
+    res.status(error.name === "ZodError" ? 400 : (error.statusCode ?? 500)).json({
+      status: false, code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}),
+    }));
   return app;
 };
 const row = (id: number, code: string, status = 2) => ({
@@ -134,7 +136,7 @@ describe("reassignment runs through the shared status sync", () => {
     sequelize.transaction.mockImplementation(async (fn: (t: unknown) => unknown) => fn({ id: "t" }));
     mockQuery.mockImplementation(async (sql: string) => (sql.includes("FOR UPDATE") ? [] : []));
     const res = await request(appFor({ ship_edit: true })).post("/reassignments").send({ sourceOrderId: 1, targetOrderId: 2, reason: "منتج تالف" });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(404);
     expect(notifyShipmentStatusChanges).not.toHaveBeenCalled();
   });
 
@@ -142,5 +144,63 @@ describe("reassignment runs through the shared status sync", () => {
     const { res, updates } = await post("إعادة تخصيص - العميل لسه محتاج الطلب");
     expect(res.status).toBe(201);
     expect(updates[0]).toEqual({ id: 1, status: 1, shipmentStatus: 1, confirmationStatus: 2, manufactureStatus: 3, scheduleStatus: undefined });
+  });
+});
+
+describe("reassignment regression guard", () => {
+  const run = async (opts: { source?: Record<string, unknown>; invoiceStatus?: string; body?: Record<string, unknown>; userType?: string }) => {
+    const { sequelize } = jest.requireMock("../../infrastructure/database");
+    sequelize.transaction.mockImplementation(async (fn: (t: unknown) => unknown) => fn({ id: "t" }));
+    const source = { id: 1, orderNumber: "H1", status: 2, shipmentStatus: 3, confirmationStatus: 2, manufactureStatus: 3, ...opts.source };
+    const target = { id: 2, orderNumber: "H2", status: 1, shipmentStatus: 1, confirmationStatus: 1, manufactureStatus: null };
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM orders") && sql.includes("FOR UPDATE")) return [source, target];
+      if (sql.includes("financial_invoice_lines")) return opts.invoiceStatus ? [{ orderId: 1, status: opts.invoiceStatus }] : [];
+      if (sql.includes('FROM "orderLines"')) return [line(1), line(2)];
+      if (sql.includes("INSERT INTO shipment_reassignments")) return [{ id: 99 }];
+      return [];
+    });
+    const res = await request(appFor({ ship_edit: true }, opts.userType))
+      .post("/reassignments").send({ sourceOrderId: 1, targetOrderId: 2, reason: "منتج تالف", ...opts.body });
+    const writes = mockQuery.mock.calls.filter(([sql]) => /^(UPDATE orders|\s*INSERT)/.test(String(sql)));
+    return { res, writes, auditCalls: mockLogBulkCreate.mock.calls.filter(([rows]) => rows.some((row: any) => row.action === "regression_confirmed")) };
+  };
+
+  it("409 with details for an order on a reviewed invoice line, nothing written, no notification", async () => {
+    const { res, writes, auditCalls } = await run({ invoiceStatus: "reviewed" });
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ status: false, code: "REGRESSION_NEEDS_CONFIRMATION" });
+    expect(res.body.details.regressions[0]).toMatchObject({ orderId: 1, orderNumber: "H1", reasons: ["invoice_reviewed"] });
+    expect(res.body.details.regressions[0].changes.map((change: any) => change.field)).toContain("status");
+    expect(writes).toEqual([]);
+    expect(auditCalls).toEqual([]);
+    expect(notifyShipmentStatusChanges).not.toHaveBeenCalled();
+  });
+  it("confirmed (true and \"true\"): reassigns and writes the regression_confirmed audit row", async () => {
+    for (const flag of [true, "true"]) {
+      mockLogBulkCreate.mockClear();
+      const { res, writes, auditCalls } = await run({ invoiceStatus: "transferred", body: { confirmRegression: flag } });
+      expect(res.status).toBe(201);
+      expect(writes.length).toBeGreaterThanOrEqual(3);
+      expect(auditCalls).toHaveLength(1);
+      expect(auditCalls[0][0]).toEqual([expect.objectContaining({ action: "regression_confirmed", entityId: 1, entityType: "order", field: "regression", userId: 7 })]);
+      expect(auditCalls[0][1]).toEqual({ transaction: { id: "t" } });
+    }
+  });
+  it("vendors get 403 REGRESSION_FORBIDDEN even with the flag, nothing written", async () => {
+    const { res, writes } = await run({ invoiceStatus: "frozen", body: { confirmRegression: true }, userType: "2" });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe("REGRESSION_FORBIDDEN");
+    expect(writes).toEqual([]);
+  });
+  it("a plain reassignment of un-invoiced non-final orders is not flagged and writes no regression audit row", async () => {
+    mockLogBulkCreate.mockClear();
+    const { res, auditCalls } = await run({});
+    expect(res.status).toBe(201);
+    expect(auditCalls).toEqual([]);
+  });
+  it("rejects a non-boolean flag at validation", async () => {
+    const { res } = await run({ body: { confirmRegression: "maybe" } });
+    expect(res.status).toBe(400);
   });
 });

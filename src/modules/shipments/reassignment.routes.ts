@@ -7,6 +7,10 @@ import { ConflictError, NotFoundError, ValidationError } from "../../shared/erro
 import { SHIPMENT_STATUS, SHIPMENT_STATUS_LABELS } from "./shipment.constants";
 import { toDateRangeBoundary } from "./shipment.helpers";
 import { buildAutoSyncLogRows, deriveStatusPatch } from "../orders/order-status-sync";
+import {
+  assertRegressionsAllowed, isRegressionConfirmed, lookupInvoiceLockedOrders, regressionAuditRows,
+} from "../orders/order-regression-gate";
+import { confirmRegressionSchema, findOrderRegressions } from "../orders/order-regression-guard";
 import { notifyShipmentStatusChanges } from "./shipment.notifications";
 import type { ShipmentStatusChange } from "./shipment.notifications";
 import {
@@ -22,6 +26,8 @@ const mutation = z.object({
   targetOperationNumber: z.string().trim().min(1).max(100).optional(),
   reason: z.string().trim().min(2).max(200),
   notes: z.string().trim().max(2000).optional().default(""),
+  /** Confirms a reassignment that moves an invoiced order (reviewed/frozen/transferred invoice line) to an earlier state. */
+  confirmRegression: confirmRegressionSchema.optional(),
 }).refine((value) => Boolean(value.targetOrderId || value.targetOperationNumber), "Choose a target order");
 
 const candidatesQuery = z.object({
@@ -39,7 +45,7 @@ const logQuery = z.object({
   dateTo: day.optional(),
 });
 
-type OrderRow = { id: number; status: number; shipmentStatus: number | null; confirmationStatus: number | null; manufactureStatus: number | null; scheduleStatus: number | null };
+type OrderRow = { id: number; orderNumber?: string | null; status: number; shipmentStatus: number | null; confirmationStatus: number | null; manufactureStatus: number | null; scheduleStatus: number | null };
 type LineRow = { orderId: number; productId: number; sku: string | null; quantity: number };
 
 export const reassignmentRouter = express.Router();
@@ -164,10 +170,46 @@ reassignmentRouter.get("/candidates", requirePermission("ship_view"), validateRe
   response.json({ status: true, data });
 }));
 
+/**
+ * @swagger
+ * /shipments/reassignments:
+ *   post:
+ *     summary: Reassign a shipment from a source order to a target order (source -> pending/canceled, target -> in inventory)
+ *     tags: [Shipments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [sourceOrderId, reason]
+ *             properties:
+ *               sourceOrderId: { type: integer }
+ *               targetOrderId: { type: integer }
+ *               targetOperationNumber: { type: string, description: Alternative to targetOrderId }
+ *               reason: { type: string }
+ *               notes: { type: string }
+ *               confirmRegression: { type: boolean, description: "true confirms a reassignment that moves an invoiced order (reviewed/frozen/transferred invoice line) backwards; ignored for vendors" }
+ *     responses:
+ *       201: { description: Reassignment created }
+ *       409:
+ *         description: REGRESSION_NEEDS_CONFIRMATION (or another conflict) - resend with confirmRegression true; nothing was written
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
+ *       403:
+ *         description: REGRESSION_FORBIDDEN - vendors can never confirm a regression
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
+ */
 reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ body: mutation }), asyncHandler(async (request, response) => {
   const input = request.body as z.infer<typeof mutation>;
   const keepOldPending = keepsSourcePendingForReason(input.reason);
-  const createdBy = Number((request as any).user?.id) || null;
+  const requestUser = (request as any).user;
+  const createdBy = Number(requestUser?.id) || null;
   const statusChanges: ShipmentStatusChange[] = [];
   const record = await sequelize.transaction(async (transaction) => {
     let targetOrderId = input.targetOrderId;
@@ -181,7 +223,7 @@ reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ b
     }
     if (targetOrderId === input.sourceOrderId) throw new ValidationError("اختر طلبًا مختلفًا");
     const orders = await sequelize.query<OrderRow>(`
-      SELECT id, status, "shipmentStatus", "confirmationStatus", "manufactureStatus", "scheduleStatus" FROM orders
+      SELECT id, "orderNumber", status, "shipmentStatus", "confirmationStatus", "manufactureStatus", "scheduleStatus" FROM orders
       WHERE id IN (:ids) AND "deletedAt" IS NULL ORDER BY id FOR UPDATE
     `, { replacements: { ids: [input.sourceOrderId, targetOrderId] }, transaction, type: QueryTypes.SELECT });
     if (orders.length !== 2) throw new NotFoundError("Source or target order not found");
@@ -208,6 +250,22 @@ reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ b
       throw new ValidationError("Product, SKU and quantity must match");
     }
 
+    /* Regression safety net, before the first write: the source goes back to pending / canceled and the target to in-inventory.
+       Both are non-final here, so what can refuse the request is an order sitting on a reviewed / frozen / transferred invoice
+       line. 409 asks for confirmRegression; vendors always get 403. Throwing here rolls the (still empty) transaction back. */
+    const sourceStatuses = { status: keepOldPending ? ORDER_STATUS.PENDING : ORDER_STATUS.CANCELED, shipmentStatus: keepOldPending ? SHIPMENT_STATUS.PENDING : SHIPMENT_STATUS.CANCELED };
+    const targetStatuses = { status: ORDER_STATUS.IN_INVENTORY, shipmentStatus: SHIPMENT_STATUS.IN_WAREHOUSE };
+    const lookupInvoices = (ids: number[]) => lookupInvoiceLockedOrders(ids, transaction);
+    const regressions = [
+      ...await findOrderRegressions([source], sourceStatuses, lookupInvoices),
+      ...await findOrderRegressions([target], targetStatuses, lookupInvoices),
+    ];
+    const confirmedRegressions = assertRegressionsAllowed(regressions, isRegressionConfirmed(requestUser, input.confirmRegression), requestUser);
+    if (confirmedRegressions.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
+      await require("../../../app/modules/logs/log.model").bulkCreate(regressionAuditRows(confirmedRegressions, createdBy), { transaction });
+    }
+
     /* The reassignment's own rules pick status + shipmentStatus explicitly; the
        shared status sync then fills the third linked column (confirmation) when
        the new order status implies one — it never overrides these explicit values. */
@@ -226,8 +284,8 @@ reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ b
         await Log.bulkCreate(buildAutoSyncLogRows(row.id, derived, createdBy), { transaction });
       }
     };
-    await applyStatuses(source, keepOldPending ? ORDER_STATUS.PENDING : ORDER_STATUS.CANCELED, keepOldPending ? SHIPMENT_STATUS.PENDING : SHIPMENT_STATUS.CANCELED);
-    await applyStatuses(target, ORDER_STATUS.IN_INVENTORY, SHIPMENT_STATUS.IN_WAREHOUSE);
+    await applyStatuses(source, sourceStatuses.status, sourceStatuses.shipmentStatus);
+    await applyStatuses(target, targetStatuses.status, targetStatuses.shipmentStatus);
     const [inserted] = await sequelize.query(`
       INSERT INTO shipment_reassignments ("sourceOrderId", "targetOrderId", reason, notes, "keepOldPending", "createdBy")
       VALUES (:sourceOrderId, :targetOrderId, :reason, :notes, :keepOldPending, :createdBy) RETURNING *

@@ -533,6 +533,9 @@ shipmentRouter.get(
  *               status:
  *                 type: integer
  *                 example: 2
+ *               confirmRegression:
+ *                 type: boolean
+ *                 description: true confirms a return that moves a delivered/returned/replaced/in-inventory or invoiced order backwards (ignored for vendors)
  *     responses:
  *       201:
  *         description: Vendor return created
@@ -540,6 +543,18 @@ shipmentRouter.get(
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ShipmentReturnItemResponse'
+ *       409:
+ *         description: REGRESSION_NEEDS_CONFIRMATION - resend with confirmRegression true; nothing was written
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
+ *       403:
+ *         description: REGRESSION_FORBIDDEN - vendors can never confirm a regression
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
  */
 shipmentRouter.get(
   "/returns/vendor",
@@ -666,6 +681,9 @@ shipmentRouter.put(
  *               status:
  *                 type: integer
  *                 example: 2
+ *               confirmRegression:
+ *                 type: boolean
+ *                 description: true confirms a return that moves a delivered/returned/replaced/in-inventory or invoiced order backwards (ignored for vendors)
  *     responses:
  *       201:
  *         description: Customer withdrawal created
@@ -673,6 +691,18 @@ shipmentRouter.put(
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ShipmentReturnItemResponse'
+ *       409:
+ *         description: REGRESSION_NEEDS_CONFIRMATION - resend with confirmRegression true; nothing was written
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
+ *       403:
+ *         description: REGRESSION_FORBIDDEN - vendors can never confirm a regression
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
  */
 shipmentRouter.get(
   "/returns/customer",
@@ -1530,12 +1560,14 @@ shipmentRouter.get(
  *             type: object
  *             required: [shipmentIds, data]
  *             properties:
+ *               confirmRegression: { type: boolean, description: "true confirms an edit that moves a delivered/returned/replaced/in-inventory or invoiced order backwards (409 REGRESSION_NEEDS_CONFIRMATION otherwise; ignored for vendors)" }
  *               shipmentIds:
  *                 type: array
  *                 items: { type: integer }
  *               data:
  *                 type: object
  *                 properties:
+ *                   confirmRegression: { type: boolean, description: Same as the top-level flag; either one confirms }
  *                   shipmentStatus: { type: integer }
  *                   shipmentType: { type: string }
  *                   governorate: { type: string }
@@ -1545,6 +1577,18 @@ shipmentRouter.get(
  *     responses:
  *       200:
  *         description: Shipments updated successfully
+ *       409:
+ *         description: REGRESSION_NEEDS_CONFIRMATION - resend with confirmRegression true; nothing was written
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
+ *       403:
+ *         description: REGRESSION_FORBIDDEN - vendors can never confirm a regression
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
  */
 shipmentRouter.put(
   "/bulk-update",
@@ -1590,7 +1634,11 @@ shipmentRouter.put(
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/ShipmentUpdateRequest'
+ *             allOf:
+ *               - $ref: '#/components/schemas/ShipmentUpdateRequest'
+ *               - type: object
+ *                 properties:
+ *                   confirmRegression: { type: boolean, description: "true confirms an edit (shipmentStatus / scheduleStatus / status / manufactureStatus / confirmationStatus) that moves a delivered/returned/replaced/in-inventory or invoiced order backwards; ignored for vendors" }
  *     responses:
  *       200:
  *         description: Shipment updated
@@ -1598,6 +1646,18 @@ shipmentRouter.put(
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ShipmentUpdateResponse'
+ *       409:
+ *         description: REGRESSION_NEEDS_CONFIRMATION - resend with confirmRegression true; nothing was written
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
+ *       403:
+ *         description: REGRESSION_FORBIDDEN - vendors can never confirm a regression
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
  *   delete:
  *     security:
  *       - bearerAuth: []

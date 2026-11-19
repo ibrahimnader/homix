@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { confirmRegressionSchema } from "../orders/order-regression-guard";
 import { DEFAULT_PAGE_NUMBER, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PERFORMANCE_PERIODS } from "./shipment.constants";
 import { isValidDateInput } from "./shipment.helpers";
 
@@ -172,7 +173,11 @@ export const shipmentCustomerEditSchema = z.object({
   return Object.fromEntries(Object.entries(normalised).filter(([, entry]) => entry !== undefined)) as Record<string, string | null>;
 });
 
+/** `confirmRegression` (optional boolean) confirms an edit that moves a delivered/returned/replaced/in-inventory or invoiced order backwards. */
 export const shipmentMutationSchema = z.record(z.string(), z.unknown()).superRefine((value, context) => {
+  if (value.confirmRegression !== undefined && !confirmRegressionSchema.safeParse(value.confirmRegression).success) {
+    context.addIssue({ code: "custom", message: "confirmRegression must be a boolean", path: ["confirmRegression"] });
+  }
   if (value.customer === undefined) return;
   const parsed = shipmentCustomerEditSchema.safeParse(value.customer);
   if (!parsed.success) {
@@ -191,7 +196,10 @@ export const shipmentMutationSchema = z.record(z.string(), z.unknown()).superRef
    allow-list: touching many rows at once deserves tighter validation.
    `scheduledDeliveryDate` accepts "" so a bulk edit can also clear a date. */
 export const shipmentBulkUpdateSchema = z.object({
+  /* Confirms a bulk edit that moves delivered/returned/replaced/in-inventory or invoiced shipments backwards (also accepted inside data). */
+  confirmRegression: confirmRegressionSchema.optional(),
   data: z.object({
+    confirmRegression: confirmRegressionSchema.optional(),
     deliveryBy: z.coerce.number().int().positive().optional(),
     governorate: z.string().trim().optional(),
     scheduledDeliveryDate: z.union([dateString, z.literal("")]).optional().nullable(),
@@ -202,7 +210,7 @@ export const shipmentBulkUpdateSchema = z.object({
     /* Shipping company id — resolved to its name by the repository, same as the single edit. null clears it. */
     shippingCompany: z.union([z.null(), z.coerce.number().int().positive()]).optional(),
     userId: z.coerce.number().int().positive().optional(),
-  }).refine((value) => Object.keys(value).length > 0, "No fields to update"),
+  }).refine((value) => Object.keys(value).filter((key) => key !== "confirmRegression").length > 0, "No fields to update"),
   shipmentIds: z.array(z.coerce.number().int().positive()).min(1),
 });
 
@@ -229,6 +237,8 @@ export const shipmentReturnMutationSchema = z.object({
   reason: z.string().trim().min(1),
   returnDate: dateString.optional().nullable(),
   status: z.coerce.number().int().positive().optional(),
+  /* Confirms a return that would move a delivered/returned/replaced/in-inventory or invoiced shipment backwards. */
+  confirmRegression: confirmRegressionSchema.optional(),
 });
 
 /**

@@ -262,6 +262,7 @@ describe("ShipmentService", () => {
 
     it("notifies a schedule-status change (and mentions the date when it changed too), not the date notification", async () => {
       const repository = {
+        findInvoiceLockedOrders: jest.fn().mockResolvedValue(new Map()),
         findShipmentEntity: jest.fn().mockResolvedValue(entity(3, { scheduleStatus: 1, scheduledDeliveryDate: "2026-12-01" })),
         updateShipment: jest.fn().mockResolvedValue(entity(3, { scheduleStatus: 4, scheduledDeliveryDate: "2026-12-05" })),
       } as never;
@@ -315,6 +316,7 @@ describe("ShipmentService", () => {
       const calls: Record<number, number> = {};
       const repository = {
         bulkUpdateShipments: jest.fn().mockResolvedValue(4),
+        findInvoiceLockedOrders: jest.fn().mockResolvedValue(new Map()),
         findShipmentEntity: jest.fn().mockImplementation(async (id: number) => {
           calls[id] = (calls[id] ?? 0) + 1;
           const [shipmentStatus, scheduleStatus] = calls[id] === 1 ? before[id]! : after[id]!;

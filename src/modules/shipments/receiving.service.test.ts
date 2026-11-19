@@ -459,3 +459,72 @@ describe("candidate filters", () => {
     expect(db.mock.calls[0][1].replacements.sku).toBe("%50\\%\\_a\\\\b%");
   });
 });
+
+describe("receipt regression guard", () => {
+  const deliveredOrder = (id: number) => ({
+    id, PoDate: "2026-09-21", status: 5, shipmentStatus: 4, manufactureStatus: 6, confirmationStatus: 2,
+    shippingReceiveDate: null, deliveryBy: 2, shippedFromInventory: false, update,
+  });
+  const caught = async (promise: Promise<unknown>): Promise<any> => {
+    try { await promise; } catch (error) { return error; }
+    throw new Error("expected a rejection");
+  };
+  const writes = () => [
+    update, Log.bulkCreate, Log.create,
+    ...db.mock.calls.filter(([sql]) => /INSERT|UPDATE/.test(String(sql))).map(() => jest.fn()),
+  ].some((mock) => mock.mock.calls.length > 0);
+  const markDelivered = (ids: number[]) => Order.findByPk.mockImplementation(async (id: number) => (ids.includes(id) ? deliveredOrder(id) : {
+    id, PoDate: "2026-09-21", status: 2, shipmentStatus: 1, shippingReceiveDate: null, deliveryBy: 2, shippedFromInventory: false, update,
+  }));
+
+  it("409 REGRESSION_NEEDS_CONFIRMATION with details, and nothing is written for any order", async () => {
+    markDelivered([11]);
+    const error = await caught(new ReceivingService().receive(input, 7, { id: 7, userType: "1" }));
+    expect(error).toMatchObject({ statusCode: 409, code: "REGRESSION_NEEDS_CONFIRMATION" });
+    expect(error.details.regressions[0]).toMatchObject({ orderId: 11, reasons: ["delivered"] });
+    expect(writes()).toBe(false);
+    expect(notifyShipmentStatusChanges).not.toHaveBeenCalled();
+  });
+  it("confirmed (true or \"true\"): receives and writes a regression_confirmed audit row in the same transaction", async () => {
+    for (const flag of [true, "true"] as const) {
+      jest.clearAllMocks();
+      markDelivered([11]);
+      await new ReceivingService().receive({ ...input, confirmRegression: flag }, 7, { id: 7, userType: "1" });
+      expect(update).toHaveBeenCalledTimes(2);
+      expect(update.mock.calls[0]![0]).not.toHaveProperty("confirmRegression");
+      expect(Log.bulkCreate).toHaveBeenCalledWith(
+        [expect.objectContaining({ action: "regression_confirmed", entityId: 11, entityType: "order", field: "regression", userId: 7 })],
+        { transaction },
+      );
+    }
+  });
+  it("vendors get 403 REGRESSION_FORBIDDEN even with the flag, nothing written", async () => {
+    markDelivered([10]);
+    const error = await caught(new ReceivingService().receive({ ...input, confirmRegression: true }, 7, { id: 7, userType: "2" }));
+    expect(error).toMatchObject({ statusCode: 403, code: "REGRESSION_FORBIDDEN" });
+    expect(writes()).toBe(false);
+  });
+  it("an invoiced order that is not final by status is refused too", async () => {
+    const base = db.getMockImplementation()!;
+    db.mockImplementation(async (sql: string, options: any) => (String(sql).includes("financial_invoice_lines")
+      ? [{ orderId: 10, status: "reviewed" }]
+      : base(sql, options)));
+    Order.findByPk.mockImplementation(async (id: number) => ({ ...deliveredOrder(id), status: 2 }));
+    const error = await caught(new ReceivingService().receive(input, 7, { id: 7, userType: "1" }));
+    expect(error).toMatchObject({ statusCode: 409 });
+    expect(error.details.regressions[0].reasons).toEqual(["invoice_reviewed"]);
+    expect(update).not.toHaveBeenCalled();
+  });
+  it("forward receipts (pending orders) are not flagged and write no audit row", async () => {
+    await new ReceivingService().receive(input, 7, { id: 7, userType: "1" });
+    expect(update).toHaveBeenCalledTimes(2);
+    for (const [rows] of Log.bulkCreate.mock.calls) {
+      expect((rows as Array<{ action: string }>).some((row) => row.action === "regression_confirmed")).toBe(false);
+    }
+  });
+  it("the receipt schema accepts the flag as boolean or \"true\"/\"false\" only", () => {
+    expect(receivingCreateSchema.safeParse({ ...input, confirmRegression: true }).success).toBe(true);
+    expect(receivingCreateSchema.safeParse({ ...input, confirmRegression: "true" }).success).toBe(true);
+    expect(receivingCreateSchema.safeParse({ ...input, confirmRegression: "maybe" }).success).toBe(false);
+  });
+});

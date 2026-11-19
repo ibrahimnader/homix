@@ -1167,7 +1167,9 @@ describe("shipmentRouter", () => {
       }),
     );
     expect(orderModel.findByPk).toHaveBeenCalledWith(9802, expect.any(Object));
-    const firstFindByPkCall = orderModel.findByPk.mock.results[0];
+    /* the service reads the row first (regression guard); the repository's own read is the one with includes */
+    const repositoryCallIndex = orderModel.findByPk.mock.calls.findIndex(([, options]: unknown[]) => Boolean(options));
+    const firstFindByPkCall = orderModel.findByPk.mock.results[repositoryCallIndex];
     expect(firstFindByPkCall).toBeDefined();
     const shipmentRecord = await firstFindByPkCall!.value;
     expect(shipmentRecord.update).toHaveBeenCalledWith(
@@ -1225,8 +1227,9 @@ describe("shipmentRouter", () => {
     const shipmentRecord = makeShipmentRecord({ id: 9802, shipmentStatus: 2, status: 8, confirmationStatus: 2 });
     orderModel.findByPk.mockResolvedValue(shipmentRecord);
 
-    const response = await request(app).put("/shipments/9802").send({ shipmentStatus: 15 });
+    const response = await request(app).put("/shipments/9802").send({ shipmentStatus: 15, confirmRegression: true });
 
+    /* an in-inventory order (status 8) moving to a canceled state is a regression: confirmed here */
     expect(response.status).toBe(200);
     expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({ confirmationStatus: 7, shipmentStatus: 15, status: 11 }));
     expect(logModel.create).toHaveBeenCalledWith(expect.objectContaining({ action: "update", field: "status", from: "8", to: "11" }));
@@ -1237,6 +1240,31 @@ describe("shipmentRouter", () => {
     expect(logModel.create).toHaveBeenCalledWith(expect.objectContaining({
       action: "auto_sync", from: "shipmentStatus", to: "confirmationStatus:2->7",
     }));
+  });
+
+  it("regression guard over HTTP: 409 body with details and nothing written, then confirmed (single + bulk top-level flag)", async () => {
+    const delivered = () => makeShipmentRecord({ id: 9802, shipmentStatus: 4, status: 5, manufactureStatus: 6, confirmationStatus: 2 });
+    const record = delivered();
+    orderModel.findByPk.mockResolvedValue(record);
+    const refused = await request(app).put("/shipments/9802").send({ shipmentStatus: 3 });
+    expect(refused.status).toBe(409);
+    expect(refused.body).toMatchObject({ status: false, code: "REGRESSION_NEEDS_CONFIRMATION" });
+    expect(refused.body.details.regressions[0]).toMatchObject({ orderId: 9802, reasons: ["delivered"] });
+    expect(record.update).not.toHaveBeenCalled();
+
+    const bulkRefused = await request(app).put("/shipments/bulk-update").send({ data: { shipmentStatus: 3 }, shipmentIds: [9802] });
+    expect(bulkRefused.status).toBe(409);
+    expect(record.update).not.toHaveBeenCalled();
+
+    const bulkConfirmed = await request(app).put("/shipments/bulk-update").send({ confirmRegression: true, data: { shipmentStatus: 3 }, shipmentIds: [9802] });
+    expect(bulkConfirmed.status).toBe(200);
+    expect(record.update).toHaveBeenCalledWith(expect.objectContaining({ shipmentStatus: 3 }));
+    expect(record.update.mock.calls[0]![0]).not.toHaveProperty("confirmRegression");
+    expect(logModel.create).toHaveBeenCalledWith(expect.objectContaining({ action: "regression_confirmed", entityId: 9802, entityType: "order" }));
+
+    const confirmed = delivered();
+    orderModel.findByPk.mockResolvedValue(confirmed);
+    expect((await request(app).put("/shipments/9802").send({ shipmentStatus: 3, confirmRegression: "true" })).status).toBe(200);
   });
 
   it("maps returned-from-customer and replaced shipments to refunded and replaced orders (reopen from final too)", async () => {
@@ -1253,7 +1281,7 @@ describe("shipmentRouter", () => {
     const shipmentRecord = makeShipmentRecord({ id: 9802, shipmentStatus: 2, status: 8, confirmationStatus: 7 });
     orderModel.findByPk.mockResolvedValue(shipmentRecord);
 
-    await request(app).put("/shipments/9802").send({ shipmentStatus: 4, status: 3 });
+    await request(app).put("/shipments/9802").send({ shipmentStatus: 4, status: 3, confirmRegression: true });
     expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({ shipmentStatus: 4, status: 3 }));
     /* only the manufacture stage (delivered shipment -> 6) is derived; the explicit order status is never touched */
     expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({ manufactureStatus: 6 }));

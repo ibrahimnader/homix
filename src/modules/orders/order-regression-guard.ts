@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { MANUFACTURE_STATUS_ARABIC, ORDER_STATUS, ORDER_STATUS_Arabic } from "../../../config/constants";
 import { SHIPMENT_STATUS_LABELS } from "../shipments/shipment.constants";
 import { deriveStatusPatch } from "./order-status-sync";
@@ -11,6 +12,8 @@ import { deriveStatusPatch } from "./order-status-sync";
  * refused with 409 `REGRESSION_NEEDS_CONFIRMATION` unless the request carries `confirmRegression: true`.
  * Vendors can never confirm: they are refused with 403 `REGRESSION_FORBIDDEN`.
  */
+/** Request-side flag shape shared by every guarded route: boolean or the strings "true"/"false" (form posts). */
+export const confirmRegressionSchema = z.union([z.boolean(), z.literal("true"), z.literal("false")]);
 export const CONFIRM_REGRESSION_FIELD = "confirmRegression";
 export const REGRESSION_NEEDS_CONFIRMATION_CODE = "REGRESSION_NEEDS_CONFIRMATION";
 export const REGRESSION_FORBIDDEN_CODE = "REGRESSION_FORBIDDEN";
@@ -38,9 +41,9 @@ export type OrderRegression = {
   changes: RegressionChange[];
 };
 
-/** Progress rank per column (higher = further along). Cancel/reject variants and anything unlisted rank -1. */
+/** Progress rank per column (higher = further along). Cancel/reject variants and anything unlisted rank -1. Returned to vendor (8) ranks with returned from customer (7): it is how a returned item normally ends, never a step back. */
 const STATUS_RANK: Readonly<Record<number, number>> = { 1: 0, 3: 1, 2: 2, 8: 3, 5: 4, 6: 5, 7: 6 };
-const SHIPMENT_RANK: Readonly<Record<number, number>> = { 1: 0, 11: 1, 3: 2, 12: 3, 10: 3, 2: 4, 4: 5, 7: 6, 9: 7 };
+const SHIPMENT_RANK: Readonly<Record<number, number>> = { 1: 0, 11: 1, 3: 2, 12: 3, 10: 3, 2: 4, 4: 5, 7: 6, 8: 6, 9: 7 };
 const MANUFACTURE_RANK: Readonly<Record<number, number>> = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 3, 7: 4, 6: 5, 17: 6, 18: 7 };
 const RANKS: Readonly<Record<RegressionField, Readonly<Record<number, number>>>> = {
   status: STATUS_RANK, shipmentStatus: SHIPMENT_RANK, manufactureStatus: MANUFACTURE_RANK,

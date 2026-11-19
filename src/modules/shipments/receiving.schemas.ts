@@ -1,5 +1,6 @@
 import { z } from "zod";
 import moment from "moment-timezone";
+import { confirmRegressionSchema } from "../orders/order-regression-guard";
 
 const ids = z
   .array(z.number().int().positive())
@@ -23,6 +24,8 @@ export const receivingCreateSchema = z.object({
     ),
   notes: z.string().trim().max(4000).default(""),
   senderName: z.string().trim().max(200).default(""),
+  /** Confirms a receipt that would move a delivered/returned/replaced/in-inventory or invoiced order backwards. */
+  confirmRegression: confirmRegressionSchema.optional(),
 });
 export const receivingDocumentSchema = z.object({ orderIds: ids });
 const isoDay = z

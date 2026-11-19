@@ -6,6 +6,8 @@ import { shipmentLegacyGateway } from "./shipment.legacy-gateway";
 import { ShipmentRepository } from "./shipment.repo";
 import { normalizeOrderMutationPayload, toPlain } from "../orders/order.helpers";
 import { assertFinancialEditAllowed, SHIPMENT_FINANCIAL_FIELDS } from "../orders/order-financial-guard";
+import { guardRegressions, isRegressionConfirmed, regressionAuditRows, stripConfirmRegression } from "../orders/order-regression-gate";
+import type { OrderRegression } from "../orders/order-regression-guard";
 import type {
   DeliveryAccountsListQuery,
   DeliveryAccountsListResponse,
@@ -60,6 +62,29 @@ export class ShipmentService {
   });
 
   public constructor(private readonly shipmentRepository: ShipmentRepository) {}
+
+  /**
+   * Regression safety net (order-regression-guard) for the shipment writers: computed on the stored rows BEFORE anything is
+   * written. 409 REGRESSION_NEEDS_CONFIRMATION unless the request carried confirmRegression; vendors always get 403.
+   * Returns the confirmed regressions so the caller audits them once the write succeeded.
+   */
+  private async guardShipmentRegressions(
+    rows: ReadonlyArray<unknown>,
+    payload: Record<string, unknown>,
+    flags: unknown[],
+    user: ShipmentRequestUser,
+  ): Promise<OrderRegression[]> {
+    return guardRegressions(rows.filter(Boolean), payload, {
+      confirmed: isRegressionConfirmed(user, ...flags),
+      lookupInvoices: (ids) => this.shipmentRepository.findInvoiceLockedOrders(ids),
+      user,
+    });
+  }
+
+  private async auditConfirmedRegressions(regressions: OrderRegression[], user: ShipmentRequestUser): Promise<void> {
+    if (regressions.length === 0) return;
+    await this.shipmentRepository.createRegressionAuditLogs(regressionAuditRows(regressions, user.id));
+  }
 
   public async createShipment(payload: ShipmentMutationPayload): Promise<Result<{ message: string }>> {
     const normalizedPayload = await this.shipmentRepository.normalizeShippingCompanyPayload(payload);
@@ -131,14 +156,36 @@ export class ShipmentService {
     ], report.items);
   }
 
+  /** Creating a return moves the shipment to the matching returned status (and the linked columns through the status sync). */
+  private async createReturn(
+    returnType: number,
+    rawPayload: ReturnMutationInput,
+    user: ShipmentRequestUser,
+  ): Promise<ReturnListResponse["items"][number]> {
+    const { payload, flag } = stripConfirmRegression(rawPayload as unknown as Record<string, unknown>);
+    const input = payload as unknown as ReturnMutationInput;
+    const existing = typeof this.shipmentRepository.findShipmentEntity === "function"
+      ? await this.shipmentRepository.findShipmentEntity(input.orderId)
+      : null;
+    const nextShipmentStatus = returnType === SHIPMENT_RETURN_TYPE.TO_VENDOR
+      ? SHIPMENT_STATUS.RETURNED_TO_VENDOR
+      : SHIPMENT_STATUS.RETURNED_FROM_CUSTOMER;
+    const confirmed = existing
+      ? await this.guardShipmentRegressions([existing], { shipmentStatus: nextShipmentStatus }, [flag], user)
+      : [];
+    const created = await this.shipmentRepository.createReturnRecord(returnType, input, user.id);
+    await this.auditConfirmedRegressions(confirmed, user);
+    return created;
+  }
+
   public async createVendorReturn(payload: ReturnMutationInput, user: ShipmentRequestUser): Promise<Result<ReturnListResponse["items"][number]>> {
-    const created = await this.shipmentRepository.createReturnRecord(SHIPMENT_RETURN_TYPE.TO_VENDOR, payload, user.id);
+    const created = await this.createReturn(SHIPMENT_RETURN_TYPE.TO_VENDOR, payload, user);
     await notifyShipmentStatusChanges([{ orderId: payload.orderId, toStatus: SHIPMENT_STATUS.RETURNED_TO_VENDOR }], user.id);
     return success(created);
   }
 
   public async createCustomerReturn(payload: ReturnMutationInput, user: ShipmentRequestUser): Promise<Result<ReturnListResponse["items"][number]>> {
-    const created = await this.shipmentRepository.createReturnRecord(SHIPMENT_RETURN_TYPE.FROM_CUSTOMER, payload, user.id);
+    const created = await this.createReturn(SHIPMENT_RETURN_TYPE.FROM_CUSTOMER, payload, user);
     await notifyShipmentStatusChanges([{ orderId: payload.orderId, toStatus: SHIPMENT_STATUS.RETURNED_FROM_CUSTOMER }], user.id);
     return success(created);
   }
@@ -457,7 +504,8 @@ export class ShipmentService {
     response.end();
   }
 
-  public async updateShipment(shipmentId: number, payload: ShipmentMutationPayload, user: ShipmentRequestUser): Promise<Result<unknown>> {
+  public async updateShipment(shipmentId: number, rawPayload: ShipmentMutationPayload, user: ShipmentRequestUser): Promise<Result<unknown>> {
+    const { payload, flag } = stripConfirmRegression(rawPayload);
     const existingShipment = typeof this.shipmentRepository.findShipmentEntity === "function"
       ? await this.shipmentRepository.findShipmentEntity(shipmentId)
       : null;
@@ -471,10 +519,12 @@ export class ShipmentService {
       SHIPMENT_FINANCIAL_FIELDS,
     );
     const before = existingShipment ? { ...toPlain(existingShipment) } : null;
+    const confirmedRegressions = existingShipment ? await this.guardShipmentRegressions([existingShipment], payload, [flag], user) : [];
     const shipment = await this.shipmentRepository.updateShipment(shipmentId, payload, user.id);
     if (!shipment) {
       throw new NotFoundError("Shipment not found");
     }
+    await this.auditConfirmedRegressions(confirmedRegressions, user);
 
     await this.refreshAggregateForShipments([existingShipment, shipment, payload]);
     /* Only after the update succeeded; notification failures are swallowed inside. A derived change of the
@@ -510,9 +560,10 @@ export class ShipmentService {
 
   public async bulkUpdateShipments(
     shipmentIds: number[],
-    payload: ShipmentMutationPayload,
+    rawPayload: ShipmentMutationPayload,
     user: ShipmentRequestUser,
   ): Promise<Result<{ message: string; updatedCount: number }>> {
+    const { payload, flag } = stripConfirmRegression(rawPayload);
     assertFinancialEditAllowed(payload, user, null, SHIPMENT_FINANCIAL_FIELDS);
     const existingShipments = typeof this.shipmentRepository.findShipmentEntity === "function"
       ? await Promise.all(shipmentIds.map((shipmentId) => this.shipmentRepository.findShipmentEntity(shipmentId)))
@@ -526,7 +577,10 @@ export class ShipmentService {
         scheduleBeforeById.set(shipmentIds[index]!, Number(plain.scheduleStatus ?? 0) || null);
       }
     });
+    /* Every selected row is checked before the first one is written: a single regressive row refuses the whole bulk edit. */
+    const confirmedRegressions = await this.guardShipmentRegressions(existingShipments, payload, [flag], user);
     const updatedCount = await this.shipmentRepository.bulkUpdateShipments(shipmentIds, payload, user.id);
+    await this.auditConfirmedRegressions(confirmedRegressions, user);
     await this.refreshAggregateForShipments([...existingShipments, payload]);
     /* ONE aggregated notification per recipient (not one per row). The rows are re-read once, after the bulk
        write, so derived status changes are included and rows that did not really change are dropped. */

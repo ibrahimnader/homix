@@ -40,6 +40,7 @@ import type { CompanyDueKind, OrderDetailsResponse, OrderDetailsView, OrderFinan
 import { calculateVendorDeliverySettlement, calculateWarehouseDeliverySettlement } from "./order-financial-settlement";
 import { listManagedOptions, MANAGED_OPTION_GROUP, replaceManagedOptions } from "../settings/managed-options";
 import { SHIPMENT_STATUS_LABELS } from "../shipments/shipment.constants";
+import { lookupInvoiceLockedOrders } from "./order-regression-gate";
 
 const { sequelize } = require("../../infrastructure/database");
 const orderModel = require("../../../app/modules/order/order.model");
@@ -582,20 +583,8 @@ export class OrderRepository {
   }
 
   /** Invoice statuses (reviewed / frozen / transferred) of the active financial-invoice lines each order sits on. */
-  public async findInvoiceLockedOrders(orderIds: number[]): Promise<Map<number, string[]>> {
-    const result = new Map<number, string[]>();
-    if (orderIds.length === 0) return result;
-    const rows = await sequelize.query(
-      `SELECT l."orderId" AS "orderId", i.status AS status
-       FROM financial_invoice_lines l JOIN financial_invoices i ON i.id = l."invoiceId"
-       WHERE l."orderId" IN (:orderIds) AND l.state IN ('included', 'frozen') AND i.status IN ('reviewed', 'frozen', 'transferred')`,
-      { replacements: { orderIds }, type: "SELECT" },
-    ) as Array<{ orderId: number | string; status: string }>;
-    for (const row of rows) {
-      const key = Number(row.orderId);
-      result.set(key, [...(result.get(key) ?? []), String(row.status)]);
-    }
-    return result;
+  public findInvoiceLockedOrders(orderIds: number[]): Promise<Map<number, string[]>> {
+    return lookupInvoiceLockedOrders(orderIds);
   }
 
   public async findOrderEntities(orderIds: number[]): Promise<unknown[]> {

@@ -4,6 +4,12 @@ import { unwrap } from "../../shared/result";
 import { assertFinancialEditAllowed } from "../orders/order-financial-guard";
 import type { ShipmentService } from "./shipment.service";
 
+const withBulkConfirmFlag = (body: { confirmRegression?: unknown; data: Record<string, unknown> }): Record<string, unknown> => {
+  const flags = [body.confirmRegression, body.data?.confirmRegression];
+  if (flags.every((flag) => flag === undefined)) return body.data;
+  return { ...body.data, confirmRegression: flags.some((flag) => flag === true || flag === "true") };
+};
+
 export class ShipmentController {
   public constructor(private readonly shipmentService: ShipmentService) {}
 
@@ -237,7 +243,8 @@ export class ShipmentController {
     response.status(200).json({
       data: unwrap(await this.shipmentService.bulkUpdateShipments(
         request.body.shipmentIds,
-        request.body.data,
+        /* confirmRegression is accepted at the top level or inside data; either one confirms. */
+        withBulkConfirmFlag(request.body),
         request.user ?? { id: 0 },
       )),
       status: true,

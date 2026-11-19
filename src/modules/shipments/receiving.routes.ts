@@ -93,12 +93,46 @@ receivingRouter.post(
     });
   })
 );
+/**
+ * @swagger
+ * /shipments/receipts:
+ *   post:
+ *     summary: Receive orders into the warehouse (order -> in inventory, shipment -> in warehouse)
+ *     tags: [Shipments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [orderIds, receivedDate]
+ *             properties:
+ *               orderIds: { type: array, items: { type: integer }, minItems: 1, maxItems: 100 }
+ *               receivedDate: { type: string, format: date }
+ *               notes: { type: string, maxLength: 4000 }
+ *               senderName: { type: string, maxLength: 200 }
+ *               confirmRegression: { type: boolean, description: "true confirms a receipt that moves a delivered/returned/replaced/in-inventory or invoiced order backwards (ignored for vendors)" }
+ *     responses:
+ *       201: { description: Receipt registered }
+ *       409:
+ *         description: REGRESSION_NEEDS_CONFIRMATION (or a stale selection) - resend with confirmRegression true; nothing was written
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
+ *       403:
+ *         description: REGRESSION_FORBIDDEN - vendors can never confirm a regression
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRegressionConflictResponse'
+ */
 receivingRouter.post(
   "/",
   requirePermission("ship_edit"),
   validateRequest({ body: receivingCreateSchema }),
   asyncHandler(async (req, res) => {
-    const data = await service.receive(req.body, Number(req.user!.id));
+    const data = await service.receive(req.body, Number(req.user!.id), req.user);
     // Receipt writes have committed. A reporting-cache failure must not turn a
     // successful receipt into an error that encourages duplicate resubmission.
     try {

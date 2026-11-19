@@ -10,9 +10,11 @@ jest.mock("../../../app/modules/order/order.model", () => ({
   findOne: (...args: unknown[]) => mockOrderFindByPk(...args),
 }));
 const mockNotifyShipments = jest.fn();
+const mockNotifySchedule = jest.fn();
 jest.mock("../shipments/shipment.notifications", () => ({
   ...jest.requireActual("../shipments/shipment.notifications"),
   notifyShipmentStatusChanges: (...args: unknown[]) => mockNotifyShipments(...args),
+  notifyShipmentScheduleStatusChanges: (...args: unknown[]) => mockNotifySchedule(...args),
 }));
 jest.mock("../shipments/inventory.movements", () => ({ applyOrderLinesToInventory: jest.fn() }));
 jest.mock("../../../app/modules/logs/log.model", () => ({ bulkCreate: (...args: unknown[]) => mockLogBulkCreate(...args) }));
@@ -44,6 +46,7 @@ beforeEach(() => {
   mockOrderFindAll.mockReset();
   mockLogBulkCreate.mockReset();
   mockNotifyShipments.mockReset();
+  mockNotifySchedule.mockReset();
   jest.spyOn(OrderService, "sendNotification").mockResolvedValue(undefined);
 });
 
@@ -61,8 +64,11 @@ describe("OrderService.updateOrder status sync", () => {
     [{ confirmationStatus: 2 }, { status: 10, shipmentStatus: 14, confirmationStatus: 9, manufactureStatus: 3 }, { confirmationStatus: 2, status: 3, shipmentStatus: 1 }],
     // going back to "no answer" / pending / call back later reopens a cancelled order to pending (1) with a pending shipment
     [{ confirmationStatus: 4 }, { status: 9, shipmentStatus: 13, confirmationStatus: 7 }, { confirmationStatus: 4, status: 1, shipmentStatus: 1 }],
-    // ... and never regresses a confirmed/in-progress/delivered order
-    [{ confirmationStatus: 4 }, { status: 3, shipmentStatus: 1, confirmationStatus: 2 }, { confirmationStatus: 4 }],
+    // ... a confirmed order goes back to pending (undoes the confirmation promotion), shipment untouched
+    [{ confirmationStatus: 4 }, { status: 3, shipmentStatus: 1, confirmationStatus: 2 }, { confirmationStatus: 4, status: 1 }],
+    [{ confirmationStatus: 1 }, { status: 3, shipmentStatus: 1, confirmationStatus: 2 }, { confirmationStatus: 1, status: 1 }],
+    // ... but never regresses an in-progress/delivered order
+    [{ confirmationStatus: 1 }, { status: 2, shipmentStatus: 3, confirmationStatus: 2 }, { confirmationStatus: 1 }],
     [{ confirmationStatus: 6 }, { status: 5, shipmentStatus: 4, confirmationStatus: 7 }, { confirmationStatus: 6 }],
     // ... but never a delivered order
     [{ confirmationStatus: 2 }, { status: 5, shipmentStatus: 4, confirmationStatus: 7 }, { confirmationStatus: 2 }],
@@ -77,6 +83,34 @@ describe("OrderService.updateOrder status sync", () => {
     expect(written).toEqual(expect.objectContaining(expected));
     expect(Object.keys(written).filter((key) => ["status", "shipmentStatus", "confirmationStatus"].includes(key)).sort())
       .toEqual(Object.keys(expected).sort());
+  });
+
+  it("notifies a schedule-status change made through the legacy single edit, once, with the actor", async () => {
+    const order = makeOrder(1, { status: 2, shipmentStatus: 3, scheduleStatus: 1 });
+    mockOrderFindByPk.mockResolvedValue(order);
+    await OrderService.updateOrder(1, { scheduleStatus: 4 }, user);
+    expect(mockNotifySchedule).toHaveBeenCalledWith([{ fromScheduleStatus: 1, orderId: 1, toScheduleStatus: 4 }], 9);
+    expect(mockNotifyShipments).not.toHaveBeenCalled();
+  });
+
+  it("does not send the schedule-status notification when the order status changed in the same edit", async () => {
+    const order = makeOrder(1, { status: 1, shipmentStatus: 1, scheduleStatus: 1, confirmationStatus: 1 });
+    mockOrderFindByPk.mockResolvedValue(order);
+    await OrderService.updateOrder(1, { scheduleStatus: 4, status: 3 }, user);
+    expect(mockNotifySchedule).not.toHaveBeenCalled();
+  });
+
+  it("legacy bulk edit sends ONE aggregated schedule-status call for the orders that really changed", async () => {
+    const a = makeOrder(1, { status: 2, shipmentStatus: 3, scheduleStatus: 1 });
+    const b = makeOrder(2, { status: 2, shipmentStatus: 3, scheduleStatus: 4 });
+    const c = makeOrder(3, { status: 2, shipmentStatus: 3, scheduleStatus: null });
+    mockOrderFindAll.mockResolvedValue([a, b, c]);
+    await OrderService.BulkUpdate({ orderIds: [1, 2, 3], orderData: { scheduleStatus: 4 } }, user);
+    expect(mockNotifySchedule).toHaveBeenCalledTimes(1);
+    expect(mockNotifySchedule).toHaveBeenCalledWith([
+      { fromScheduleStatus: 1, orderId: 1, toScheduleStatus: 4 },
+      { fromScheduleStatus: null, orderId: 3, toScheduleStatus: 4 },
+    ], 9);
   });
 
   it("logs each derived field as an automatic change naming its source field", async () => {
@@ -143,6 +177,14 @@ describe("OrderService.BulkUpdate status sync", () => {
     expect(cancelled2.update).toHaveBeenCalledWith(expect.objectContaining({ status: 1, shipmentStatus: 1 }));
     expect(inProgress.update.mock.calls[0]![0].status).toBeUndefined();
     expect(inProgress.update.mock.calls[0]![0].shipmentStatus).toBeUndefined();
+
+    // bulk "pending" sends confirmed orders back to pending, leaves in-progress alone
+    const confirmed = makeOrder(21, { status: 3, shipmentStatus: 1, confirmationStatus: 2 });
+    const inProgress2 = makeOrder(22, { status: 2, shipmentStatus: 3, confirmationStatus: 2 });
+    mockOrderFindAll.mockResolvedValue([confirmed, inProgress2]);
+    await OrderService.BulkUpdate({ orderIds: [21, 22], orderData: { confirmationStatus: 1 } }, user);
+    expect(confirmed.update).toHaveBeenCalledWith(expect.objectContaining({ status: 1 }));
+    expect(inProgress2.update.mock.calls[0]![0].status).toBeUndefined();
 
     const explicit = makeOrder(3, { status: 2, manufactureStatus: 2 });
     mockOrderFindAll.mockResolvedValue([explicit]);

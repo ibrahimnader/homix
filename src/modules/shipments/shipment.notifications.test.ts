@@ -8,7 +8,9 @@ jest.mock("../notification/notification.publisher", () => ({
 
 import {
   buildShipmentStatusText,
+  buildShipmentScheduleStatusText,
   notifyShipmentScheduled,
+  notifyShipmentScheduleStatusChanges,
   notifyShipmentStatusChanges,
   shouldNotifyShipmentStatusChange,
 } from "./shipment.notifications";
@@ -108,6 +110,81 @@ describe("notifyShipmentScheduled", () => {
 
   it("ignores an invalid date", async () => {
     await notifyShipmentScheduled(1, "not-a-date", 99);
+    expect(mockPublish).not.toHaveBeenCalled();
+  });
+});
+
+describe("notifyShipmentScheduleStatusChanges", () => {
+  it("notifies the audience except the actor with the Arabic schedule-status label", async () => {
+    mockAudience.mockResolvedValue(audience({ 5: [1], 6: [1], 99: [1] }));
+
+    await notifyShipmentScheduleStatusChanges([{ fromScheduleStatus: 1, orderId: 1, toScheduleStatus: 3 }], 99);
+
+    const text = publishedRows()[0]!.text;
+    expect(text).toMatch(/^تم تغيير حالة جدولة الشحنة #SH12273 إلى .+/);
+    expect(publishedRows()).toEqual([
+      { entityId: 1, entityType: "shipment", text, userId: 5 },
+      { entityId: 1, entityType: "shipment", text, userId: 6 },
+    ]);
+  });
+
+  it("uses the 'no answer, first attempt' label for that status", () => {
+    const { SHIPMENT_SCHEDULE_STATUS_LABELS } = jest.requireActual("./shipment.constants");
+    const id = Object.keys(SHIPMENT_SCHEDULE_STATUS_LABELS).find((key) => SHIPMENT_SCHEDULE_STATUS_LABELS[key].includes("أولى"));
+    expect(id).toBeDefined();
+    expect(buildShipmentScheduleStatusText([{ orderId: 1, toScheduleStatus: Number(id) }], new Map([[1, "12273"]])))
+      .toBe(`تم تغيير حالة جدولة الشحنة #SH12273 إلى ${SHIPMENT_SCHEDULE_STATUS_LABELS[id!]}`);
+  });
+
+  it("says the status was cancelled when it is cleared", async () => {
+    mockAudience.mockResolvedValue(audience({ 5: [1] }));
+    await notifyShipmentScheduleStatusChanges([{ fromScheduleStatus: 3, orderId: 1, toScheduleStatus: null }], 99);
+    expect(publishedRows()).toEqual([
+      { entityId: 1, entityType: "shipment", text: "تم إلغاء حالة جدولة الشحنة #SH12273", userId: 5 },
+    ]);
+  });
+
+  it("mentions the date when the date changed in the same edit", () => {
+    expect(buildShipmentScheduleStatusText(
+      [{ orderId: 1, scheduledDeliveryDate: "2026-12-01T10:00:00.000Z", toScheduleStatus: 1 }],
+      new Map([[1, "12273"]]),
+    )).toMatch(/^تم تغيير حالة جدولة الشحنة #SH12273 إلى .+ بتاريخ 2026-12-01$/);
+  });
+
+  it("aggregates a bulk change per recipient, scoped to what each can see", async () => {
+    mockAudience.mockResolvedValue(audience({ 5: [1, 2, 3], 7: [2] }));
+
+    await notifyShipmentScheduleStatusChanges([
+      { fromScheduleStatus: 1, orderId: 1, toScheduleStatus: 3 },
+      { fromScheduleStatus: 1, orderId: 2, toScheduleStatus: 3 },
+      { fromScheduleStatus: null, orderId: 3, toScheduleStatus: 3 },
+    ], 99);
+
+    const rows = publishedRows();
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.userId === 5)).toMatchObject({ entityId: 1, text: expect.stringMatching(/^تم تغيير حالة جدولة 3 شحنة إلى /) });
+    expect(rows.find((row) => row.userId === 7)).toMatchObject({ entityId: 2, text: expect.stringContaining("#SH12274") });
+  });
+
+  it("generic text when targets differ, cleared aggregate text when all cleared", () => {
+    expect(buildShipmentScheduleStatusText([{ orderId: 1, toScheduleStatus: 3 }, { orderId: 2, toScheduleStatus: 1 }], new Map()))
+      .toBe("تم تغيير حالة جدولة 2 شحنة");
+    expect(buildShipmentScheduleStatusText([{ orderId: 1, toScheduleStatus: null }, { orderId: 2, toScheduleStatus: null }], new Map()))
+      .toBe("تم إلغاء حالة جدولة 2 شحنة");
+  });
+
+  it("drops unchanged rows (null/0 equal) and publishes nothing when none is left", async () => {
+    await notifyShipmentScheduleStatusChanges([
+      { fromScheduleStatus: 3, orderId: 1, toScheduleStatus: 3 },
+      { fromScheduleStatus: null, orderId: 2, toScheduleStatus: null },
+    ], 99);
+    expect(mockAudience).not.toHaveBeenCalled();
+    expect(mockPublish).not.toHaveBeenCalled();
+  });
+
+  it("never throws when resolving the audience fails", async () => {
+    mockAudience.mockRejectedValue(new Error("db down"));
+    await expect(notifyShipmentScheduleStatusChanges([{ orderId: 1, toScheduleStatus: 3 }], 99)).resolves.toBeUndefined();
     expect(mockPublish).not.toHaveBeenCalled();
   });
 });

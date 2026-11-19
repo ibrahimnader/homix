@@ -174,7 +174,7 @@ POST   /:id/lines/:lineId/action
 POST   /:id/receipt              GET /:id/receipt        DELETE /:id/receipt
 ```
 
-## Amounts: formulas and the two meanings of "company due"
+## Amounts: formulas and "company due" (المستحق لهوميكس)
 
 Per order (the live report `getFinancialReport` is the single source; invoice lines are snapshots of it):
 
@@ -183,10 +183,9 @@ Per order (the live report `getFinancialReport` is the single source; invoice li
 | Homix delivered (`deliveryBy` = Homix, delivered or not yet) | `max(0, cost − fines)` | `collection − cost` (not clamped) | `margin` |
 | Vendor delivered | `max(max(cost + vendorShipping − toBeCollected, 0) − fines, 0)` | `max(toBeCollected − cost − vendorShipping, 0)` | `vendorOwes` |
 
-- `margin` = **هامش هوميكس**: what Homix keeps from warehouse deliveries (collection = vendor due + fines kept + margin). The vendor owes nothing.
-- `vendorOwes` = **مستحق على الصانع**: a debt the vendor pays Homix on vendor deliveries.
-- The two are never netted against each other and **company due never enters the invoice net**: `net = Σ vendorDue (effective) + adjustments (addition +, deduction −)`; due party = vendor when `net >= 0`, otherwise Homix with the absolute value. There is no combined total («الإجمالي الكلي» was removed: it subtracted fines twice and mixed unrelated things).
-- Report API: each order has `companyDueKind`; each vendor row and section summary keeps `companyDue` (total, backward compatible) and adds `homixMargin` and `vendorOwes`; top `summary` has the same two. The Excel export has the columns «هامش هوميكس» and «مستحق على الصانع» instead of one company-due column.
+- The UI and the Excel export show **one** column, «المستحق لهوميكس» (`companyDue`): what Homix is entitled to — its margin on warehouse deliveries (collection − cost), or what the vendor owes Homix on vendor deliveries; both are amounts due to Homix, so one label fits. `companyDueKind` (`margin` / `vendorOwes`) and the `homixMargin` / `vendorOwes` API fields are kept for later use, but no label depends on them.
+- **Company due never enters the invoice net**: `net = Σ vendorDue (effective) + adjustments (addition +, deduction −)`; due party = vendor when `net >= 0`, otherwise Homix with the absolute value. There is no combined total («الإجمالي الكلي» was removed: it subtracted fines twice and mixed unrelated things).
+- Report API: each order has `companyDueKind`; each vendor row and section summary keeps `companyDue` (total, backward compatible) and adds `homixMargin` and `vendorOwes`; top `summary` has the same two. The Excel export (section sheets, totals row, summary sheet) has the single column «المستحق لهوميكس» = `companyDue`.
 - Invoice lines store the kind in `financial_invoice_lines."companyDueKind"` (nullable, CHECK in `margin`, `vendorOwes`), set at snapshot/refresh time; existing lines are backfilled idempotently from `orders."deliveryBy"` (Homix → `margin`, otherwise `vendorOwes`). A NULL kind is shown as `margin` for warehouse deliveries and `vendorOwes` otherwise.
 - Effective line values: `cost = warehouseCostOverride ?? snapshot`, `collection = collectionOverride ?? snapshot`, `vendorDue = vendorDueOverride ?? max(0, cost − fines)`, `companyDue = companyDueOverride ?? collection − cost` (overrides always win, whatever the kind; legacy snapshots keep their own fines-delta logic).
 - Vendors are never shown override values, original values or reasons.

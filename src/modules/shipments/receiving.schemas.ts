@@ -61,13 +61,22 @@ export const receivingReceivedFilterSchema = receivingListSchema.extend({
   dateFrom: isoDay.optional(),
   dateTo: isoDay.optional(),
 });
-/** Inline edits of an already received item (receipt notes / manufacture date). */
+export const MANUFACTURE_DATE_AUTOMATIC_MESSAGE =
+  "تاريخ التصنيع يُسجَّل تلقائيًا عند تحويل الطلب لقيد التصنيع ولا يُعدَّل يدويًا";
+
+/** Inline edits of an already received item (receipt notes / receipt date). The manufacture date is automatic and read-only. */
 export const receivingUpdateSchema = z
   .object({
     notes: z.string().trim().max(4000).optional(),
-    manufactureDate: isoDay.nullable().optional(),
+    receiptDate: isoDay.optional(),
+    manufactureDate: z
+      .unknown()
+      .refine((value) => value === undefined, MANUFACTURE_DATE_AUTOMATIC_MESSAGE),
   })
-  .refine((value) => value.notes !== undefined || value.manufactureDate !== undefined, "لا توجد تعديلات");
+  .refine(
+    (value) => value.notes !== undefined || value.receiptDate !== undefined || value.manufactureDate !== undefined,
+    "لا توجد تعديلات"
+  );
 export const receivingExportSchema = receivingReceivedFilterSchema.omit({ page: true });
 export const receivingDocumentParams = z.object({
   number: z.string().trim().min(1),

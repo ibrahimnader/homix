@@ -124,12 +124,15 @@ export const CONFIRMATION_CONFIRMED_RULE: StatusRule = {
 /**
  * Matrix 3a': confirmation 1 (pending), 3/4/5 (no answer, attempt 1/2/3) and 6 (call back later) ALSO reopen a
  * cancelled/rejected order: order 4 or 9..17 -> 1 (pending), and its shipment 5 or 13..21 -> 1 (only while the order is
- * cancelled/rejected). They never change an order that is pending, in progress, confirmed, delivered, returned,
- * replaced or in inventory (manufacturing/delivered work is never regressed), nor those orders' shipments.
+ * cancelled/rejected). They ALSO send a CONFIRMED order (3) back to pending (1), undoing the confirmation-driven
+ * promotion (confirm -> back to pending/no answer -> order pending again); the shipment of a confirmed order is not
+ * touched. They never change an order that is pending, in progress (2), delivered, returned, replaced or in
+ * inventory (manufacturing/delivered work is never regressed), nor those orders' shipments.
+ * No loop: this fires from a CONFIRMATION change only; order 3 -> confirmation 2 fires from an ORDER change only.
  * Explicit payload values still win and it is one hop, like every other rule.
  */
 export const CONFIRMATION_REOPEN_PENDING_RULE: StatusRule = {
-  status: { value: O.PENDING, onlyIfCurrentIn: CANCELED_ORDER_STATUS_VALUES },
+  status: { value: O.PENDING, onlyIfCurrentIn: [O.CONFIRMED, ...CANCELED_ORDER_STATUS_VALUES] },
   shipmentStatus: {
     value: S.PENDING,
     onlyIfCurrentIn: CANCELED_SHIPMENT_STATUS_VALUES,

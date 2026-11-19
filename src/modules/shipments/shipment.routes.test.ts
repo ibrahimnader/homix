@@ -86,7 +86,12 @@ const mockListManagedOptions = jest.fn(async (group: string) => group === "expen
 const mockReplaceManagedOptions = jest.fn(async (_group: string, options: Array<{ id?: number; label: string }>) =>
   options.map((option, index) => ({ id: option.id ?? index + 1, label: option.label })));
 
-jest.mock("./shipment.notifications");
+jest.mock("./shipment.notifications", () => ({
+  ...jest.requireActual("./shipment.notifications"),
+  notifyShipmentScheduleStatusChanges: jest.fn(),
+  notifyShipmentScheduled: jest.fn(),
+  notifyShipmentStatusChanges: jest.fn(),
+}));
 jest.mock("../../../app/middlewares/protectApi", () => {
   return (req: express.Request, _res: express.Response, next: express.NextFunction) => {
     req.user = mockAuthenticatedUser as never;
@@ -160,6 +165,7 @@ jest.mock("../settings/managed-options", () => ({
 
 import { errorMiddleware } from "../../shared/http";
 import { shipmentRouter } from "./shipment.routes";
+import { SHIPMENT_STATUS_LABELS } from "./shipment.constants";
 
 const noteModel = jest.requireMock("../../../app/modules/notes/notes.model") as {
   create: jest.Mock;
@@ -1066,7 +1072,7 @@ describe("shipmentRouter", () => {
       size: "200x300",
       sku: "RKA-002",
     }));
-    expect(response.body.data.timeline[0].message).toBe("تم استلام الطلب");
+    expect(response.body.data.timeline.map((item: { message: string }) => item.message)).not.toContain("تم استلام الطلب");
   });
 
   it("returns automated deliveryStatus in shipment details based on expectedDeliveryDate", async () => {
@@ -1086,9 +1092,9 @@ describe("shipmentRouter", () => {
       {
         action: "update",
         createdAt: "2026-07-20T01:00:00.000Z",
-        field: "paymentStatus",
+        field: "shipmentStatus",
         id: 501,
-        to: "1",
+        to: "2",
         userId: 1,
       },
       {
@@ -1104,10 +1110,30 @@ describe("shipmentRouter", () => {
     const response = await request(app).get("/shipments/9802");
 
     expect(response.status).toBe(200);
-    expect(response.body.data.timeline[0].message).toBe("تم تحديث حالة الدفع إلى الدفع عند الاستلام");
+    expect(response.body.data.timeline[0].message).toBe(`تم تحديث حالة الشحنة إلى ${SHIPMENT_STATUS_LABELS[2]}`);
     expect(response.body.data.timeline[0].userName).toBe("Ahmed Hesham");
     expect(response.body.data.timeline[1].message).toBe("تم تحديث الشحن من المخزون إلى نعم");
     expect(response.body.data.timeline[1].userName).toBe("Ahmed Hesham");
+  });
+
+  it("shows only shipment events in the timeline, in log order, hiding order events and auto_sync markers", async () => {
+    const row = (id: number, action: string, field: string, to: string, at: string) => ({
+      action, createdAt: at, field, id, to, userId: 1,
+    });
+    logModel.findAll.mockResolvedValueOnce([
+      row(1, "create", "order_received", "", "2026-07-20T01:00:00.000Z"),
+      row(2, "notify", "order_received_notification", "", "2026-07-20T01:01:00.000Z"),
+      row(3, "update", "confirmationStatus", "2", "2026-07-20T01:02:00.000Z"),
+      row(4, "update", "deliveryBy", "1", "2026-07-20T01:03:00.000Z"),
+      row(5, "update", "shipmentStatus", "2", "2026-07-20T01:04:00.000Z"),
+      row(6, "auto_sync", "autoSync", "shipmentStatus:1->2", "2026-07-20T01:04:00.000Z"),
+      row(7, "update", "status", "5", "2026-07-20T01:05:00.000Z"),
+    ]);
+
+    const response = await request(app).get("/shipments/9802");
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.timeline.map((item: { id: number }) => item.id)).toEqual([4, 5]);
   });
 
   it("returns vendor returns list", async () => {
@@ -1262,6 +1288,36 @@ describe("shipmentRouter", () => {
     records.forEach((record) => {
       expect(record.update).toHaveBeenCalledWith(expect.objectContaining({ shippingCompany: "J&T" }));
     });
+  });
+
+  it("notifies about a schedule-status change from the inline table editor (PUT /shipments/:id), with the actor", async () => {
+    const shipmentRecord = makeShipmentRecord({ id: 9802, scheduleStatus: 1, shipmentStatus: 3 });
+    orderModel.findByPk.mockResolvedValue(shipmentRecord);
+    const notifications = jest.requireMock("./shipment.notifications");
+
+    const response = await request(app).put("/shipments/9802").send({ scheduleStatus: 3 });
+
+    expect(response.status).toBe(200);
+    expect(notifications.notifyShipmentScheduleStatusChanges).toHaveBeenCalledWith(
+      [expect.objectContaining({ fromScheduleStatus: 1, orderId: 9802, toScheduleStatus: 3 })],
+      1,
+    );
+    expect(notifications.notifyShipmentStatusChanges).not.toHaveBeenCalled();
+  });
+
+  it("sends ONE aggregated schedule-status call for a bulk update (PUT /shipments/bulk-update)", async () => {
+    const records = [makeShipmentRecord({ id: 9802, scheduleStatus: 1 }), makeShipmentRecord({ id: 9803, scheduleStatus: 3 })];
+    orderModel.findByPk.mockImplementation(async (id: number) => records.find((r) => r.toJSON().id === id) ?? null);
+    const notifications = jest.requireMock("./shipment.notifications");
+
+    const response = await request(app).put("/shipments/bulk-update").send({ data: { scheduleStatus: 3 }, shipmentIds: [9802, 9803] });
+
+    expect(response.status).toBe(200);
+    expect(notifications.notifyShipmentScheduleStatusChanges).toHaveBeenCalledTimes(1);
+    expect(notifications.notifyShipmentScheduleStatusChanges).toHaveBeenCalledWith(
+      [expect.objectContaining({ orderId: 9802, toScheduleStatus: 3 })],
+      1,
+    );
   });
 
   it("bulk-clears the schedule status and shipping company with null", async () => {

@@ -118,15 +118,38 @@ describe("deriveStatusPatch: confirmation status as source", () => {
     it.each(CANCELLED_ORDERS)("order %i / shipment %i -> order 1 / shipment 1", (status, shipmentStatus) => {
       expect(derive({ status, shipmentStatus, confirmationStatus: 7 }, { confirmationStatus })).toEqual({ status: 1, shipmentStatus: 1 });
     });
-    it.each([1, 2, 3, 5, 6, 7, 8])("order %i (not cancelled) changes nothing", (status) => {
+    it.each([1, 2, 5, 6, 7, 8])("order %i (not cancelled/confirmed) changes nothing", (status) => {
       expect(derive({ status, shipmentStatus: 3, confirmationStatus: 7 }, { confirmationStatus })).toEqual({});
       // a stray cancelled shipment on a non-cancelled order is not touched either
       expect(derive({ status, shipmentStatus: 13, confirmationStatus: 7 }, { confirmationStatus })).toEqual({});
+    });
+    it("a confirmed order (3) goes back to pending (1); its shipment is untouched", () => {
+      expect(derive({ status: 3, shipmentStatus: 1, confirmationStatus: 2 }, { confirmationStatus })).toEqual({ status: 1 });
+      expect(derive({ status: 3, shipmentStatus: 13, confirmationStatus: 2 }, { confirmationStatus })).toEqual({ status: 1 });
+    });
+    it("an explicit order status in the payload wins over the confirmed -> pending revert", () => {
+      expect(derive({ status: 3, confirmationStatus: 2 }, { confirmationStatus, status: 2 })).toEqual({});
     });
     it("explicit order/shipment values in the payload win", () => {
       expect(derive({ status: 9, shipmentStatus: 13, confirmationStatus: 7 }, { confirmationStatus, status: 3 })).toEqual({ shipmentStatus: 1 });
       expect(derive({ status: 9, shipmentStatus: 13, confirmationStatus: 7 }, { confirmationStatus, shipmentStatus: 3 })).toEqual({ status: 1 });
     });
+  });
+  it("confirm -> pending -> confirm -> pending is stable and consistent", () => {
+    let row: Row = { status: 1, shipmentStatus: 1, confirmationStatus: 1 };
+    const step = (payload: Row) => { row = { ...row, ...payload, ...derive(row, payload) }; };
+    step({ confirmationStatus: 2 });
+    expect(row).toMatchObject({ status: 3, shipmentStatus: 1, confirmationStatus: 2 });
+    step({ confirmationStatus: 1 });
+    expect(row).toMatchObject({ status: 1, shipmentStatus: 1, confirmationStatus: 1 });
+    step({ confirmationStatus: 2 });
+    expect(row).toMatchObject({ status: 3, confirmationStatus: 2 });
+    step({ confirmationStatus: 4 });
+    expect(row).toMatchObject({ status: 1, confirmationStatus: 4 });
+  });
+  it("an explicit order change to 3 still confirms confirmation only from null/1/3..6 and does not fight the revert", () => {
+    expect(derive({ status: 1, confirmationStatus: 1 }, { status: 3 })).toEqual({ confirmationStatus: 2 });
+    expect(derive({ status: 3, confirmationStatus: 2 }, { confirmationStatus: 1 })).toEqual({ status: 1 });
   });
   it("cancel -> pending -> cancel -> confirm stays stable", () => {
     let row: Row = { status: 2, shipmentStatus: 3, confirmationStatus: 2, manufactureStatus: 3 };

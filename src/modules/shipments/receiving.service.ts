@@ -437,10 +437,11 @@ export class ReceivingService {
     });
   }
 
-  /** Edits receipt notes and/or the manufacture date (orders."PoDate") of a received item. */
+  /** Edits receipt notes and/or the receipt date (orders."shippingReceiveDate") of a received item.
+   * The manufacture date (orders."PoDate") is stamped automatically and is never written here. */
   async updateReceipt(
     orderId: number, input: z.infer<typeof receivingUpdateSchema>, userId: number,
-  ): Promise<{ orderId: number; warehouseReceiptNotes?: string | null; PoDate?: string | null }> {
+  ): Promise<{ orderId: number; warehouseReceiptNotes?: string | null; shippingReceiveDate?: string | null }> {
     return sequelize.transaction(async (transaction) => {
       const [order] = await select<{
         id: number; PoDate: string | null; shippingReceiveDate: string | null; warehouseReceiptNotes: string | null;
@@ -452,17 +453,20 @@ export class ReceivingService {
       if (!order) throw new NotFoundError("الصنف غير مستلم أو غير موجود");
       const changes: Record<string, string | null> = {};
       if (input.notes !== undefined) changes.warehouseReceiptNotes = input.notes;
-      if (input.manufactureDate !== undefined) {
-        if (input.manufactureDate && order.shippingReceiveDate) {
-          const received = moment(order.shippingReceiveDate).tz("Africa/Cairo").format("YYYY-MM-DD");
-          if (input.manufactureDate > received) throw new ValidationError("تاريخ التصنيع بعد تاريخ الاستلام");
+      if (input.receiptDate !== undefined) {
+        if (input.receiptDate > moment().tz("Africa/Cairo").format("YYYY-MM-DD")) {
+          throw new ValidationError("تاريخ الاستلام لا يمكن أن يكون في المستقبل");
         }
-        changes.PoDate = input.manufactureDate
-          ? moment.tz(input.manufactureDate, "YYYY-MM-DD", "Africa/Cairo").toISOString()
-          : null;
+        const manufactured = order.PoDate ? moment(order.PoDate).tz("Africa/Cairo").format("YYYY-MM-DD") : null;
+        if (manufactured && input.receiptDate < manufactured) {
+          throw new ValidationError("تاريخ الاستلام يسبق تاريخ التصنيع");
+        }
+        changes.shippingReceiveDate = moment.tz(input.receiptDate, "YYYY-MM-DD", "Africa/Cairo").toISOString();
       }
       const Log = require("../../../app/modules/logs/log.model");
-      const previous: Record<string, unknown> = { warehouseReceiptNotes: order.warehouseReceiptNotes, PoDate: order.PoDate };
+      const previous: Record<string, unknown> = {
+        warehouseReceiptNotes: order.warehouseReceiptNotes, shippingReceiveDate: order.shippingReceiveDate,
+      };
       await Log.bulkCreate(
         Object.entries(changes)
           .filter(([field, value]) => String(previous[field] ?? "") !== String(value ?? ""))
@@ -476,7 +480,7 @@ export class ReceivingService {
       await sequelize.query(`UPDATE orders SET ${sets}, "updatedAt" = NOW() WHERE id = :orderId`, {
         replacements: { ...changes, orderId }, transaction,
       });
-      return { orderId, ...changes } as { orderId: number; warehouseReceiptNotes?: string | null; PoDate?: string | null };
+      return { orderId, ...changes } as { orderId: number; warehouseReceiptNotes?: string | null; shippingReceiveDate?: string | null };
     });
   }
 

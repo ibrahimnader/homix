@@ -35,7 +35,13 @@ import { RETURN_TO_VENDOR_STATUS, SHIPMENT_RETURN_TYPE, SHIPMENT_STATUS } from "
 import { DELIVERY_BY } from "../../../config/constants";
 import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
 import type { DashboardMetricSnapshot } from "../dashboard/dashboard.types";
-import { notifyShipmentScheduled, notifyShipmentStatusChanges } from "./shipment.notifications";
+import {
+  hasScheduleStatusChanged,
+  notifyShipmentScheduled,
+  notifyShipmentScheduleStatusChanges,
+  notifyShipmentStatusChanges,
+} from "./shipment.notifications";
+import type { ShipmentScheduleStatusChange } from "./shipment.notifications";
 import type { ShipmentStatusChange } from "./shipment.notifications";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
@@ -483,9 +489,20 @@ export class ShipmentService {
           orderId: shipmentId,
           toStatus: Number(after.shipmentStatus),
         }], user.id);
-      } else if (after.scheduledDeliveryDate
-        && new Date(before.scheduledDeliveryDate as string).getTime() !== new Date(after.scheduledDeliveryDate as string).getTime()) {
-        await notifyShipmentScheduled(shipmentId, after.scheduledDeliveryDate, user.id);
+      } else {
+        const dateChanged = Boolean(after.scheduledDeliveryDate)
+          && new Date(before.scheduledDeliveryDate as string).getTime() !== new Date(after.scheduledDeliveryDate as string).getTime();
+        /* Priority: shipment status > schedule status (mentions the date when it changed too) > scheduled date. */
+        if (hasScheduleStatusChanged(before.scheduleStatus, after.scheduleStatus)) {
+          await notifyShipmentScheduleStatusChanges([{
+            fromScheduleStatus: Number(before.scheduleStatus ?? 0) || null,
+            orderId: shipmentId,
+            scheduledDeliveryDate: dateChanged ? after.scheduledDeliveryDate : undefined,
+            toScheduleStatus: Number(after.scheduleStatus ?? 0) || null,
+          }], user.id);
+        } else if (dateChanged) {
+          await notifyShipmentScheduled(shipmentId, after.scheduledDeliveryDate, user.id);
+        }
       }
     }
     return success(shipment);
@@ -501,9 +518,12 @@ export class ShipmentService {
       ? await Promise.all(shipmentIds.map((shipmentId) => this.shipmentRepository.findShipmentEntity(shipmentId)))
       : [];
     const beforeById = new Map<number, number | null>();
+    const scheduleBeforeById = new Map<number, number | null>();
     existingShipments.forEach((existing, index) => {
       if (existing) {
-        beforeById.set(shipmentIds[index]!, Number(toPlain(existing).shipmentStatus ?? 0) || null);
+        const plain = toPlain(existing);
+        beforeById.set(shipmentIds[index]!, Number(plain.shipmentStatus ?? 0) || null);
+        scheduleBeforeById.set(shipmentIds[index]!, Number(plain.scheduleStatus ?? 0) || null);
       }
     });
     const updatedCount = await this.shipmentRepository.bulkUpdateShipments(shipmentIds, payload, user.id);
@@ -512,14 +532,24 @@ export class ShipmentService {
        write, so derived status changes are included and rows that did not really change are dropped. */
     if (beforeById.size > 0 && typeof this.shipmentRepository.findShipmentEntity === "function") {
       const changes: ShipmentStatusChange[] = [];
+      const scheduleChanges: ShipmentScheduleStatusChange[] = [];
       for (const [shipmentId, fromStatus] of beforeById) {
         const after = await this.shipmentRepository.findShipmentEntity(shipmentId);
-        const toStatus = after ? Number(toPlain(after).shipmentStatus ?? 0) : 0;
+        const afterPlain = after ? toPlain(after) : null;
+        const toStatus = afterPlain ? Number(afterPlain.shipmentStatus ?? 0) : 0;
         if (toStatus > 0 && toStatus !== (fromStatus ?? 0)) {
           changes.push({ fromStatus, orderId: shipmentId, toStatus });
+        } else if (afterPlain && hasScheduleStatusChanged(scheduleBeforeById.get(shipmentId), afterPlain.scheduleStatus)) {
+          /* A shipment whose status changed is covered by the status notification (one per shipment). */
+          scheduleChanges.push({
+            fromScheduleStatus: scheduleBeforeById.get(shipmentId) ?? null,
+            orderId: shipmentId,
+            toScheduleStatus: Number(afterPlain.scheduleStatus ?? 0) || null,
+          });
         }
       }
       await notifyShipmentStatusChanges(changes, user.id);
+      await notifyShipmentScheduleStatusChanges(scheduleChanges, user.id);
     }
     return success({ message: "Shipments updated successfully", updatedCount });
   }

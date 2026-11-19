@@ -113,7 +113,7 @@ receivingRouter.post(
  * @swagger
  * /shipments/receipts/{orderId}:
  *   patch:
- *     summary: Edit receipt notes and/or manufacture date of a received item
+ *     summary: Edit receipt notes and/or receipt date of a received item
  *     tags: [Shipments]
  *     parameters:
  *       - { in: path, name: orderId, required: true, schema: { type: integer } }
@@ -124,7 +124,7 @@ receivingRouter.post(
  *             type: object
  *             properties:
  *               notes: { type: string, maxLength: 4000 }
- *               manufactureDate: { type: string, format: date, nullable: true, description: Cannot be after the receipt date }
+ *               receiptDate: { type: string, format: date, description: Not in the future (Cairo) and not before the manufacture date (orders.PoDate); manufactureDate is automatic and rejected with 400 }
  *     responses:
  *       200: { description: Updated }
  *       404: { description: Item not received or not found }

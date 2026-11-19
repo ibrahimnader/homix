@@ -606,7 +606,7 @@ describe("orderRouter", () => {
     expect(String(response.headers["content-disposition"])).toContain("financial-report.xlsx");
   });
 
-  it("the financial export splits company due into Homix margin and vendor-owes columns", async () => {
+  it("the financial export has a single «المستحق لهوميكس» column", async () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const ExcelJS = require("exceljs");
     const response = await request(app)
@@ -621,11 +621,15 @@ describe("orderRouter", () => {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(response.body);
     const headers = workbook.getWorksheet("full-invoice").getRow(1).values.filter(Boolean);
-    expect(headers).toEqual(expect.arrayContaining(["هامش هوميكس", "مستحق على الصانع", "سعر التكلفة"]));
+    expect(headers).toEqual(expect.arrayContaining(["المستحق لهوميكس", "سعر التكلفة"]));
     expect(headers).not.toContain("مستحق الشركة");
+    expect(headers).not.toContain("هامش هوميكس");
+    expect(headers).not.toContain("مستحق على الصانع");
     const summaryLabels = workbook.getWorksheet("summary").getColumn(1).values.filter(Boolean);
-    expect(summaryLabels).toEqual(expect.arrayContaining(["هامش هوميكس", "مستحق على الصانع"]));
+    expect(summaryLabels).toEqual(expect.arrayContaining(["المستحق لهوميكس"]));
     expect(summaryLabels).not.toContain("مستحق الشركة");
+    expect(summaryLabels).not.toContain("هامش هوميكس");
+    expect(summaryLabels).not.toContain("مستحق على الصانع");
   });
 
   it("applies orderSource filter to the orders query", async () => {

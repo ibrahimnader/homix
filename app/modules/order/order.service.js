@@ -61,6 +61,8 @@ const {
   buildAutoSyncLogRows,
 } = require("../../../src/modules/orders/order-status-sync");
 const {
+  hasScheduleStatusChanged,
+  notifyShipmentScheduleStatusChanges,
   notifyShipmentStatusChanges,
   shouldNotifyShipmentStatusChange,
 } = require("../../../src/modules/shipments/shipment.notifications");
@@ -1864,6 +1866,7 @@ class OrderService {
       status: order.status,
       shipmentStatus: order.shipmentStatus,
     };
+    const scheduleStatusBeforeUpdate = order.scheduleStatus;
     await order.update(orderData);
     await Log.bulkCreate(logs);
     /* Shipment notification only when the shipment status changed WITHOUT an order status change: an order
@@ -1877,6 +1880,18 @@ class OrderService {
         orderId,
         fromStatus: Number(statusesBeforeUpdate.shipmentStatus) || null,
         toStatus: Number(statusesAfterUpdate.shipmentStatus),
+      }], user.id);
+    } else if (
+      Object.prototype.hasOwnProperty.call(orderData, "scheduleStatus")
+      && Number(statusesAfterUpdate.status ?? 0) === Number(statusesBeforeUpdate.status ?? 0)
+      && Number(statusesAfterUpdate.shipmentStatus ?? 0) === Number(statusesBeforeUpdate.shipmentStatus ?? 0)
+      && hasScheduleStatusChanged(scheduleStatusBeforeUpdate, orderData.scheduleStatus)
+    ) {
+      /* Schedule status changed alone: status changes (order or shipment) already notified everyone. */
+      await notifyShipmentScheduleStatusChanges([{
+        orderId,
+        fromScheduleStatus: Number(scheduleStatusBeforeUpdate) || null,
+        toScheduleStatus: Number(orderData.scheduleStatus) || null,
       }], user.id);
     }
     const returnedOrder = await Order.findOne({
@@ -1940,6 +1955,7 @@ class OrderService {
     const { orderIds, orderData } = body;
     const logs = [];
     const shipmentStatusChanges = [];
+    const scheduleStatusChanges = [];
     const normalizedOrderIds = orderIds.map((id) => Number(id));
     let orders = [];
     Object.keys(orderData).forEach(
@@ -2138,6 +2154,7 @@ class OrderService {
       }
 
       const statusesBeforeUpdate = { status: order.status, shipmentStatus: order.shipmentStatus };
+      const scheduleStatusBeforeUpdate = order.scheduleStatus;
       await order.update(perOrderData);
       /* Same dedupe rule as the single update: orders whose status changed were already covered by the ORDER
          notification. The rest are aggregated into one shipment notification per recipient below. */
@@ -2150,11 +2167,25 @@ class OrderService {
           fromStatus: Number(statusesBeforeUpdate.shipmentStatus) || null,
           toStatus: Number(perOrderData.shipmentStatus),
         });
+      } else if (
+        Object.prototype.hasOwnProperty.call(perOrderData, "scheduleStatus")
+        && Number(perOrderData.status ?? statusesBeforeUpdate.status ?? 0) === Number(statusesBeforeUpdate.status ?? 0)
+        && Number(perOrderData.shipmentStatus ?? statusesBeforeUpdate.shipmentStatus ?? 0) === Number(statusesBeforeUpdate.shipmentStatus ?? 0)
+        && hasScheduleStatusChanged(scheduleStatusBeforeUpdate, perOrderData.scheduleStatus)
+      ) {
+        scheduleStatusChanges.push({
+          orderId: order.id,
+          fromScheduleStatus: Number(scheduleStatusBeforeUpdate) || null,
+          toScheduleStatus: Number(perOrderData.scheduleStatus) || null,
+        });
       }
     }
     await Log.bulkCreate(logs);
     if (shipmentStatusChanges.length > 0) {
       await notifyShipmentStatusChanges(shipmentStatusChanges, user.id);
+    }
+    if (scheduleStatusChanges.length > 0) {
+      await notifyShipmentScheduleStatusChanges(scheduleStatusChanges, user.id);
     }
 
     return {

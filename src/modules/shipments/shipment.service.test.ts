@@ -4,7 +4,10 @@ import { ShipmentService } from "./shipment.service";
 
 const mockStatusChanges = jest.fn();
 const mockScheduled = jest.fn();
+const mockScheduleStatus = jest.fn();
 jest.mock("./shipment.notifications", () => ({
+  ...jest.requireActual("./shipment.notifications"),
+  notifyShipmentScheduleStatusChanges: (...args: unknown[]) => mockScheduleStatus(...args),
   notifyShipmentScheduled: (...args: unknown[]) => mockScheduled(...args),
   notifyShipmentStatusChanges: (...args: unknown[]) => mockStatusChanges(...args),
 }));
@@ -255,6 +258,78 @@ describe("ShipmentService", () => {
 
       expect(mockStatusChanges).not.toHaveBeenCalled();
       expect(mockScheduled).toHaveBeenCalledWith(9802, "2026-12-05", 7);
+    });
+
+    it("notifies a schedule-status change (and mentions the date when it changed too), not the date notification", async () => {
+      const repository = {
+        findShipmentEntity: jest.fn().mockResolvedValue(entity(3, { scheduleStatus: 1, scheduledDeliveryDate: "2026-12-01" })),
+        updateShipment: jest.fn().mockResolvedValue(entity(3, { scheduleStatus: 4, scheduledDeliveryDate: "2026-12-05" })),
+      } as never;
+
+      await new ShipmentService(repository).updateShipment(9802, { scheduleStatus: 4, scheduledDeliveryDate: "2026-12-05" }, { id: 7 });
+
+      expect(mockScheduleStatus).toHaveBeenCalledWith([
+        { fromScheduleStatus: 1, orderId: 9802, scheduledDeliveryDate: "2026-12-05", toScheduleStatus: 4 },
+      ], 7);
+      expect(mockScheduled).not.toHaveBeenCalled();
+      expect(mockStatusChanges).not.toHaveBeenCalled();
+    });
+
+    it("notifies a cleared schedule status", async () => {
+      const repository = {
+        findShipmentEntity: jest.fn().mockResolvedValue(entity(3, { scheduleStatus: 4 })),
+        updateShipment: jest.fn().mockResolvedValue(entity(3, { scheduleStatus: null })),
+      } as never;
+
+      await new ShipmentService(repository).updateShipment(9802, { scheduleStatus: null }, { id: 7 });
+
+      expect(mockScheduleStatus).toHaveBeenCalledWith([expect.objectContaining({ orderId: 9802, toScheduleStatus: null })], 7);
+    });
+
+    it("status change wins: only the status notification when the schedule status changed in the same edit", async () => {
+      const repository = {
+        findShipmentEntity: jest.fn().mockResolvedValue(entity(3, { scheduleStatus: 1 })),
+        updateShipment: jest.fn().mockResolvedValue(entity(4, { scheduleStatus: 4 })),
+      } as never;
+
+      await new ShipmentService(repository).updateShipment(9802, { shipmentStatus: 4, scheduleStatus: 4 }, { id: 7 });
+
+      expect(mockStatusChanges).toHaveBeenCalledTimes(1);
+      expect(mockScheduleStatus).not.toHaveBeenCalled();
+    });
+
+    it("does not send a schedule-status notification when it is unchanged", async () => {
+      const repository = {
+        findShipmentEntity: jest.fn().mockResolvedValue(entity(3, { scheduleStatus: 4 })),
+        updateShipment: jest.fn().mockResolvedValue(entity(3, { scheduleStatus: 4 })),
+      } as never;
+
+      await new ShipmentService(repository).updateShipment(9802, { scheduleStatus: 4 }, { id: 7 });
+
+      expect(mockScheduleStatus).not.toHaveBeenCalled();
+    });
+
+    it("bulk: ONE aggregated schedule-status call, skipping rows unchanged or whose shipment status changed", async () => {
+      const before: Record<number, [number, number | null]> = { 1: [3, 1], 2: [3, 4], 3: [3, 1], 4: [3, 4] };
+      const after: Record<number, [number, number | null]> = { 1: [3, 4], 2: [3, 4], 3: [5, 4], 4: [3, null] };
+      const calls: Record<number, number> = {};
+      const repository = {
+        bulkUpdateShipments: jest.fn().mockResolvedValue(4),
+        findShipmentEntity: jest.fn().mockImplementation(async (id: number) => {
+          calls[id] = (calls[id] ?? 0) + 1;
+          const [shipmentStatus, scheduleStatus] = calls[id] === 1 ? before[id]! : after[id]!;
+          return entity(shipmentStatus, { scheduleStatus });
+        }),
+      } as never;
+
+      await new ShipmentService(repository).bulkUpdateShipments([1, 2, 3, 4], { scheduleStatus: 4 }, { id: 7 });
+
+      expect(mockScheduleStatus).toHaveBeenCalledTimes(1);
+      expect(mockScheduleStatus).toHaveBeenCalledWith([
+        { fromScheduleStatus: 1, orderId: 1, toScheduleStatus: 4 },
+        { fromScheduleStatus: 4, orderId: 4, toScheduleStatus: null },
+      ], 7);
+      expect(mockStatusChanges).toHaveBeenCalledWith([{ fromStatus: 3, orderId: 3, toStatus: 5 }], 7);
     });
 
     it("sends ONE aggregated call for a bulk update, only for rows whose status really changed", async () => {

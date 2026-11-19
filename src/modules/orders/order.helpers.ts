@@ -209,6 +209,9 @@ const FIELD_LABELS: Record<string, string> = {
   totalPrice: "سعر البيع",
   userId: "المسؤول",
   vendorId: "البائع",
+  warehouseReceiptNotes: "ملاحظات الاستلام",
+  warehouseReceivedBy: "مستلم المخزن",
+  warehouseSenderName: "اسم المسلّم",
 };
 
 type LogMessageContext = {

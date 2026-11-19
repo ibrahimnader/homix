@@ -378,16 +378,33 @@ describe("updateReceipt", () => {
     expect(update[0]).toContain(`"warehouseReceiptNotes" = :warehouseReceiptNotes`);
     expect(update[0]).not.toContain("PoDate");
   });
-  it("rejects a manufacture date after the receipt date and writes nothing", async () => {
-    await expect(new ReceivingService().updateReceipt(10, { manufactureDate: "2026-10-05" }, 7)).rejects.toThrow("تاريخ التصنيع");
+  it("rejects a receipt date in the future and writes nothing", async () => {
+    await expect(new ReceivingService().updateReceipt(10, { receiptDate: "2999-01-01" }, 7)).rejects.toThrow("في المستقبل");
     expect(db.mock.calls.some(([sql]) => sql.startsWith("UPDATE orders"))).toBe(false);
   });
-  it("sets and clears the manufacture date", async () => {
-    await new ReceivingService().updateReceipt(10, { manufactureDate: "2026-09-25" }, 7);
-    expect(db.mock.calls.find(([sql]) => sql.startsWith("UPDATE orders"))![0]).toContain(`"PoDate" = :PoDate`);
-    db.mockClear();
-    const out = await new ReceivingService().updateReceipt(10, { manufactureDate: null }, 7);
-    expect(out.PoDate).toBeNull();
+  it("rejects a receipt date before the manufacture date (Cairo day) and writes nothing", async () => {
+    await expect(new ReceivingService().updateReceipt(10, { receiptDate: "2026-09-20" }, 7)).rejects.toThrow("يسبق تاريخ التصنيع");
+    expect(db.mock.calls.some(([sql]) => sql.startsWith("UPDATE orders"))).toBe(false);
+  });
+  it("accepts the manufacture day itself as the receipt date", async () => {
+    const out = await new ReceivingService().updateReceipt(10, { receiptDate: "2026-09-21" }, 7);
+    expect(out.shippingReceiveDate).toBe("2026-09-20T21:00:00.000Z");
+  });
+  it("sets the receipt date as Cairo midnight, logs it, and never touches PoDate", async () => {
+    const out = await new ReceivingService().updateReceipt(10, { receiptDate: "2026-09-25" }, 7);
+    expect(out).toEqual({ orderId: 10, shippingReceiveDate: "2026-09-24T21:00:00.000Z" });
+    expect(Log.bulkCreate).toHaveBeenCalledWith(
+      [expect.objectContaining({ field: "shippingReceiveDate", from: "2026-09-30T00:00:00Z", to: "2026-09-24T21:00:00.000Z", userId: 7 })],
+      { transaction }
+    );
+    const update = db.mock.calls.find(([sql]) => sql.startsWith("UPDATE orders"))!;
+    expect(update[0]).toContain(`"shippingReceiveDate" = :shippingReceiveDate`);
+    expect(update[0]).not.toContain("PoDate");
+  });
+  it("allows any past receipt date when the order has no manufacture date", async () => {
+    db.mockImplementation(async (sql: string) => (sql.includes("FOR UPDATE") ? [{ ...row, PoDate: null }] : []));
+    const out = await new ReceivingService().updateReceipt(10, { receiptDate: "2020-01-01" }, 7);
+    expect(out.shippingReceiveDate).toBe("2019-12-31T22:00:00.000Z");
   });
   it("404s for an item that is not received", async () => {
     db.mockResolvedValue([]);

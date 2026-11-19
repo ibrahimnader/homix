@@ -4,6 +4,7 @@ import { sequelize } from "../../infrastructure/database";
 import { ConflictError, NotFoundError } from "../../shared/errors";
 import { shipmentCustomerEditSchema } from "./shipment.schemas";
 import { buildLogMessage } from "../orders/order.helpers";
+import { isShipmentTimelineLog } from "./shipment.timeline";
 import {
   getManagedOptionLabels,
   listManagedOptions,
@@ -698,8 +699,7 @@ const mapTimeline = (
   vendorNamesById: Record<string, string> = {},
   shippingCompanyNamesById: Record<string, string> = {},
 ) =>
-  logs.map((logValue) => {
-    const log = toPlain(logValue);
+  logs.map((logValue) => toPlain(logValue)).filter(isShipmentTimelineLog).map((log) => {
     const userName = userNamesById[String(toNumber(log.userId))] ?? "";
     return {
       changedAt: toIsoString(log.createdAt) ?? "",

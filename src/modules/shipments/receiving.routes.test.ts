@@ -1,5 +1,6 @@
 import express from "express";
 import request from "supertest";
+import { receivingUpdateSchema } from "./receiving.schemas";
 import { receivingRouter } from "./receiving.routes";
 
 jest.mock("./receiving.service", () => ({
@@ -88,7 +89,17 @@ test("receipt edit needs ship_edit and validates its body", async () => {
   expect((await request(view).patch("/receipts/5").send({ notes: "x" })).status).toBe(403);
   const edit = appFor({ ship_receipts_view: true, ship_edit: true });
   expect((await request(edit).patch("/receipts/5").send({})).status).toBe(400);
-  expect((await request(edit).patch("/receipts/5").send({ manufactureDate: "31-12-2026" })).status).toBe(400);
+  expect((await request(edit).patch("/receipts/5").send({ receiptDate: "31-12-2026" })).status).toBe(400);
+  const manual = await request(edit).patch("/receipts/5").send({ manufactureDate: "2026-09-01" });
+  expect(manual.status).toBe(400);
+  const parsed = receivingUpdateSchema.safeParse({ manufactureDate: "2026-09-01" });
+  expect(!parsed.success && parsed.error.issues.map((issue) => issue.message)).toContain(
+    "تاريخ التصنيع يُسجَّل تلقائيًا عند تحويل الطلب لقيد التصنيع ولا يُعدَّل يدويًا"
+  );
+  expect((await request(edit).patch("/receipts/5").send({ notes: "x", manufactureDate: null })).status).toBe(400);
+  const dated = await request(edit).patch("/receipts/5").send({ receiptDate: "2026-09-25" });
+  expect(dated.status).toBe(200);
+  expect(dated.body.data).toEqual({ orderId: 5, receiptDate: "2026-09-25" });
   const ok = await request(edit).patch("/receipts/5").send({ notes: "تمام" });
   expect(ok.status).toBe(200);
   expect(ok.body.data).toEqual({ orderId: 5, notes: "تمام" });

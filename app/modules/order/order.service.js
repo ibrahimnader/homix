@@ -58,6 +58,7 @@ const CUSTOM_PREFIX = "CU";
 const { resolveExpectedDeliveryDate } = require("../../../src/modules/orders/order-fines");
 const {
   deriveStatusPatch,
+  shouldStampPoDate,
   buildAutoSyncLogRows,
 } = require("../../../src/modules/orders/order-status-sync");
 const {
@@ -1777,11 +1778,12 @@ class OrderService {
     const statusSync = deriveStatusPatch(order, orderData);
     Object.assign(orderData, statusSync.patch);
     logs.push(...buildAutoSyncLogRows(order.id, statusSync.derived, user.id));
+    /* «قيد التصنيع» from either field (order status 2 OR manufactureStatus 2): stamp PoDate on the transition only. */
+    if (shouldStampPoDate(order, orderData, statusSync.patch)) {
+      orderData.PoDate = new Date();
+    }
     if (orderData.status) {
       if (Number(order.status) !== Number(orderData.status)) {
-        if (orderData.status == ORDER_STATUS.IN_PROGRESS) {
-          orderData.PoDate = new Date();
-        }
         if (
           Number(orderData.status) === ORDER_STATUS.DELIVERED &&
           !orderData.deliveryDate &&
@@ -1806,7 +1808,11 @@ class OrderService {
         );
       }
     }
-    if (orderData.manufactureStatus) {
+    /* A manufacture stage derived from another status is announced only when the order status did not also change in this
+       edit (that edit already sends the order notification); an explicit manufacture change always notifies, as before. */
+    const manufactureIsDerived = statusSync.patch.manufactureStatus !== undefined;
+    const orderStatusAlsoChanged = Boolean(orderData.status) && Number(order.status) !== Number(orderData.status);
+    if (orderData.manufactureStatus && !(manufactureIsDerived && orderStatusAlsoChanged)) {
       if (
         Number(order.manufactureStatus) !== Number(orderData.manufactureStatus)
       ) {
@@ -2104,11 +2110,7 @@ class OrderService {
       /* Same rule as the single-order update: the manufacturing date records the
          moment an order entered «قيد التصنيع», so it is written only on the
          transition — never re-stamped on an order already in that status. */
-      if (
-        perOrderData.status
-        && Number(perOrderData.status) === Number(ORDER_STATUS.IN_PROGRESS)
-        && Number(order.status) !== Number(ORDER_STATUS.IN_PROGRESS)
-      ) {
+      if (shouldStampPoDate(order, orderData, statusSync.patch)) {
         perOrderData.PoDate = new Date();
       }
       const hasFinancialEdit = [

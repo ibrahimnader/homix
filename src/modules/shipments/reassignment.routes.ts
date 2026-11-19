@@ -39,7 +39,7 @@ const logQuery = z.object({
   dateTo: day.optional(),
 });
 
-type OrderRow = { id: number; status: number; shipmentStatus: number | null; confirmationStatus: number | null; manufactureStatus: number | null };
+type OrderRow = { id: number; status: number; shipmentStatus: number | null; confirmationStatus: number | null; manufactureStatus: number | null; scheduleStatus: number | null };
 type LineRow = { orderId: number; productId: number; sku: string | null; quantity: number };
 
 export const reassignmentRouter = express.Router();
@@ -181,7 +181,7 @@ reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ b
     }
     if (targetOrderId === input.sourceOrderId) throw new ValidationError("اختر طلبًا مختلفًا");
     const orders = await sequelize.query<OrderRow>(`
-      SELECT id, status, "shipmentStatus", "confirmationStatus", "manufactureStatus" FROM orders
+      SELECT id, status, "shipmentStatus", "confirmationStatus", "manufactureStatus", "scheduleStatus" FROM orders
       WHERE id IN (:ids) AND "deletedAt" IS NULL ORDER BY id FOR UPDATE
     `, { replacements: { ids: [input.sourceOrderId, targetOrderId] }, transaction, type: QueryTypes.SELECT });
     if (orders.length !== 2) throw new NotFoundError("Source or target order not found");
@@ -214,8 +214,10 @@ reassignmentRouter.post("/", requirePermission("ship_edit"), validateRequest({ b
     const applyStatuses = async (row: OrderRow, status: number, shipmentStatus: number) => {
       const { patch, derived } = deriveStatusPatch(row as unknown as Record<string, unknown>, { status, shipmentStatus });
       const confirmationStatus = patch.confirmationStatus ?? row.confirmationStatus;
-      await sequelize.query(`UPDATE orders SET status = :status, "shipmentStatus" = :shipmentStatus, "confirmationStatus" = :confirmationStatus, "updatedAt" = NOW() WHERE id = :id`, {
-        replacements: { id: row.id, status, shipmentStatus, confirmationStatus }, transaction,
+      const manufactureStatus = patch.manufactureStatus ?? row.manufactureStatus;
+      const scheduleStatus = patch.scheduleStatus ?? row.scheduleStatus;
+      await sequelize.query(`UPDATE orders SET status = :status, "shipmentStatus" = :shipmentStatus, "confirmationStatus" = :confirmationStatus, "manufactureStatus" = :manufactureStatus, "scheduleStatus" = :scheduleStatus, "updatedAt" = NOW() WHERE id = :id`, {
+        replacements: { id: row.id, status, shipmentStatus, confirmationStatus, manufactureStatus, scheduleStatus }, transaction,
       });
       statusChanges.push({ fromStatus: row.shipmentStatus, orderId: row.id, toStatus: shipmentStatus });
       if (derived.length > 0) {

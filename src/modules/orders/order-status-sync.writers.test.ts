@@ -88,8 +88,8 @@ describe("OrderService.updateOrder status sync", () => {
   it("notifies a schedule-status change made through the legacy single edit, once, with the actor", async () => {
     const order = makeOrder(1, { status: 2, shipmentStatus: 3, scheduleStatus: 1 });
     mockOrderFindByPk.mockResolvedValue(order);
-    await OrderService.updateOrder(1, { scheduleStatus: 4 }, user);
-    expect(mockNotifySchedule).toHaveBeenCalledWith([{ fromScheduleStatus: 1, orderId: 1, toScheduleStatus: 4 }], 9);
+    await OrderService.updateOrder(1, { scheduleStatus: 3 }, user);
+    expect(mockNotifySchedule).toHaveBeenCalledWith([{ fromScheduleStatus: 1, orderId: 1, toScheduleStatus: 3 }], 9);
     expect(mockNotifyShipments).not.toHaveBeenCalled();
   });
 
@@ -102,14 +102,14 @@ describe("OrderService.updateOrder status sync", () => {
 
   it("legacy bulk edit sends ONE aggregated schedule-status call for the orders that really changed", async () => {
     const a = makeOrder(1, { status: 2, shipmentStatus: 3, scheduleStatus: 1 });
-    const b = makeOrder(2, { status: 2, shipmentStatus: 3, scheduleStatus: 4 });
+    const b = makeOrder(2, { status: 2, shipmentStatus: 3, scheduleStatus: 3 });
     const c = makeOrder(3, { status: 2, shipmentStatus: 3, scheduleStatus: null });
     mockOrderFindAll.mockResolvedValue([a, b, c]);
-    await OrderService.BulkUpdate({ orderIds: [1, 2, 3], orderData: { scheduleStatus: 4 } }, user);
+    await OrderService.BulkUpdate({ orderIds: [1, 2, 3], orderData: { scheduleStatus: 3 } }, user);
     expect(mockNotifySchedule).toHaveBeenCalledTimes(1);
     expect(mockNotifySchedule).toHaveBeenCalledWith([
-      { fromScheduleStatus: 1, orderId: 1, toScheduleStatus: 4 },
-      { fromScheduleStatus: null, orderId: 3, toScheduleStatus: 4 },
+      { fromScheduleStatus: 1, orderId: 1, toScheduleStatus: 3 },
+      { fromScheduleStatus: null, orderId: 3, toScheduleStatus: 3 },
     ], 9);
   });
 
@@ -147,7 +147,8 @@ describe("OrderService.BulkUpdate status sync", () => {
     expect(delivered.update).toHaveBeenCalledWith(expect.objectContaining({ status: 15, shipmentStatus: 19, confirmationStatus: 8 }));
     const markers = mockLogBulkCreate.mock.calls[0]![0].filter((row: { action: string }) => row.action === "auto_sync");
     expect(markers.map((row: { entityId: number; to: string }) => `${row.entityId}:${row.to}`).sort()).toEqual([
-      "1:confirmationStatus:1->8", "1:shipmentStatus:1->19", "2:confirmationStatus:2->8", "2:shipmentStatus:4->19",
+      "1:confirmationStatus:1->8", "1:manufactureStatus:->14", "1:shipmentStatus:1->19",
+      "2:confirmationStatus:2->8", "2:manufactureStatus:->14", "2:shipmentStatus:4->19",
     ]);
   });
 
@@ -200,7 +201,9 @@ describe("shipment notifications from the legacy order writers (dedupe against t
 
     await OrderService.updateOrder(1, { shipmentStatus: 3 }, user);
 
-    expect(OrderService.sendNotification).not.toHaveBeenCalled();
+    /* shipment 3 also derives manufacture 3: that derived stage is announced as a manufacture change (never as an order change). */
+    expect(OrderService.sendNotification).toHaveBeenCalledTimes(1);
+    expect(OrderService.sendNotification).toHaveBeenCalledWith(1, "ON-1", expect.objectContaining({ type: "orderUpdateManufactureStatus", newStatus: 3 }), false, false, true);
     expect(mockNotifyShipments).toHaveBeenCalledTimes(1);
     expect(mockNotifyShipments).toHaveBeenCalledWith([{ fromStatus: 1, orderId: 1, toStatus: 3 }], 9);
   });
@@ -243,5 +246,70 @@ describe("shipment notifications from the legacy order writers (dedupe against t
     mockOrderFindAll.mockResolvedValue([makeOrder(1, { status: 1, shipmentStatus: 1, confirmationStatus: 1 })]);
     await OrderService.BulkUpdate({ orderIds: [1], orderData: { status: 15 } }, user);
     expect(mockNotifyShipments).not.toHaveBeenCalled();
+  });
+});
+
+describe("PoDate («تاريخ التصنيع») stamping from order status 2 OR manufactureStatus 2", () => {
+  const writtenOf = (order: { update: jest.Mock }) => order.update.mock.calls[0]![0] as Record<string, unknown>;
+
+  it("single edit: order status -> 2 stamps PoDate and derives manufacture 2", async () => {
+    const order = makeOrder(1, { status: 3, shipmentStatus: 1, confirmationStatus: 2, manufactureStatus: 1, PoDate: null });
+    mockOrderFindByPk.mockResolvedValue(order);
+    await OrderService.updateOrder(1, { status: 2 }, user);
+    expect(writtenOf(order).PoDate).toBeInstanceOf(Date);
+    expect(writtenOf(order).manufactureStatus).toBe(2);
+  });
+
+  it("single edit: manufactureStatus -> 2 stamps PoDate and derives order status 2", async () => {
+    const order = makeOrder(1, { status: 3, shipmentStatus: 1, confirmationStatus: 2, manufactureStatus: 1, PoDate: null });
+    mockOrderFindByPk.mockResolvedValue(order);
+    await OrderService.updateOrder(1, { manufactureStatus: 2 }, user);
+    expect(writtenOf(order).PoDate).toBeInstanceOf(Date);
+    expect(writtenOf(order).status).toBe(ORDER_STATUS.IN_PROGRESS);
+  });
+
+  it("single edit: an unrelated edit or a repeated value never re-stamps an order already in manufacturing", async () => {
+    const order = makeOrder(1, { status: 2, shipmentStatus: 1, confirmationStatus: 2, manufactureStatus: 2, PoDate: "2026-01-01" });
+    mockOrderFindByPk.mockResolvedValue(order);
+    await OrderService.updateOrder(1, { status: 2, manufactureStatus: 2, notes: "x" }, user);
+    expect(writtenOf(order).PoDate).toBeUndefined();
+  });
+
+  it("single edit: vendor setting stage 2 on an order already at status 2 with a date does not re-stamp", async () => {
+    const order = makeOrder(1, { status: 2, shipmentStatus: 1, confirmationStatus: 2, manufactureStatus: 1, PoDate: "2026-01-01" });
+    mockOrderFindByPk.mockResolvedValue(order);
+    await OrderService.updateOrder(1, { manufactureStatus: 2 }, user);
+    expect(writtenOf(order).PoDate).toBeUndefined();
+  });
+
+  it("single edit: the derived manufacture notification is skipped when the order status changed in the same edit", async () => {
+    const order = makeOrder(1, { status: 3, shipmentStatus: 1, confirmationStatus: 2, manufactureStatus: 1, PoDate: null });
+    mockOrderFindByPk.mockResolvedValue(order);
+    await OrderService.updateOrder(1, { status: 2 }, user);
+    expect(OrderService.sendNotification).toHaveBeenCalledTimes(1);
+    expect(OrderService.sendNotification).toHaveBeenCalledWith(1, "ON-1", expect.objectContaining({ type: "orderUpdate" }), true);
+  });
+
+  it("bulk edit: stamps per order, only the ones that move into manufacturing (either field)", async () => {
+    const moving = makeOrder(1, { status: 3, shipmentStatus: 1, confirmationStatus: 2, manufactureStatus: 1, PoDate: null });
+    const already = makeOrder(2, { status: 2, shipmentStatus: 1, confirmationStatus: 2, manufactureStatus: 2, PoDate: "2026-01-01" });
+    const viaOther = makeOrder(3, { status: 3, shipmentStatus: 1, confirmationStatus: 2, manufactureStatus: 2, PoDate: "2026-01-01" });
+    mockOrderFindAll.mockResolvedValue([moving, already, viaOther]);
+    await OrderService.BulkUpdate({ orderIds: [1, 2, 3], orderData: { status: 2 } }, user);
+    expect(writtenOf(moving).PoDate).toBeInstanceOf(Date);
+    expect(writtenOf(already).PoDate).toBeUndefined();
+    expect(writtenOf(viaOther).PoDate).toBeUndefined();
+  });
+
+  it("bulk edit: manufactureStatus 2 stamps PoDate and derives order status 2 per order", async () => {
+    const a = makeOrder(1, { status: 1, shipmentStatus: 1, confirmationStatus: 1, manufactureStatus: 1, PoDate: null });
+    const b = makeOrder(2, { status: 5, shipmentStatus: 4, confirmationStatus: 2, manufactureStatus: 1, PoDate: null });
+    mockOrderFindAll.mockResolvedValue([a, b]);
+    await OrderService.BulkUpdate({ orderIds: [1, 2], orderData: { manufactureStatus: 2 } }, user);
+    expect(writtenOf(a)).toMatchObject({ status: 2, manufactureStatus: 2 });
+    expect(writtenOf(a).PoDate).toBeInstanceOf(Date);
+    // a delivered order is not pulled back to status 2 by the vendor-side stage, but the stage itself still moves into 2 -> stamped
+    expect(writtenOf(b).status).toBeUndefined();
+    expect(writtenOf(b).PoDate).toBeInstanceOf(Date);
   });
 });

@@ -3,6 +3,8 @@ import request from "supertest";
 
 const mockQuery = jest.fn();
 jest.mock("./shipment.notifications");
+const mockLogBulkCreate = jest.fn();
+jest.mock("../../../app/modules/logs/log.model", () => ({ bulkCreate: (...args: unknown[]) => mockLogBulkCreate(...args) }));
 jest.mock("../../infrastructure/database", () => ({
   sequelize: { query: (...args: unknown[]) => mockQuery(...args), transaction: jest.fn() },
 }));
@@ -110,9 +112,14 @@ describe("reassignment runs through the shared status sync", () => {
     const { res, updates } = await post("منتج تالف");
     expect(res.status).toBe(201);
     expect(updates).toEqual([
-      { id: 1, status: 4, shipmentStatus: 5, confirmationStatus: 2 },
-      { id: 2, status: 8, shipmentStatus: 2, confirmationStatus: 1 },
+      { id: 1, status: 4, shipmentStatus: 5, confirmationStatus: 2, manufactureStatus: 3, scheduleStatus: undefined },
+      { id: 2, status: 8, shipmentStatus: 2, confirmationStatus: 1, manufactureStatus: 7, scheduleStatus: undefined },
     ]);
+    /* the target's manufacture stage follows "in warehouse" (7) through the shared sync, with an auto_sync marker */
+    expect(mockLogBulkCreate).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ action: "auto_sync", entityId: 2, to: "manufactureStatus:->7" })]),
+      expect.anything(),
+    );
   });
 
   it("notifies both shipments after the commit, separately, attributed to the user", async () => {
@@ -134,6 +141,6 @@ describe("reassignment runs through the shared status sync", () => {
   it("keeps the source pending when the customer still needs the order", async () => {
     const { res, updates } = await post("إعادة تخصيص - العميل لسه محتاج الطلب");
     expect(res.status).toBe(201);
-    expect(updates[0]).toEqual({ id: 1, status: 1, shipmentStatus: 1, confirmationStatus: 2 });
+    expect(updates[0]).toEqual({ id: 1, status: 1, shipmentStatus: 1, confirmationStatus: 2, manufactureStatus: 3, scheduleStatus: undefined });
   });
 });

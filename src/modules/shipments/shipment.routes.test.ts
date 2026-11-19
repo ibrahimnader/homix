@@ -1255,7 +1255,9 @@ describe("shipmentRouter", () => {
 
     await request(app).put("/shipments/9802").send({ shipmentStatus: 4, status: 3 });
     expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({ shipmentStatus: 4, status: 3 }));
-    expect(logModel.create).not.toHaveBeenCalledWith(expect.objectContaining({ action: "auto_sync" }));
+    /* only the manufacture stage (delivered shipment -> 6) is derived; the explicit order status is never touched */
+    expect(shipmentRecord.update).toHaveBeenCalledWith(expect.objectContaining({ manufactureStatus: 6 }));
+    expect(logModel.create).not.toHaveBeenCalledWith(expect.objectContaining({ action: "auto_sync", to: expect.stringMatching(/^(status|confirmationStatus):/) }));
   });
 
   it("bulk status change derives the order status per row", async () => {

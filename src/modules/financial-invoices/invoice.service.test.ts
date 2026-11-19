@@ -443,3 +443,84 @@ describe("company due kind on lines", () => {
     expect(repo.refreshLineSnapshot).toHaveBeenCalledWith(11, expect.objectContaining({ companyDueKind: "margin" }), expect.anything());
   });
 });
+
+describe("reviewLive (review without a prior manual issue step)", () => {
+  const closed = () => jest.fn(async () => report("2026-10-28T21:59:59.999Z"));
+
+  test("creates the draft, fills it and reviews it in ONE transaction", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow()];
+    repo.findInvoice.mockImplementation(async () => state.current);
+    (repo.updateInvoiceFields as jest.Mock).mockImplementation(async (_i: unknown, fields: Record<string, unknown>) => { state.current = { ...state.current, ...fields } as InvoiceRow; });
+    const result = await service(repo, closed()).reviewLive({ billingDay: 28, vendorId: 5 }, actor);
+    expect(repo.transaction).toHaveBeenCalledTimes(1);
+    expect(repo.upsertDraft).toHaveBeenCalled();
+    expect(repo.insertLines).toHaveBeenCalled();
+    expect(repo.updateInvoiceFields).toHaveBeenCalledWith(1, expect.objectContaining({ code: "INV-2026-0007", status: "reviewed" }), expect.anything());
+    expect(repo.insertEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "invoice.generated" }), expect.anything());
+    expect(repo.insertEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "invoice.reviewed", fromStatus: "draft", toStatus: "reviewed" }), expect.anything());
+    expect(result).toMatchObject({ alreadyReviewed: false, vendorId: 5 });
+  });
+
+  test("is idempotent: an already reviewed invoice is returned untouched", async () => {
+    const { repo } = makeRepo(invoice({ code: "INV-2026-0001", status: "reviewed" }));
+    repo.upsertDraft.mockResolvedValue({ created: false, invoice: invoice({ code: "INV-2026-0001", status: "reviewed" }) });
+    const result = await service(repo, closed()).reviewLive({ billingDay: 28, vendorId: 5 }, actor);
+    expect(result.alreadyReviewed).toBe(true);
+    expect(result.invoice.status).toBe("reviewed");
+    expect(repo.insertLines).not.toHaveBeenCalled();
+    expect(repo.updateInvoiceFields).not.toHaveBeenCalled();
+    expect(repo.nextInvoiceSequence).not.toHaveBeenCalled();
+  });
+
+  test("blocked with 409 while the cycle is open (whole transaction rolls back via the throw)", async () => {
+    const { repo, state } = makeRepo(invoice({ periodEnd: "2026-11-28T21:59:59.999Z" }));
+    state.lines = [lineRow()];
+    await expect(service(repo, jest.fn(async () => report("2026-11-28T21:59:59.999Z"))).reviewLive({ billingDay: 28, vendorId: 5 }, actor))
+      .rejects.toThrow(/الدورة لم تنتهِ بعد/);
+    expect(repo.updateInvoiceFields).not.toHaveBeenCalled();
+  });
+
+  test("never duplicates orders that are already on another invoice and keeps existing lines/overrides", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow({ vendorDueOverride: 5 })];
+    repo.findLockedOrderIds.mockResolvedValue(new Set([100]));
+    await service(repo, closed()).reviewLive({ billingDay: 28, vendorId: 5 }, actor);
+    expect(repo.insertLines).toHaveBeenCalledWith(1, [expect.objectContaining({ orderId: 101 })], 9, expect.anything());
+    expect(repo.setLineOverrides).not.toHaveBeenCalled();
+    expect(repo.refreshLineSnapshot).not.toHaveBeenCalled();
+    expect(repo.setLineState).not.toHaveBeenCalled();
+  });
+});
+
+describe("reviewLiveAll", () => {
+  const twoVendors = () => ({
+    cycle: { billingDay: 28, endDate: "2026-10-28T21:59:59.999Z", mode: "billingCycle", referenceDate: "2026-10-20", startDate: "2026-10-13T22:00:00.000Z" },
+    fullInvoice: { items: [
+      { orders: [reportOrder(100)], vendorId: 5 },
+      { orders: [reportOrder(200)], vendorId: 6 },
+      { orders: [], vendorId: 7 },
+    ], summary: {} },
+  }) as never;
+
+  test("skips vendors without counted orders and reports a failing vendor without aborting the rest", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow()];
+    (repo.upsertDraft as jest.Mock).mockImplementation(async (input: { vendorId: number }) => {
+      if (input.vendorId === 6) throw new Error("boom");
+      return { created: true, invoice: state.current };
+    });
+    const result = await service(repo, jest.fn(async () => twoVendors())).reviewLiveAll({ billingDay: 28 }, actor);
+    expect(result.results).toEqual([
+      expect.objectContaining({ ok: true, vendorId: 5 }),
+      expect.objectContaining({ error: "boom", ok: false, vendorId: 6 }),
+    ]);
+    expect(result).toMatchObject({ failed: 1, succeeded: 1 });
+  });
+
+  test("409 up front while the cycle is open", async () => {
+    const { repo } = makeRepo();
+    await expect(service(repo, jest.fn(async () => report("2026-11-28T21:59:59.999Z"))).reviewLiveAll({ billingDay: 28 }, actor)).rejects.toThrow(/الدورة لم تنتهِ بعد/);
+    expect(repo.upsertDraft).not.toHaveBeenCalled();
+  });
+});

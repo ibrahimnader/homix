@@ -63,6 +63,14 @@ export const generateBody = z.object({
   vendorId: id.optional(),
 });
 
+export const reviewLiveBody = z.object({
+  billingDay: z.union([z.literal(13), z.literal(28)]),
+  referenceDate: day.optional(),
+  vendorId: id,
+});
+
+export const reviewLiveAllBody = reviewLiveBody.omit({ vendorId: true });
+
 export const transitionBody = z.object({
   to: z.enum(INVOICE_STATUSES),
   transferAmount: money.optional(),

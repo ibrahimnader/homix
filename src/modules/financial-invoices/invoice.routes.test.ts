@@ -19,6 +19,8 @@ const spies = {
   detail: jest.spyOn(invoiceService, "detail").mockResolvedValue({ adjustments: [], invoice: {}, lines: [] } as never),
   generate: jest.spyOn(invoiceService, "generate").mockResolvedValue({ invoices: [] } as never),
   invoicedLines: jest.spyOn(invoiceService, "invoicedLines").mockResolvedValue({ items: [] } as never),
+  reviewLive: jest.spyOn(invoiceService, "reviewLive").mockResolvedValue({ alreadyReviewed: false } as never),
+  reviewLiveAll: jest.spyOn(invoiceService, "reviewLiveAll").mockResolvedValue({ results: [], succeeded: 0 } as never),
   vendorOptions: jest.spyOn(invoiceService, "vendorOptions").mockResolvedValue([{ id: 1, name: "ركة" }] as never),
   list: jest.spyOn(invoiceService, "list").mockResolvedValue({ items: [] } as never),
   refreshDraft: jest.spyOn(invoiceService, "refreshDraft").mockResolvedValue({ refreshed: 0 } as never),
@@ -154,4 +156,18 @@ test("vendor options: staff with finance_view only, never vendors", async () => 
 test("archive list accepts a separate invoiceCode filter", async () => {
   await request(finance).get("/financial-invoices?invoiceCode=INV-9&vendorId=4");
   expect(spies.list).toHaveBeenCalledWith(expect.objectContaining({ invoiceCode: "INV-9", vendorId: 4 }), {});
+});
+
+test("review-live: staff with finance_settle only, validated body, actor from the token", async () => {
+  const body = { billingDay: 28, referenceDate: "2026-10-20", vendorId: 4 };
+  expect((await request(vendor).post("/financial-invoices/review-live").send(body)).status).toBe(403);
+  expect((await request(vendor).post("/financial-invoices/review-live-all").send({ billingDay: 28 })).status).toBe(403);
+  expect((await request(viewer).post("/financial-invoices/review-live").send(body)).status).toBe(403);
+  expect((await request(finance).post("/financial-invoices/review-live").send({ billingDay: 28 })).status).toBe(400);
+  expect((await request(finance).post("/financial-invoices/review-live").send({ ...body, billingDay: 15 })).status).toBe(400);
+  expect(spies.reviewLive).not.toHaveBeenCalled();
+  expect((await request(finance).post("/financial-invoices/review-live").send(body)).status).toBe(200);
+  expect(spies.reviewLive).toHaveBeenCalledWith(body, { id: 7 });
+  expect((await request(finance).post("/financial-invoices/review-live-all").send({ billingDay: 13 })).status).toBe(200);
+  expect(spies.reviewLiveAll).toHaveBeenCalledWith({ billingDay: 13 }, { id: 7 });
 });

@@ -8,7 +8,7 @@ import { InvoiceRepository } from "./invoice.repo";
 import {
   activityQuery, addOrderBody, adjustmentBody, bulkTransitionBody, candidatesQuery, cycleQuery, generateBody, invoiceAdjustmentParams,
   invoiceIdParams, invoiceLineParams, invoiceListQuery, invoicedLinesQuery, lineActionBody, lineOverrideBody,
-  reconciliationBody, reconciliationQuery, transitionBody,
+  reconciliationBody, reconciliationQuery, reviewLiveAllBody, reviewLiveBody, transitionBody,
 } from "./invoice.schemas";
 import { InvoiceService, type Scope } from "./invoice.service";
 
@@ -212,6 +212,60 @@ invoiceRouter.post("/reconciliation", ...settle, validateRequest({ body: reconci
  */
 invoiceRouter.post("/generate", ...settle, validateRequest({ body: generateBody }), asyncHandler(async (request, response) => {
   response.json({ status: true, data: await invoiceService.generate(request.body, actorOf(request)) });
+}));
+
+/**
+ * @swagger
+ * /financial-invoices/review-live:
+ *   post:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: Review one vendor's live cycle in one step (create-or-reuse the draft, then draft -> reviewed)
+ *     description: Staff only (finance_settle). One transaction. Existing manual overrides and line states are kept and orders already on another invoice are never duplicated. Idempotent - an invoice already reviewed/frozen/transferred is returned unchanged. 409 until the cycle end has passed.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [vendorId, billingDay]
+ *             properties:
+ *               vendorId: { type: integer }
+ *               billingDay: { type: integer, enum: [13, 28] }
+ *               referenceDate: { type: string, format: date }
+ *     responses:
+ *       200: { description: "{ cycle, vendorId, alreadyReviewed, invoice }" }
+ *       403: { description: Vendor users or missing finance_settle }
+ *       409: { description: Cycle still open, or empty invoice }
+ */
+invoiceRouter.post("/review-live", ...settle, validateRequest({ body: reviewLiveBody }), asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await invoiceService.reviewLive(request.body, actorOf(request)) });
+}));
+
+/**
+ * @swagger
+ * /financial-invoices/review-live-all:
+ *   post:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: Review every vendor of the live cycle that has counted orders
+ *     description: Staff only (finance_settle). Each vendor in its own transaction; failures are reported per vendor and do not abort the others. 409 while the cycle is still open.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [billingDay]
+ *             properties:
+ *               billingDay: { type: integer, enum: [13, 28] }
+ *               referenceDate: { type: string, format: date }
+ *     responses:
+ *       200: { description: "{ cycle, results: [{ vendorId, ok, invoiceId?, alreadyReviewed?, error? }], succeeded, failed }" }
+ *       409: { description: Cycle still open }
+ */
+invoiceRouter.post("/review-live-all", ...settle, validateRequest({ body: reviewLiveAllBody }), asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await invoiceService.reviewLiveAll(request.body, actorOf(request)) });
 }));
 
 /**

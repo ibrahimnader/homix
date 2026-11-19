@@ -382,29 +382,87 @@ export class InvoiceService {
 
     const results: Array<{ added: number; created: boolean; invoiceId: number; skippedDeferred: number[]; status: InvoiceStatus; vendorId: number }> = [];
     for (const [vendorId, snapshots] of byVendor) {
-      results.push(await this.repo.transaction(async (transaction) => {
-        const { created, invoice } = await this.repo.upsertDraft({
-          billingDay: report.cycle.billingDay, createdBy: actor.id, periodEnd: report.cycle.endDate, periodStart: report.cycle.startDate, vendorId,
-        }, transaction);
-        let added: number[] = [];
-        let skippedDeferred: number[] = [];
-        if (invoice.status === INVOICE_STATUS.DRAFT) {
-          ({ added, skippedDeferred } = await this.fillDraft(invoice, snapshots, actor, transaction));
-        }
-        if (created || added.length > 0) {
-          await this.repo.insertEvent({
-            action: created ? "invoice.generated" : "invoice.synced",
-            actorId: actor.id,
-            detail: { added, billingDay: report.cycle.billingDay, periodEnd: report.cycle.endDate, skippedDeferred },
-            invoiceId: invoice.id,
-            toStatus: invoice.status,
-            vendorId,
-          }, transaction);
-        }
-        return { added: added.length, created, invoiceId: Number(invoice.id), skippedDeferred, status: invoice.status, vendorId };
-      }));
+      results.push(await this.repo.transaction((transaction) => this.ensureDraft(report.cycle, vendorId, snapshots, actor, transaction)));
     }
     return { cycle: report.cycle, invoices: results };
+  }
+
+  /** Create-or-reuse the (vendor, cycle) invoice and top up a draft. Shared by generate and review-live. */
+  private async ensureDraft(
+    cycle: { billingDay: 13 | 28; endDate: string; startDate: string },
+    vendorId: number,
+    snapshots: LineSnapshot[],
+    actor: Actor,
+    transaction: Tx,
+  ) {
+    const { created, invoice } = await this.repo.upsertDraft({
+      billingDay: cycle.billingDay, createdBy: actor.id, periodEnd: cycle.endDate, periodStart: cycle.startDate, vendorId,
+    }, transaction);
+    let added: number[] = [];
+    let skippedDeferred: number[] = [];
+    if (invoice.status === INVOICE_STATUS.DRAFT) {
+      ({ added, skippedDeferred } = await this.fillDraft(invoice, snapshots, actor, transaction));
+    }
+    if (created || added.length > 0) {
+      await this.repo.insertEvent({
+        action: created ? "invoice.generated" : "invoice.synced",
+        actorId: actor.id,
+        detail: { added, billingDay: cycle.billingDay, periodEnd: cycle.endDate, skippedDeferred },
+        invoiceId: invoice.id,
+        toStatus: invoice.status,
+        vendorId,
+      }, transaction);
+    }
+    return { added: added.length, created, invoiceId: Number(invoice.id), skippedDeferred, status: invoice.status, vendorId };
+  }
+
+  private snapshotsByVendor(report: OrderFinancialReportResponse): Map<number, LineSnapshot[]> {
+    const byVendor = new Map<number, LineSnapshot[]>();
+    for (const item of report.fullInvoice.items) {
+      if (!item.vendorId) continue;
+      byVendor.set(Number(item.vendorId), item.orders.map((order) => snapshotFromReportOrder(order)));
+    }
+    return byVendor;
+  }
+
+  private async reviewVendor(
+    cycle: { billingDay: 13 | 28; endDate: string; startDate: string },
+    vendorId: number,
+    snapshots: LineSnapshot[],
+    actor: Actor,
+  ) {
+    return this.repo.transaction(async (transaction) => {
+      const { invoiceId } = await this.ensureDraft(cycle, vendorId, snapshots, actor, transaction);
+      const invoice = (await this.repo.findInvoice(invoiceId, transaction, true))!;
+      if (invoice.status !== INVOICE_STATUS.DRAFT) return { alreadyReviewed: true, invoice: this.toInvoiceDto(invoice) };
+      return { alreadyReviewed: false, invoice: await this.transitionInTx(invoice.id, "reviewed", {}, actor, transaction) };
+    });
+  }
+
+  /** One vendor: draft (create or reuse, manual overrides untouched) -> reviewed in one transaction. Idempotent. */
+  public async reviewLive(input: { billingDay: 13 | 28; referenceDate?: string; vendorId: number }, actor: Actor) {
+    const report = await this.getReport({ billingDay: input.billingDay, referenceDate: input.referenceDate, vendorId: input.vendorId }, input.vendorId);
+    const snapshots = this.snapshotsByVendor(report).get(input.vendorId) ?? [];
+    return { cycle: report.cycle, vendorId: input.vendorId, ...(await this.reviewVendor(report.cycle, input.vendorId, snapshots, actor)) };
+  }
+
+  /** Every vendor of the cycle that has counted orders; each in its own transaction, failures reported per vendor. */
+  public async reviewLiveAll(input: { billingDay: 13 | 28; referenceDate?: string }, actor: Actor) {
+    const report = await this.getReport({ billingDay: input.billingDay, referenceDate: input.referenceDate }, null);
+    if (new Date(report.cycle.endDate).getTime() >= this.now().getTime()) {
+      throw new ConflictError("الدورة لم تنتهِ بعد — لا يمكن مراجعة الفواتير");
+    }
+    const results: Array<{ alreadyReviewed?: boolean; error?: string; invoiceId?: number; ok: boolean; vendorId: number }> = [];
+    for (const [vendorId, snapshots] of this.snapshotsByVendor(report)) {
+      if (snapshots.length === 0) continue;
+      try {
+        const done = await this.reviewVendor(report.cycle, vendorId, snapshots, actor);
+        results.push({ alreadyReviewed: done.alreadyReviewed, invoiceId: done.invoice.id, ok: true, vendorId });
+      } catch (error) {
+        results.push({ error: error instanceof Error ? error.message : "failed", ok: false, vendorId });
+      }
+    }
+    return { cycle: report.cycle, failed: results.filter((row) => !row.ok).length, results, succeeded: results.filter((row) => row.ok).length };
   }
 
   public async sync(id: number, actor: Actor) {
@@ -485,8 +543,12 @@ export class InvoiceService {
   /* ---------- status transitions ---------- */
 
   public async transition(id: number, to: InvoiceStatus, options: { transferAmount?: number }, actor: Actor) {
-    return this.repo.transaction(async (transaction) => {
-      const invoice = await this.mustFind(id, transaction);
+    return this.repo.transaction((transaction) => this.transitionInTx(id, to, options, actor, transaction));
+  }
+
+  private async transitionInTx(id: number | string, to: InvoiceStatus, options: { transferAmount?: number }, actor: Actor, transaction: Tx) {
+    {
+      const invoice = await this.mustFind(Number(id), transaction);
       const from = invoice.status;
       if (!canTransition(from, to)) {
         throw new ConflictError(`لا يمكن الانتقال من «${INVOICE_STATUS_LABELS[from]}» إلى «${INVOICE_STATUS_LABELS[to]}»`);
@@ -537,7 +599,7 @@ export class InvoiceService {
         actorId: actor.id, detail, fromStatus: from, invoiceId: invoice.id, toStatus: to, vendorId: invoice.vendorId,
       }, transaction);
       return this.toInvoiceDto((await this.repo.findInvoice(invoice.id, transaction))!);
-    });
+    }
   }
 
   public async bulkTransition(ids: number[], to: InvoiceStatus, actor: Actor) {

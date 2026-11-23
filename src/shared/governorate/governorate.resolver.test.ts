@@ -96,3 +96,21 @@ describe("isInsideCairoGizaValue", () => {
     expect(isInsideCairoGizaValue(null)).toBe(false);
   });
 });
+
+describe("«جسر السويس» is a Cairo district, not the Suez governorate", () => {
+  it.each([
+    "جسر السويس، القاهرة",
+    "شارع جسر السويس - برج 5",
+    "٥ ش الحجاز جسر السويس",
+    "جسر السويس الجديد",
+    "كوبري جسر السويس",
+  ])("resolves %s to Cairo", (address) => {
+    expect(matchGovernorate(address)?.governorateId).toBe(1);
+    expect(isInsideCairoGiza(address)).toBe(true);
+  });
+
+  it("still resolves the Suez governorate when the address is really in Suez", () => {
+    expect(matchGovernorate("السويس - حي الأربعين")?.governorateId).toBe(20);
+    expect(matchGovernorate("محافظة السويس شارع الجيش")?.governorateId).toBe(20);
+  });
+});

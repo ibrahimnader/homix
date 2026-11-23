@@ -61,6 +61,18 @@ export const createApp = (): Express => {
   app.use(`${UPLOADS_ROUTE}/financial-receipts`, (_request, response) => {
     response.status(404).json({ status: false, message: "Not found" });
   });
+  /* The default product image ships with the repo (uploads/default-product.png) but UPLOADS_DIR can point at a
+     persistent disk that never received it, which made every system product without a picture a broken image. */
+  app.get(`${UPLOADS_ROUTE}/default-product.png`, (request, response, next) => {
+    const stored = path.join(path.resolve(env.UPLOADS_DIR), "default-product.png");
+    response.sendFile(stored, (error) => {
+      if (error) {
+        response.sendFile(path.resolve(__dirname, "..", "uploads", "default-product.png"), (fallbackError) => {
+          if (fallbackError) next();
+        });
+      }
+    });
+  });
   app.use(UPLOADS_ROUTE, express.static(path.resolve(env.UPLOADS_DIR)));
   app.use(applyCacheHeaders);
   app.use(notifyNavigationCountsChanged);

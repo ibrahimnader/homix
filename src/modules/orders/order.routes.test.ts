@@ -400,9 +400,13 @@ describe("orderRouter", () => {
     expect(response.body.status).toBe(true);
     expect(response.body.data.cycle.billingDay).toBe(13);
     expect(response.body.data.summary.totalSales).toBe(8000);
-    expect(response.body.data.summary.companyDue).toBe(4499);
+    expect(response.body.data.summary.companyDue).toBe(699);
     expect(response.body.data.summary.fines).toBe(300);
-    expect(response.body.data.summary.vendorDue).toBe(1000);
+    // Homix delivery: vendor due = cost gross (fines are their own column); vendor delivery owes Homix 699
+    expect(response.body.data.summary.vendorDue).toBe(1200);
+    // net = vendorDue - companyDue - fines = 1200 - 699 - 300
+    expect(response.body.data.summary.netAmount).toBe(201);
+    expect(response.body.data.fullInvoice.items[0].netAmount).toBe(201);
     expect(response.body.data.fullInvoice.summary.warehouseCost).toBe(2400);
     expect(response.body.data.vendorDeliveries.summary.ordersCount).toBe(1);
     expect(response.body.data.warehouseDeliveries.summary.ordersCount).toBe(1);
@@ -426,7 +430,7 @@ describe("orderRouter", () => {
       }),
       expect.objectContaining({
         collectionTotal: 5000,
-        companyDue: 3800,
+        companyDue: 0,
         fines: 200,
         id: 8,
         operationNumber: "3001",
@@ -436,18 +440,18 @@ describe("orderRouter", () => {
         productCode: "RKA-001",
         productId: 812,
         shipmentId: 8,
-        vendorDue: 1000,
+        vendorDue: 1200,
         vendorShippingCost: 200,
         warehouseCost: 1200,
       }),
     ]);
     // kinds: order 7 is vendor delivered (debt), order 8 is Homix delivered (margin) — per order, per vendor row and per section
     expect(response.body.data.fullInvoice.items[0].orders.map((order: { companyDueKind: string }) => order.companyDueKind)).toEqual(["vendorOwes", "margin"]);
-    expect(response.body.data.fullInvoice.items[0]).toMatchObject({ companyDue: 4499, homixMargin: 3800, vendorOwes: 699 });
+    expect(response.body.data.fullInvoice.items[0]).toMatchObject({ companyDue: 699, homixMargin: 3800, vendorOwes: 699 });
     expect(response.body.data.fullInvoice.summary).toMatchObject({ homixMargin: 3800, vendorOwes: 699 });
     expect(response.body.data.vendorDeliveries.summary).toMatchObject({ homixMargin: 0, vendorOwes: 699 });
     expect(response.body.data.warehouseDeliveries.summary).toMatchObject({ homixMargin: 3800, vendorOwes: 0 });
-    expect(response.body.data.summary).toMatchObject({ companyDue: 4499, homixMargin: 3800, vendorOwes: 699 });
+    expect(response.body.data.summary).toMatchObject({ companyDue: 699, homixMargin: 3800, vendorOwes: 699 });
     expect(response.body.data.vendorDeliveries.items[0].orders).toHaveLength(1);
     expect(response.body.data.vendorDeliveries.items[0].orders[0].id).toBe(7);
     expect(response.body.data.vendorDeliveries.items[0].orders[0]).toEqual(expect.objectContaining({
@@ -509,17 +513,20 @@ describe("orderRouter", () => {
 
     expect(response.status).toBe(200);
     const byId = Object.fromEntries(response.body.data.fullInvoice.items[0].orders.map((order: { id: number }) => [order.id, order]));
-    expect(byId[21]).toMatchObject({ companyDue: 1099, vendorDue: 1100, warehouseCost: 1200 });
-    expect(byId[22]).toMatchObject({ companyDue: 800, vendorDue: 1000, shipmentId: null });
-    expect(byId[23]).toMatchObject({ companyDue: 900, vendorDue: 0, warehouseCost: 0 });
+    expect(byId[21]).toMatchObject({ companyDue: 0, vendorDue: 1200, fines: 100, warehouseCost: 1200 });
+    expect(byId[22]).toMatchObject({ companyDue: 0, vendorDue: 1000, shipmentId: null });
+    expect(byId[23]).toMatchObject({ companyDue: 0, vendorDue: 0, warehouseCost: 0 });
     // the warehouse tab section uses the very same numbers, so its "net required" equals the invoice vendor due
     const warehouseOrders = response.body.data.warehouseDeliveries.items[0].orders;
     expect(warehouseOrders.map((order: { id: number }) => order.id)).toEqual([21, 23]);
-    expect(warehouseOrders[0]).toMatchObject({ companyDue: 1099, vendorDue: 1100 });
-    expect(response.body.data.summary.vendorDue).toBe(2100);
+    expect(warehouseOrders[0]).toMatchObject({ companyDue: 0, vendorDue: 1200 });
+    expect(response.body.data.summary.vendorDue).toBe(2200);
+    // all-Homix-delivery vendor: net = sum of cost - fines (no per-line floor)
+    expect(response.body.data.summary.netAmount).toBe(2050);
+    expect(response.body.data.warehouseDeliveries.summary.netAmount).toBe(1200 - 100 - 50);
     // company due of Homix-delivered orders is the margin; nothing is a vendor debt here
     expect(Object.values(byId).map((order) => (order as { companyDueKind: string }).companyDueKind)).toEqual(["margin", "margin", "margin"]);
-    expect(response.body.data.summary).toMatchObject({ companyDue: 2799, homixMargin: 2799, vendorOwes: 0 });
+    expect(response.body.data.summary).toMatchObject({ companyDue: 0, homixMargin: 2799, vendorOwes: 0 });
     expect(response.body.data.fullInvoice.items[0]).toMatchObject({ homixMargin: 2799, vendorOwes: 0 });
   });
 

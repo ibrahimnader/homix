@@ -25,6 +25,14 @@ export type InvoiceListFilters = {
   size: number;
 };
 
+export type VendorBankRow = {
+  bankName: string | null;
+  bankAccountHolderName: string | null;
+  bankAccountNumber: string | null;
+  walletNumber: string | null;
+  instaPayNumber: string | null;
+};
+
 export type InvoiceEventInput = {
   action: string;
   actorId: number;
@@ -92,6 +100,13 @@ export class InvoiceRepository {
     return sequelize.query<LineRow>(
       'SELECT * FROM financial_invoice_lines WHERE "invoiceId" = :invoiceId AND id = :lineId FOR UPDATE',
       { replacements: { invoiceId, lineId }, transaction, type: QueryTypes.SELECT },
+    ).then((rows) => rows[0]);
+  }
+
+  public findLineByOrder(invoiceId: number | string, orderId: number | string, transaction: Tx): Promise<LineRow | undefined> {
+    return sequelize.query<LineRow>(
+      'SELECT * FROM financial_invoice_lines WHERE "invoiceId" = :invoiceId AND "orderId" = :orderId ORDER BY id LIMIT 1 FOR UPDATE',
+      { replacements: { invoiceId, orderId }, transaction, type: QueryTypes.SELECT },
     ).then((rows) => rows[0]);
   }
 
@@ -267,7 +282,7 @@ export class InvoiceRepository {
     if (filters.invoiceTo) { conditions.push('i."periodEnd" <= CAST(:invoiceTo AS timestamptz)'); replacements.invoiceTo = filters.invoiceTo; }
     if (filters.transferredFrom) { conditions.push('i."transferredAt" >= CAST(:transferredFrom AS timestamptz)'); replacements.transferredFrom = filters.transferredFrom; }
     if (filters.transferredTo) { conditions.push('i."transferredAt" <= CAST(:transferredTo AS timestamptz)'); replacements.transferredTo = filters.transferredTo; }
-    if (filters.dueParty === "vendor") conditions.push('i."netAmount" >= 0');
+    if (filters.dueParty === "vendor") conditions.push('i."netAmount" > 0');
     if (filters.dueParty === "homix") conditions.push('i."netAmount" < 0');
     if (filters.receipt === "uploaded") conditions.push('i."receiptPath" IS NOT NULL');
     if (filters.receipt === "missing") conditions.push('i."receiptPath" IS NULL');
@@ -343,6 +358,25 @@ export class InvoiceRepository {
   }
 
   /** Every non-deleted vendor with a name (filter dropdown). */
+  /**
+   * Bank / wallet data of vendors' users (a vendor's own user rows, `users.vendorId`), keyed by vendor id.
+   * Only rows with at least one non-empty bank field; an active user wins, then the oldest. Callers must gate exposure.
+   */
+  public async listVendorBanks(vendorIds: number[]): Promise<Map<number, VendorBankRow>> {
+    const ids = [...new Set(vendorIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+    if (ids.length === 0) return new Map();
+    const rows = await sequelize.query<VendorBankRow & { vendorId: number }>(
+      `SELECT DISTINCT ON ("vendorId") "vendorId", "bankName", "bankAccountHolderName", "bankAccountNumber", "walletNumber", "instaPayNumber"
+       FROM users
+       WHERE "vendorId" IN (:ids) AND "deletedAt" IS NULL
+         AND (COALESCE(TRIM("bankName"), '') <> '' OR COALESCE(TRIM("bankAccountHolderName"), '') <> '' OR COALESCE(TRIM("bankAccountNumber"), '') <> ''
+              OR COALESCE(TRIM("walletNumber"), '') <> '' OR COALESCE(TRIM("instaPayNumber"), '') <> '')
+       ORDER BY "vendorId", ("accountStatus" = 'active') DESC, id ASC`,
+      { replacements: { ids }, type: QueryTypes.SELECT },
+    );
+    return new Map(rows.map((row) => [Number(row.vendorId), row]));
+  }
+
   public listVendorOptions(): Promise<Array<{ id: number; name: string }>> {
     return sequelize.query<{ id: number; name: string }>(
       `SELECT id, name FROM vendors WHERE "deletedAt" IS NULL AND name IS NOT NULL AND TRIM(name) <> '' ORDER BY name, id`,
@@ -366,7 +400,7 @@ export class InvoiceRepository {
   public async listInvoicedLines(filters: {
     invoiceCode?: string; operationNumber?: string; orderNumber?: string; page: number; productCode?: string; q?: string; size: number;
     statuses: InvoiceStatus[]; vendorIds?: number[];
-  }): Promise<{ rows: Array<LineRow & { code: string | null; invoiceStatus: InvoiceStatus; periodEnd: string; vendorId: number; vendorName: string; transferredAt: string | null; receiptPath: string | null }>; total: number }> {
+  }): Promise<{ rows: Array<LineRow & { code: string | null; invoiceNetAmount?: string | number; invoiceStatus: InvoiceStatus; periodEnd: string; vendorId: number; vendorName: string; transferredAt: string | null; receiptPath: string | null }>; total: number }> {
     const replacements: Record<string, unknown> = { statuses: filters.statuses };
     const conditions = ["l.state = 'included'", "i.status IN (:statuses)"];
     if (filters.vendorIds?.length) { conditions.push('i."vendorId" IN (:vendorIds)'); replacements.vendorIds = filters.vendorIds; }
@@ -386,7 +420,7 @@ export class InvoiceRepository {
     const where = conditions.join(" AND ");
     const rows = await sequelize.query<any>(
       `SELECT l.*, i.code, i.status AS "invoiceStatus", i."periodEnd", i."vendorId", v.name AS "vendorName",
-              i."transferredAt", i."receiptPath"
+              i."transferredAt", i."receiptPath", i."netAmount" AS "invoiceNetAmount"
        FROM financial_invoice_lines l JOIN financial_invoices i ON i.id = l."invoiceId" JOIN vendors v ON v.id = i."vendorId"
        WHERE ${where} ORDER BY i."periodEnd" DESC, l.id DESC LIMIT :limit OFFSET :offset`,
       { replacements: { ...replacements, limit: filters.size, offset: (filters.page - 1) * filters.size }, type: QueryTypes.SELECT },

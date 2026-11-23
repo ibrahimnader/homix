@@ -1,6 +1,7 @@
 /**
- * Re-prices old vendor invoices that were issued before the cost-based vendor-due rule
- * (vendorDue = max(0, cost - fines) for non-vendor deliveries).
+ * Re-prices old vendor invoices that were issued before the current settlement model
+ * (reference model: Homix delivery vendorDue = cost gross, vendor delivery balance = collection - cost - shipping,
+ * fines as their own column, signed net = vendorDue - companyDue - fines).
  *
  * For each target invoice it runs the SAME steps a user would run in the UI, through the
  * same service, so every rule and audit event applies:

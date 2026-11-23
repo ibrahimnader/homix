@@ -14,7 +14,8 @@ import {
   REGRESSION_FORBIDDEN_CODE, REGRESSION_NEEDS_CONFIRMATION_CODE, type OrderRegression,
 } from "./order-regression-guard";
 import type { LegacyOrderResponse, OrderDetailsResponse, OrderFinancialReportQuery, OrderFinancialReportResponse, OrderListQuery, OrderListResponse, OrderMetaResponse, OrderMutationPayload, OrderRequestUser, OrderSummaryResponse } from "./order.types";
-import { liveExportReport as toLiveExportReport, LINE_STATE_LABELS, type ExportReport } from "../financial-invoices/invoice.export-overlay";
+import { netDirectionLabel } from "../financial-invoices/invoice.constants";
+import { isCountedOrder, liveExportReport as toLiveExportReport, LINE_STATE_LABELS, type ExportReport } from "../financial-invoices/invoice.export-overlay";
 import type { Response } from "express";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
@@ -22,6 +23,8 @@ const ExcelJS = require("exceljs");
 
 export type FinancialReportOverlay = {
   effectiveReport(report: OrderFinancialReportResponse, scope: { vendorId?: number | null }, vendorId?: number): Promise<ExportReport>;
+  /** Adds the vendors' bank data to the seller rows for finance_settle staff / the vendor himself only. */
+  withVendorBanks?<T extends OrderFinancialReportResponse>(report: T, scope: { canSettle?: boolean; vendorId?: number | null }): Promise<T>;
 };
 
 const ensureLegacySuccess = <TData>(response: LegacyOrderResponse<TData>): LegacyOrderResponse<TData> => {
@@ -131,8 +134,12 @@ export class OrderService {
     return success({ message: "Orders imported successfully" });
   }
 
-  public async financialReport(query: OrderFinancialReportQuery, vendorId?: number | null): Promise<Result<OrderFinancialReportResponse>> {
-    return success(await this.orderRepository.getFinancialReport(query, vendorId));
+  public async financialReport(query: OrderFinancialReportQuery, vendorId?: number | null, access: { canSettle?: boolean } = {}): Promise<Result<OrderFinancialReportResponse>> {
+    const report = await this.orderRepository.getFinancialReport(query, vendorId);
+    // vendorBank only for finance_settle staff and (own rows) the vendor himself; anyone else gets the report unchanged
+    return success(this.invoiceOverlay?.withVendorBanks
+      ? await this.invoiceOverlay.withVendorBanks(report, { canSettle: access.canSettle, vendorId: vendorId ?? null })
+      : report);
   }
 
   /**
@@ -388,9 +395,12 @@ export class OrderService {
       { label: "نهاية الدورة", value: report.cycle.endDate },
       { label: "نوع الدورة", value: report.cycle.mode },
       { label: "إجمالي المبيعات", value: report.summary.totalSales },
-      { label: "مستحق البائعين", value: report.summary.vendorDue },
+      { label: "مستحق البائعين (إجمالي)", value: report.summary.vendorDue },
       { label: "المستحق لهوميكس", value: report.summary.companyDue },
       { label: "الغرامات", value: report.summary.fines },
+      // signed: > 0 Homix owes the vendors, < 0 the vendors owe Homix
+      { label: "الصافي", value: report.summary.netAmount },
+      { label: "اتجاه الصافي", value: netDirectionLabel(report.summary.netAmount) },
       { label: "عدد البائعين", value: report.summary.vendorsCount },
     ].forEach((row) => {
       summarySheet.addRow(row);
@@ -408,10 +418,10 @@ export class OrderService {
         { header: "سعر التكلفة", key: "warehouseCost", width: 18 },
         { header: "شحن البائع", key: "vendorShippingCost", width: 18 },
         { header: "الغرامات", key: "fines", width: 18 },
-        ...(withAdjustments ? [
-          { header: "التسويات اليدوية", key: "adjustmentsTotal", width: 18 },
-          { header: "صافي مستحق البائع", key: "netAmount", width: 18 },
-        ] : []),
+        ...(withAdjustments ? [{ header: "التسويات اليدوية", key: "adjustmentsTotal", width: 18 }] : []),
+        // signed net (negative = the vendor owes Homix) + its direction label
+        { header: "الصافي", key: "netAmount", width: 18 },
+        { header: "اتجاه الصافي", key: "netLabel", width: 22 },
         { header: "كود الفاتورة", key: "invoiceCode", width: 18 },
         { header: "حالة الفاتورة", key: "invoiceStatus", width: 18 },
       ];
@@ -420,21 +430,25 @@ export class OrderService {
       section.items.forEach((item) => {
         const adjustments = withAdjustments ? (item.invoice?.adjustmentsTotal ?? 0) : 0;
         adjustmentsTotal += adjustments;
+        const rowNet = Math.round((item.netAmount + adjustments) * 100) / 100;
         worksheet.addRow({
           ...item,
           adjustmentsTotal: withAdjustments ? adjustments : undefined,
           invoiceCode: item.invoice?.code ?? "",
           invoiceStatus: item.invoice?.statusLabel ?? "",
-          netAmount: withAdjustments ? Math.round((item.vendorDue + adjustments) * 100) / 100 : undefined,
+          netAmount: rowNet,
+          netLabel: netDirectionLabel(rowNet),
         });
       });
       worksheet.addRow({});
+      const totalNet = Math.round((section.summary.netAmount + adjustmentsTotal) * 100) / 100;
       worksheet.addRow({
         adjustmentsTotal: withAdjustments ? Math.round(adjustmentsTotal * 100) / 100 : undefined,
         collectionTotal: section.summary.collectionTotal,
         companyDue: section.summary.companyDue,
         fines: section.summary.fines,
-        netAmount: withAdjustments ? Math.round((section.summary.vendorDue + adjustmentsTotal) * 100) / 100 : undefined,
+        netAmount: totalNet,
+        netLabel: netDirectionLabel(totalNet),
         ordersCount: section.summary.ordersCount,
         vendorDue: section.summary.vendorDue,
         vendorName: "الإجمالي",
@@ -464,21 +478,27 @@ export class OrderService {
       { header: "الغرامات", key: "fines", width: 16 },
       { header: "مستحق البائع", key: "vendorDue", width: 16 },
       { header: "المستحق لهوميكس", key: "companyDue", width: 16 },
+      { header: "الصافي", key: "lineNet", width: 16 },
       { header: "حالة البند", key: "lineState", width: 16 },
       { header: "ملاحظات", key: "note", width: 40 },
     ];
     report.fullInvoice.items.forEach((item) => {
       item.exportOrders.forEach((order) => {
+        const homixDelivered = order.companyDueKind === "margin";
         const row = linesSheet.addRow({
           ...order,
+          // «المستحق لهوميكس» لتسليمات هوميكس: لا قيمة (—) ولا تعديل معروض
+          companyDue: homixDelivered ? "—" : order.companyDue,
           invoiceCode: item.invoice?.code ?? "",
           invoiceStatus: item.invoice?.statusLabel ?? "",
+          // signed line net = مستحق البائع − المستحق لهوميكس − الغرامات (uncounted lines have none)
+          lineNet: isCountedOrder(order) ? Math.round((order.vendorDue - (homixDelivered ? 0 : order.companyDue) - order.fines) * 100) / 100 : "",
           lineState: order.state === "live" ? "" : LINE_STATE_LABELS[order.state],
           note: order.note ?? "",
           vendorName: item.vendorName,
         });
         // a manually edited cell carries the marking in its value's neighbour (notes) and a visible fill
-        order.overridden.forEach((key) => {
+        order.overridden.filter((key) => !(homixDelivered && key === "companyDue")).forEach((key) => {
           row.getCell(key).fill = { fgColor: { argb: "FFFFF2CC" }, pattern: "solid", type: "pattern" };
         });
       });

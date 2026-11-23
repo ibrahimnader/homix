@@ -1,4 +1,5 @@
-import { canTransition, computeTotals, daysCounter, effectiveLineCents, isOverdue, snapshotFromReportOrder } from "./invoice.logic";
+import { invoiceStatusLabel, netDirectionLabel } from "./invoice.constants";
+import { canTransition, computeTotals, daysCounter, dueParty, effectiveLineCents, isOverdue, snapshotFromReportOrder } from "./invoice.logic";
 import { fromCents, toCents } from "./invoice.money";
 import type { LineRow } from "./invoice.types";
 
@@ -17,22 +18,27 @@ describe("money", () => {
   });
 });
 
-describe("effectiveLineCents", () => {
-  test("uses stored values without overrides", () => {
+describe("effectiveLineCents (reference model)", () => {
+  test("uses stored values without overrides (vendor delivery keeps the report's dues; fines are separate)", () => {
     expect(effectiveLineCents(line())).toMatchObject({ companyDue: 20000, fines: 5000, vendorDue: 75000 });
   });
-  test("a fines override shifts vendor due by the difference, floored at zero", () => {
-    expect(effectiveLineCents(line({ finesOverride: "0" }))).toMatchObject({ fines: 0, vendorDue: 80000 });
-    expect(effectiveLineCents(line({ finesOverride: "100", vendorDue: "20.00" }))).toMatchObject({ fines: 10000, vendorDue: 0 });
+  test("a fines override only changes the fines column, never the dues", () => {
+    expect(effectiveLineCents(line({ finesOverride: "0" }))).toMatchObject({ fines: 0, vendorDue: 75000, companyDue: 20000 });
+    expect(effectiveLineCents(line({ finesOverride: "100" }))).toMatchObject({ fines: 10000, vendorDue: 75000 });
   });
-  test("explicit overrides win over derived values", () => {
+  test("explicit overrides win over derived values (vendorDue override is the GROSS due)", () => {
     expect(effectiveLineCents(line({ finesOverride: "0", vendorDueOverride: "700", companyDueOverride: "10" })))
       .toMatchObject({ companyDue: 1000, fines: 0, vendorDue: 70000 });
+  });
+  test("Homix delivery: the snapshot (cost gross, companyDue 0) stands; a cost override re-derives it", () => {
+    const homix = line({ companyDueKind: "margin", isWarehouseDelivery: true, collectionTotal: "1500", warehouseCost: "600", fines: "50", vendorDue: "600", companyDue: "0" });
+    expect(effectiveLineCents(homix)).toMatchObject({ companyDue: 0, fines: 5000, vendorDue: 60000 });
+    expect(effectiveLineCents({ ...homix, warehouseCostOverride: 450 })).toMatchObject({ companyDue: 0, vendorDue: 45000 });
   });
 });
 
 describe("computeTotals", () => {
-  test("counts included lines only and applies live adjustments", () => {
+  test("counts included lines only and applies live adjustments (net = vendor - company - fines + adjustments)", () => {
     const totals = computeTotals(
       [line(), line({ state: "frozen" }), line({ state: "deferred" }), line({ state: "removed" }), line({ vendorDueOverride: "100" })],
       [
@@ -43,17 +49,87 @@ describe("computeTotals", () => {
     );
     expect(totals).toMatchObject({
       adjustmentsTotal: -15.5, collectionTotal: 2000, companyDueTotal: 400, finesTotal: 100,
-      netAmount: 834.5, ordersCount: 2, vendorDueTotal: 850, warehouseCost: 1200,
+      netAmount: 850 - 400 - 100 - 15.5, ordersCount: 2, vendorDueTotal: 850, warehouseCost: 1200,
     });
   });
-  test("net may be negative (payable to Homix) and is not clamped", () => {
-    const totals = computeTotals([line({ vendorDue: "10" })], [{ amount: "100", kind: "deduction", removedAt: null }]);
+  test("net may be negative (the vendor owes Homix) and is not clamped", () => {
+    const totals = computeTotals([line({ vendorDue: "10", companyDue: "0", fines: "0" })], [{ amount: "100", kind: "deduction", removedAt: null }]);
     expect(totals.netAmount).toBe(-90);
   });
   test("is independent of later order edits because it only reads stored snapshot columns", () => {
     const stored = line();
     const first = computeTotals([stored], []);
     expect(computeTotals([stored], [])).toEqual(first);
+  });
+});
+
+describe("dueParty / net direction", () => {
+  test("derived from the sign of the net: vendor, homix, or null when settled", () => {
+    expect(dueParty(10)).toBe("vendor");
+    expect(dueParty(-0.01)).toBe("homix");
+    expect(dueParty(0)).toBeNull();
+  });
+  test("transferred labels follow the direction", () => {
+    expect(invoiceStatusLabel("transferred", 5)).toBe("تم التحويل للبائع");
+    expect(invoiceStatusLabel("transferred", -5)).toBe("تم استلام التحويل من البائع");
+    expect(invoiceStatusLabel("transferred", 0)).toBe("تم التحويل");
+    expect(invoiceStatusLabel("reviewed", -5)).toBe("تمت المراجعة");
+    expect(netDirectionLabel(1)).toBe("صافي المستحق للبائع");
+    expect(netDirectionLabel(-1)).toBe("صافي المستحق لهوميكس");
+    expect(netDirectionLabel(0)).toBe("لا يوجد مستحق");
+  });
+});
+
+describe("regression: reference-model scenarios", () => {
+  const homixLine = (cost: string, fines = "0", overrides: Partial<LineRow> = {}) => line({
+    collectionTotal: String(Number(cost) * 2), companyDue: "0", companyDueKind: "margin", fines, isWarehouseDelivery: true, vendorDue: cost, warehouseCost: cost, ...overrides,
+  });
+  const vendorLine = (balance: number, fines = "0", overrides: Partial<LineRow> = {}) => line({
+    collectionTotal: "1000", companyDue: String(Math.max(balance, 0)), companyDueKind: "vendorOwes", fines, isWarehouseDelivery: false,
+    vendorDue: String(Math.max(-balance, 0)), vendorShippingCost: "0", warehouseCost: "600", ...overrides,
+  });
+
+  test("all-warehouse with fines: net = sum(cost) - fines (fines are not floored per line)", () => {
+    const totals = computeTotals([homixLine("1200", "100"), homixLine("500", "700")], []);
+    expect(totals).toMatchObject({ vendorDueTotal: 1700, companyDueTotal: 0, finesTotal: 800, netAmount: 900 });
+  });
+  test("mixed: Homix deliveries owed to the vendor, vendor deliveries owed to Homix", () => {
+    const totals = computeTotals([homixLine("1200", "100"), vendorLine(350, "20")], []);
+    expect(totals).toMatchObject({ vendorDueTotal: 1200, companyDueTotal: 350, finesTotal: 120, netAmount: 730 });
+  });
+  test("vendor delivery owing Homix plus fines gives a negative net", () => {
+    const totals = computeTotals([vendorLine(350, "50")], []);
+    expect(totals).toMatchObject({ vendorDueTotal: 0, companyDueTotal: 350, finesTotal: 50, netAmount: -400 });
+    expect(dueParty(totals.netAmount)).toBe("homix");
+  });
+  test("vendor delivery where Homix owes the vendor: fines still subtract once", () => {
+    const totals = computeTotals([vendorLine(-100, "30")], []);
+    expect(totals).toMatchObject({ vendorDueTotal: 100, companyDueTotal: 0, finesTotal: 30, netAmount: 70 });
+  });
+  test("net exactly 0 is settled (no party)", () => {
+    const totals = computeTotals([homixLine("100"), vendorLine(100)], []);
+    expect(totals.netAmount).toBe(0);
+    expect(dueParty(totals.netAmount)).toBeNull();
+  });
+  test("overrides feed the same formula (gross vendor due, company due, fines, cost)", () => {
+    const totals = computeTotals([
+      homixLine("1200", "100", { vendorDueOverride: "1000", finesOverride: "0" }),
+      vendorLine(350, "0", { companyDueOverride: "100", finesOverride: "25" }),
+      homixLine("500", "0", { warehouseCostOverride: 400 }),
+    ], []);
+    expect(totals).toMatchObject({ vendorDueTotal: 1400, companyDueTotal: 100, finesTotal: 25, netAmount: 1275 });
+  });
+  test("manual adjustments move the signed net (and can flip its direction)", () => {
+    const base = [homixLine("100")];
+    expect(computeTotals(base, [{ amount: "30", kind: "addition", removedAt: null }]).netAmount).toBe(130);
+    expect(computeTotals(base, [{ amount: "130", kind: "deduction", removedAt: null }]).netAmount).toBe(-30);
+  });
+  test("the equation holds for every fixture: vendorDue - companyDue - fines + adjustments = net", () => {
+    const fixtures = [[homixLine("1200", "100")], [vendorLine(350, "50")], [homixLine("100"), vendorLine(100)], [vendorLine(-100, "30"), homixLine("77.77", "1.11")]];
+    for (const lines of fixtures) {
+      const t = computeTotals(lines, [{ amount: "5.05", kind: "addition", removedAt: null }]);
+      expect(toCents(t.vendorDueTotal) - toCents(t.companyDueTotal) - toCents(t.finesTotal) + toCents(t.adjustmentsTotal)).toBe(toCents(t.netAmount));
+    }
   });
 });
 
@@ -98,51 +174,46 @@ describe("snapshotFromReportOrder", () => {
 });
 
 describe("effectiveLineCents with cost/collection overrides", () => {
-  // cost based snapshot: 2,299 collected, 1,200 cost, 100 fines -> vendor 1,100, company 1,099
-  const costBased = (overrides: Partial<LineRow> = {}) => line({
-    collectionTotal: "2299", companyDue: "1099", fines: "100", vendorDue: "1100", warehouseCost: "1200", ...overrides,
+  // Homix delivery: 2,299 collected, 1,200 cost, 100 fines -> vendorDue 1,200 gross, companyDue 0
+  const homix = (overrides: Partial<LineRow> = {}) => line({
+    collectionTotal: "2299", companyDue: "0", companyDueKind: "margin", fines: "100", isWarehouseDelivery: true, vendorDue: "1200", warehouseCost: "1200", ...overrides,
   });
   const eff = (overrides: Partial<LineRow> = {}) => {
-    const e = effectiveLineCents(costBased(overrides));
+    const e = effectiveLineCents(homix(overrides));
     return { collection: fromCents(e.collection), companyDue: fromCents(e.companyDue), cost: fromCents(e.cost), fines: fromCents(e.fines), vendorDue: fromCents(e.vendorDue) };
   };
 
   test("no overrides keeps the snapshot", () => {
-    expect(eff()).toEqual({ collection: 2299, companyDue: 1099, cost: 1200, fines: 100, vendorDue: 1100 });
+    expect(eff()).toEqual({ collection: 2299, companyDue: 0, cost: 1200, fines: 100, vendorDue: 1200 });
   });
-  test("cost override recalculates both dues", () => {
-    expect(eff({ warehouseCostOverride: 1000 })).toMatchObject({ cost: 1000, vendorDue: 900, companyDue: 1299 });
+  test("cost override recalculates the vendor due (cost gross)", () => {
+    expect(eff({ warehouseCostOverride: 1000 })).toMatchObject({ cost: 1000, vendorDue: 1000, companyDue: 0 });
   });
-  test("collection override only moves the company due", () => {
-    expect(eff({ collectionOverride: 2000 })).toMatchObject({ collection: 2000, vendorDue: 1100, companyDue: 800 });
+  test("collection override moves nothing on a Homix delivery", () => {
+    expect(eff({ collectionOverride: 2000 })).toMatchObject({ collection: 2000, vendorDue: 1200, companyDue: 0 });
   });
-  test("fines override recalculates the vendor due from cost", () => {
-    expect(eff({ finesOverride: 0 })).toMatchObject({ fines: 0, vendorDue: 1200, companyDue: 1099 });
-    expect(eff({ finesOverride: 5000 }).vendorDue).toBe(0);
+  test("fines override changes only the fines", () => {
+    expect(eff({ finesOverride: 0 })).toMatchObject({ fines: 0, vendorDue: 1200 });
+    expect(eff({ finesOverride: 5000 })).toMatchObject({ fines: 5000, vendorDue: 1200 });
   });
   test("due overrides win over everything (and may be 0)", () => {
     expect(eff({ warehouseCostOverride: 1000, finesOverride: 10, vendorDueOverride: 0, companyDueOverride: 5 })).toMatchObject({ vendorDue: 0, companyDue: 5, cost: 1000, fines: 10 });
   });
-  test("all five overrides combined", () => {
-    expect(eff({ collectionOverride: 3000, companyDueOverride: 7, finesOverride: 50, vendorDueOverride: 999, warehouseCostOverride: 1500 }))
-      .toEqual({ collection: 3000, companyDue: 7, cost: 1500, fines: 50, vendorDue: 999 });
-  });
-  test("legacy (selling-price) snapshots keep the fines delta logic and re-settle on cost/collection overrides", () => {
-    const legacy = line({ collectionTotal: "1000", companyDue: "200", fines: "50", vendorDue: "750", warehouseCost: "600", finesOverride: 0 });
-    expect(fromCents(effectiveLineCents(legacy).vendorDue)).toBe(800);
-    const resettled = effectiveLineCents(line({ collectionTotal: "1000", companyDue: "200", fines: "0", vendorDue: "800", warehouseCost: "600", warehouseCostOverride: 1100, vendorShippingCost: "0" }));
+  test("vendor delivery with a cost/collection override re-settles the balance", () => {
+    const vendor = line({ collectionTotal: "1000", companyDue: "200", companyDueKind: "vendorOwes", fines: "0", vendorDue: "0", vendorShippingCost: "0", warehouseCost: "600", warehouseCostOverride: 1100 });
+    const resettled = effectiveLineCents(vendor);
     expect([fromCents(resettled.companyDue), fromCents(resettled.vendorDue)]).toEqual([0, 100]);
   });
   test("computeTotals uses the effective cost and collection", () => {
-    const totals = computeTotals([costBased({ warehouseCostOverride: 1000, collectionOverride: 2000 })], []);
-    expect(totals).toMatchObject({ collectionTotal: 2000, warehouseCost: 1000, vendorDueTotal: 900, companyDueTotal: 1000, finesTotal: 100 });
+    const totals = computeTotals([homix({ warehouseCostOverride: 1000, collectionOverride: 2000 })], []);
+    expect(totals).toMatchObject({ collectionTotal: 2000, warehouseCost: 1000, vendorDueTotal: 1000, companyDueTotal: 0, finesTotal: 100, netAmount: 900 });
   });
 });
 
 describe("vendor shipping (شحن البائع) override", () => {
   // vendor delivery: collected 1,000, cost 600, system shipping 50 -> balance 350 for Homix
   const vendorDelivered = (overrides: Partial<LineRow> = {}) => line({
-    collectionTotal: "1000", companyDue: "350", fines: "0", vendorDue: "0", vendorShippingCost: "50", warehouseCost: "600", ...overrides,
+    collectionTotal: "1000", companyDue: "350", companyDueKind: "vendorOwes", fines: "0", vendorDue: "0", vendorShippingCost: "50", warehouseCost: "600", ...overrides,
   });
 
   test("no override keeps the system shipping and the snapshot dues", () => {
@@ -150,9 +221,9 @@ describe("vendor shipping (شحن البائع) override", () => {
   });
   test("override replaces the system value and re-settles balance = collection - cost - shipping", () => {
     expect(effectiveLineCents(vendorDelivered({ vendorShippingCostOverride: 120 }))).toMatchObject({ shipping: 12000, companyDue: 28000, vendorDue: 0 });
-    // shipping above the margin turns the balance into a vendor due (fines still reduce it)
+    // shipping above the margin turns the balance into a (gross) vendor due; fines never reduce it
     expect(effectiveLineCents(vendorDelivered({ vendorShippingCostOverride: 500 }))).toMatchObject({ companyDue: 0, vendorDue: 10000 });
-    expect(effectiveLineCents(vendorDelivered({ vendorShippingCostOverride: 500, fines: "30" }))).toMatchObject({ vendorDue: 7000 });
+    expect(effectiveLineCents(vendorDelivered({ vendorShippingCostOverride: 500, fines: "30" }))).toMatchObject({ vendorDue: 10000, fines: 3000 });
   });
   test("an override of 0 is a real value, not 'no override'", () => {
     expect(effectiveLineCents(vendorDelivered({ vendorShippingCostOverride: 0 }))).toMatchObject({ shipping: 0, companyDue: 40000 });
@@ -160,9 +231,9 @@ describe("vendor shipping (شحن البائع) override", () => {
   test("explicit due overrides still win over the shipping re-settlement", () => {
     expect(effectiveLineCents(vendorDelivered({ vendorShippingCostOverride: 120, companyDueOverride: 9, vendorDueOverride: 8 }))).toMatchObject({ companyDue: 900, vendorDue: 800, shipping: 12000 });
   });
-  test("cost-based (Homix delivered) lines keep their dues; the override never changes them", () => {
-    const homix = line({ collectionTotal: "2299", companyDue: "1099", fines: "100", vendorDue: "1100", warehouseCost: "1200", vendorShippingCostOverride: 70 });
-    expect(effectiveLineCents(homix)).toMatchObject({ companyDue: 109900, vendorDue: 110000 });
+  test("Homix-delivered lines keep their dues; the shipping override never changes them", () => {
+    const homix = line({ collectionTotal: "2299", companyDue: "0", companyDueKind: "margin", fines: "100", vendorDue: "1200", warehouseCost: "1200", vendorShippingCostOverride: 70 });
+    expect(effectiveLineCents(homix)).toMatchObject({ companyDue: 0, vendorDue: 120000 });
   });
   test("computeTotals sums the effective shipping of counted lines only", () => {
     const totals = computeTotals([
@@ -176,16 +247,30 @@ describe("vendor shipping (شحن البائع) override", () => {
 
 describe("company due kinds", () => {
   test("the snapshot keeps the report's kind (margin / vendorOwes) and defaults to null", () => {
-    const base = { collectionTotal: 100, companyDue: 40, fines: 0, orderId: 7, vendorDue: 60, warehouseCost: 60 };
+    const base = { collectionTotal: 100, companyDue: 0, fines: 0, orderId: 7, vendorDue: 60, warehouseCost: 60 };
     expect(snapshotFromReportOrder({ ...base, companyDueKind: "margin", shipmentId: 7 })).toMatchObject({ companyDueKind: "margin" });
     expect(snapshotFromReportOrder({ ...base, companyDueKind: "vendorOwes" })).toMatchObject({ companyDueKind: "vendorOwes" });
     expect(snapshotFromReportOrder(base).companyDueKind).toBeNull();
   });
 
-  test("company due never enters the invoice net, whatever its kind", () => {
-    const withCompany = (companyDue: string) => computeTotals([line({ companyDue, fines: "0", vendorDue: "100", vendorDueOverride: null })], [{ amount: "10", kind: "deduction", removedAt: null }]);
-    expect(withCompany("0").netAmount).toBe(90);
-    expect(withCompany("5000").netAmount).toBe(90);
-    expect(withCompany("5000").companyDueTotal).toBe(5000);
+  test("company due enters the net only for vendor-delivered (vendorOwes) lines", () => {
+    const vendorLine = (companyDue: string) => line({ companyDue, companyDueKind: "vendorOwes", fines: "0", vendorDue: "100" });
+    const adjustments = [{ amount: "10", kind: "deduction" as const, removedAt: null }];
+    expect(computeTotals([vendorLine("0")], adjustments).netAmount).toBe(90);
+    expect(computeTotals([vendorLine("50")], adjustments).netAmount).toBe(40);
+    expect(computeTotals([vendorLine("50")], adjustments).companyDueTotal).toBe(50);
+  });
+
+  test("company due totals count vendor-delivered lines only; Homix-delivered overrides are kept but never summed", () => {
+    const warehouse = line({ companyDue: "0", companyDueKind: "margin", isWarehouseDelivery: true, collectionTotal: "2299", fines: "100", vendorDue: "1200", warehouseCost: "1200" });
+    const vendor = line({ companyDue: "350", companyDueKind: "vendorOwes", isWarehouseDelivery: false, collectionTotal: "1000", fines: "0", vendorDue: "0", vendorShippingCost: "50", warehouseCost: "600" });
+    expect(computeTotals([warehouse], []).companyDueTotal).toBe(0);
+    expect(computeTotals([warehouse], []).vendorDueTotal).toBe(1200);
+    const mixed = computeTotals([warehouse, vendor], []);
+    expect(mixed.companyDueTotal).toBe(350);
+    expect(mixed.netAmount).toBe(1200 - 350 - 100);
+    // a NULL kind falls back to isWarehouseDelivery
+    expect(computeTotals([{ ...warehouse, companyDueKind: null }], []).companyDueTotal).toBe(0);
+    expect(computeTotals([{ ...warehouse, companyDueOverride: "777" }], []).companyDueTotal).toBe(0);
   });
 });

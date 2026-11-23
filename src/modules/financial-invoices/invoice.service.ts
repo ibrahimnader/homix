@@ -6,22 +6,44 @@ import { env } from "../../config/env";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../../shared/errors";
 import type { OrderFinancialReportQuery, OrderFinancialReportResponse } from "../orders/order.types";
 import {
-  INVOICE_STATUS, INVOICE_STATUS_LABELS, LINE_ACTION_RULES, LINE_STATE, OVERDUE_DAYS, RECEIPT_FOLDER, VENDOR_VISIBLE_STATUSES,
+  INVOICE_STATUS, INVOICE_STATUS_LABELS, invoiceStatusLabel, LINE_ACTION_RULES, LINE_STATE, OVERDUE_DAYS, RECEIPT_FOLDER, VENDOR_VISIBLE_STATUSES,
   type InvoiceStatus, type LineAction,
 } from "./invoice.constants";
 import { isBillableOrderStatus } from "./invoice.eligibility";
-import { canTransition, computeTotals, dueParty, daysCounter, effectiveLineCents, isOverdue, snapshotFromReportOrder } from "./invoice.logic";
+import { canTransition, computeTotals, dueParty, daysCounter, effectiveLineCents, isOverdue, lineNetCents, snapshotFromReportOrder } from "./invoice.logic";
 import { overlayReport, type ExportReport, type OverlayInvoice, type OverlayLine } from "./invoice.export-overlay";
 import { fromCents, toCents } from "./invoice.money";
-import type { InvoiceListFilters, InvoiceRepository, Tx } from "./invoice.repo";
+import type { InvoiceListFilters, InvoiceRepository, Tx, VendorBankRow } from "./invoice.repo";
 import type { Actor, AdjustmentRow, InvoiceRow, LineRow, LineSnapshot } from "./invoice.types";
 
 const CAIRO = "Africa/Cairo";
 
 export type ReportProvider = (query: OrderFinancialReportQuery, vendorId?: number | null) => Promise<OrderFinancialReportResponse>;
 
-/** Who is asking. `vendorId` is set (from the token) for vendor users and forces read scoping. */
-export type Scope = { vendorId?: number | null };
+/**
+ * Who is asking. `vendorId` is set (from the token) for vendor users and forces read scoping.
+ * `canSettle` = staff holding finance_settle: the only non-vendor scope that may read vendors' bank data.
+ */
+export type Scope = { canSettle?: boolean; vendorId?: number | null };
+
+/** A vendor's payout details, exposed only to finance_settle staff and to the vendor himself (see `vendorBankFor`). */
+export type VendorBank = { accountHolder: string | null; accountNumber: string | null; bankName: string | null; instaPayNumber: string | null; walletNumber: string | null };
+
+const clean = (value: unknown): string | null => {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text === "" ? null : text;
+};
+const toVendorBank = (row: VendorBankRow | undefined): VendorBank | null => {
+  if (!row) return null;
+  const bank: VendorBank = {
+    accountHolder: clean(row.bankAccountHolderName), accountNumber: clean(row.bankAccountNumber), bankName: clean(row.bankName),
+    instaPayNumber: clean(row.instaPayNumber), walletNumber: clean(row.walletNumber),
+  };
+  return Object.values(bank).some((value) => value !== null) ? bank : null;
+};
+
+/** Which (vendor, cycle) draft a live-row action targets. `referenceDate` = a Cairo day inside the cycle (the cycle end day). */
+export type LiveDraftInput = { billingDay: 13 | 28; referenceDate?: string; vendorId: number };
 
 type Deps = {
   getReport: ReportProvider;
@@ -98,7 +120,7 @@ export class InvoiceService {
       receiptUploadedAt: iso(row.receiptUploadedAt),
       reviewedAt: iso(row.reviewedAt),
       status: row.status,
-      statusLabel: INVOICE_STATUS_LABELS[row.status],
+      statusLabel: invoiceStatusLabel(row.status, net),
       transferAmount,
       transferredAt: iso(row.transferredAt),
       vendorDueTotal: num(row.vendorDueTotal),
@@ -121,6 +143,8 @@ export class InvoiceService {
       finesOverride: line.finesOverride === null ? null : num(line.finesOverride),
       id: Number(line.id),
       isWarehouseDelivery: Boolean(line.isWarehouseDelivery),
+      /** signed line net = vendorDue − companyDue (vendor deliveries only) − fines */
+      netAmount: fromCents(lineNetCents(line)),
       operationNumber: line.operationNumber,
       orderId: Number(line.orderId),
       orderNumber: line.orderNumber,
@@ -211,6 +235,39 @@ export class InvoiceService {
     return { counts, items: rows.map((row) => this.toInvoiceDto(row)), page: query.page, size: query.size, total };
   }
 
+  private canReadVendorBank(scope: Scope): boolean {
+    return Boolean(scope.vendorId) || Boolean(scope.canSettle);
+  }
+
+  /** `undefined` = not allowed to see bank data (key omitted); `null` = allowed, none registered. */
+  private async vendorBankFor(vendorId: number, scope: Scope): Promise<VendorBank | null | undefined> {
+    if (!this.canReadVendorBank(scope)) return undefined;
+    // a vendor only ever gets his own record, whatever vendorId the caller passed
+    const id = scope.vendorId ? Number(scope.vendorId) : vendorId;
+    return toVendorBank((await this.repo.listVendorBanks([id])).get(id));
+  }
+
+  /**
+   * Adds `vendorBank` to the seller rows of the live report: to finance_settle staff for every vendor, to a vendor user for his own
+   * row only (a vendor-scoped report only contains his own rows anyway; the id check is defence in depth). Other callers get the report unchanged.
+   */
+  public async withVendorBanks<T extends { fullInvoice: { items: Array<{ vendorId: number | null }> }; vendorDeliveries: { items: Array<{ vendorId: number | null }> }; warehouseDeliveries: { items: Array<{ vendorId: number | null }> } }>(
+    report: T, scope: Scope,
+  ): Promise<T> {
+    if (!this.canReadVendorBank(scope)) return report;
+    const sections = [report.fullInvoice, report.vendorDeliveries, report.warehouseDeliveries];
+    const ids = sections.flatMap((section) => section.items.map((item) => item.vendorId)).filter((id): id is number => id !== null)
+      .filter((id) => !scope.vendorId || Number(id) === Number(scope.vendorId));
+    const banks = await this.repo.listVendorBanks(ids);
+    for (const section of sections) {
+      for (const item of section.items as Array<{ vendorId: number | null; vendorBank?: VendorBank | null }>) {
+        if (item.vendorId === null || (scope.vendorId && Number(item.vendorId) !== Number(scope.vendorId))) continue;
+        item.vendorBank = toVendorBank(banks.get(Number(item.vendorId)));
+      }
+    }
+    return report;
+  }
+
   /** Vendor view of a line: internal handling notes and pre-override amounts are not for vendors. */
   private toVendorLineDto<T extends ReturnType<InvoiceService["toLineDto"]>>(dto: T) {
     const {
@@ -226,10 +283,13 @@ export class InvoiceService {
     const invoice = this.assertReadable(await this.repo.findInvoice(id), scope);
     const [lines, adjustments] = await Promise.all([this.repo.listLines(id), this.repo.listAdjustments(id)]);
     const isStaff = !scope.vendorId;
+    const vendorBank = await this.vendorBankFor(Number(invoice.vendorId), scope);
     return {
       adjustments: adjustments.filter((row) => isStaff || !row.removedAt).map((row) => this.toAdjustmentDto(row)),
       // Vendors only see counted lines; deferred/frozen/removed are internal handling.
       invoice: this.toInvoiceDto(invoice),
+      // payout details: finance_settle staff, or the vendor himself on his own invoice (assertReadable above); omitted otherwise
+      ...(vendorBank === undefined ? {} : { vendorBank }),
       lines: lines
         .filter((line) => isStaff || line.state === LINE_STATE.INCLUDED)
         .map((line) => {
@@ -265,7 +325,7 @@ export class InvoiceService {
         id: Number(row.id),
         netAmount: num(row.netAmount),
         status: row.status,
-        statusLabel: INVOICE_STATUS_LABELS[row.status],
+        statusLabel: invoiceStatusLabel(row.status, num(row.netAmount)),
         vendorId: Number(row.vendorId),
       })),
       lines: overlayRows
@@ -351,7 +411,7 @@ export class InvoiceService {
         invoiceCode: row.code,
         invoiceId: Number(row.invoiceId),
         invoiceStatus: row.invoiceStatus,
-        invoiceStatusLabel: INVOICE_STATUS_LABELS[row.invoiceStatus],
+        invoiceStatusLabel: invoiceStatusLabel(row.invoiceStatus, num(row.invoiceNetAmount ?? 0)),
         periodEnd: iso(row.periodEnd),
         transferredAt: iso(row.transferredAt),
         vendorId: row.vendorId,
@@ -753,28 +813,58 @@ export class InvoiceService {
     });
   }
 
+  /** Shared by the invoice dialog and the live rows: the caller already holds the locked, draft-checked invoice. */
+  private async applyLineAction(invoice: InvoiceRow, line: LineRow, action: LineAction, reason: string | undefined, actor: Actor, transaction: Tx) {
+    const rule = LINE_ACTION_RULES[action];
+    if (!rule.from.includes(line.state)) throw new ConflictError("هذا الإجراء غير متاح لحالة الطلب الحالية");
+    if (rule.to === LINE_STATE.INCLUDED) {
+      const locked = await this.repo.findLockedOrderIds([Number(line.orderId)], transaction);
+      if (locked.has(Number(line.orderId)) && line.state !== LINE_STATE.FROZEN) {
+        throw new ConflictError("هذا الطلب موجود بالفعل في فاتورة أخرى");
+      }
+    }
+    await this.repo.setLineState(line.id, rule.to, reason?.trim() || null, actor.id, transaction);
+    const totals = await this.recomputeTotals(invoice.id, transaction);
+    await this.repo.insertEvent({
+      action: `line.${action}`, actorId: actor.id,
+      detail: { fromState: line.state, lineId: Number(line.id), netAmount: totals.netAmount, orderId: Number(line.orderId), orderNumber: line.orderNumber, reason: reason ?? null, toState: rule.to },
+      invoiceId: invoice.id, vendorId: invoice.vendorId,
+    }, transaction);
+    return { netAmount: totals.netAmount, state: rule.to };
+  }
+
   public async lineAction(id: number, lineId: number, action: LineAction, reason: string | undefined, actor: Actor) {
     return this.repo.transaction(async (transaction) => {
       const invoice = await this.mustFind(id, transaction);
       this.assertDraft(invoice);
       const line = await this.repo.findLine(invoice.id, lineId, transaction);
       if (!line) throw new NotFoundError("الطلب غير موجود في الفاتورة");
-      const rule = LINE_ACTION_RULES[action];
-      if (!rule.from.includes(line.state)) throw new ConflictError("هذا الإجراء غير متاح لحالة الطلب الحالية");
-      if (rule.to === LINE_STATE.INCLUDED) {
-        const locked = await this.repo.findLockedOrderIds([Number(line.orderId)], transaction);
-        if (locked.has(Number(line.orderId)) && line.state !== LINE_STATE.FROZEN) {
-          throw new ConflictError("هذا الطلب موجود بالفعل في فاتورة أخرى");
-        }
-      }
-      await this.repo.setLineState(line.id, rule.to, reason?.trim() || null, actor.id, transaction);
-      const totals = await this.recomputeTotals(invoice.id, transaction);
-      await this.repo.insertEvent({
-        action: `line.${action}`, actorId: actor.id,
-        detail: { fromState: line.state, lineId, netAmount: totals.netAmount, orderId: Number(line.orderId), orderNumber: line.orderNumber, reason: reason ?? null, toState: rule.to },
-        invoiceId: invoice.id, vendorId: invoice.vendorId,
-      }, transaction);
-      return { netAmount: totals.netAmount, state: rule.to };
+      return this.applyLineAction(invoice, line, action, reason, actor, transaction);
+    });
+  }
+
+  /* ---------- live-row actions (create the draft first, act in the same transaction) ---------- */
+
+  /** (vendor, cycle) draft from the live report, created if missing. Concurrent callers converge on one row (upsertDraft ON CONFLICT). */
+  public async ensureLiveDraft(input: LiveDraftInput, actor: Actor) {
+    const report = await this.getReport({ billingDay: input.billingDay, referenceDate: input.referenceDate, vendorId: input.vendorId }, input.vendorId);
+    const snapshots = this.snapshotsByVendor(report).get(input.vendorId) ?? [];
+    const ensured = await this.repo.transaction((transaction) => this.ensureDraft(report.cycle, input.vendorId, snapshots, actor, transaction));
+    return { cycle: report.cycle, ...ensured };
+  }
+
+  /** Freeze / unfreeze / defer (move to the next cycle) / delete / restore one order straight from the live row. */
+  public async liveLineAction(input: LiveDraftInput & { action: LineAction; orderId: number; reason?: string }, actor: Actor) {
+    const report = await this.getReport({ billingDay: input.billingDay, referenceDate: input.referenceDate, vendorId: input.vendorId }, input.vendorId);
+    const snapshots = this.snapshotsByVendor(report).get(input.vendorId) ?? [];
+    return this.repo.transaction(async (transaction) => {
+      const { created, invoiceId } = await this.ensureDraft(report.cycle, input.vendorId, snapshots, actor, transaction);
+      const invoice = await this.mustFind(invoiceId, transaction);
+      this.assertDraft(invoice);
+      const line = await this.repo.findLineByOrder(invoice.id, input.orderId, transaction);
+      if (!line) throw new ConflictError("هذا الطلب غير مضمّن في فاتورة الدورة (مفوتَر في فاتورة أخرى أو محذوف نهائيًا)");
+      const result = await this.applyLineAction(invoice, line, input.action, input.reason, actor, transaction);
+      return { ...result, created, invoiceId: Number(invoice.id) };
     });
   }
 
@@ -782,6 +872,17 @@ export class InvoiceService {
     const invoice = await this.repo.findInvoice(id);
     if (!invoice) throw new NotFoundError("الفاتورة غير موجودة");
     return this.repo.searchOrderCandidates(Number(invoice.vendorId), q);
+  }
+
+  private async insertOrderLine(invoice: InvoiceRow, snapshot: LineSnapshot, actor: Actor, transaction: Tx) {
+    const added = await this.repo.insertLines(invoice.id, [snapshot], actor.id, transaction);
+    if (added.length === 0) throw new ConflictError("هذا الطلب موجود بالفعل في فاتورة أخرى أو تم حذفه نهائيًا من الفواتير");
+    const totals = await this.recomputeTotals(invoice.id, transaction);
+    await this.repo.insertEvent({
+      action: "line.added", actorId: actor.id, detail: { netAmount: totals.netAmount, orderId: snapshot.orderId, orderNumber: snapshot.orderNumber },
+      invoiceId: invoice.id, vendorId: invoice.vendorId,
+    }, transaction);
+    return { netAmount: totals.netAmount };
   }
 
   public async addOrder(id: number, orderId: number, actor: Actor) {
@@ -793,14 +894,33 @@ export class InvoiceService {
     return this.repo.transaction(async (transaction) => {
       const invoice = await this.mustFind(id, transaction);
       this.assertDraft(invoice);
-      const added = await this.repo.insertLines(invoice.id, [snapshot], actor.id, transaction);
-      if (added.length === 0) throw new ConflictError("هذا الطلب موجود بالفعل في فاتورة أخرى أو تم حذفه نهائيًا من الفواتير");
-      const totals = await this.recomputeTotals(invoice.id, transaction);
-      await this.repo.insertEvent({
-        action: "line.added", actorId: actor.id, detail: { netAmount: totals.netAmount, orderId, orderNumber: snapshot.orderNumber },
-        invoiceId: invoice.id, vendorId: invoice.vendorId,
-      }, transaction);
-      return { netAmount: totals.netAmount };
+      return this.insertOrderLine(invoice, snapshot, actor, transaction);
+    });
+  }
+
+  /** Order picker for the live rows: same search as the dialog, but keyed by vendor (no invoice needed yet). */
+  public liveOrderCandidates(vendorId: number, q: string) {
+    return this.repo.searchOrderCandidates(vendorId, q);
+  }
+
+  /** «إضافة طلب» from the live vendor section: create the draft if missing, then add the order in the same transaction. Idempotent. */
+  public async liveAddOrder(input: LiveDraftInput & { orderId: number }, actor: Actor) {
+    const snapshot = await this.repo.transaction((transaction) => this.lookupSnapshot(input.orderId, input.vendorId, transaction));
+    if (!snapshot) throw new ConflictError("الطلب غير مسلّم أو لا يخص هذا البائع");
+    const report = await this.getReport({ billingDay: input.billingDay, referenceDate: input.referenceDate, vendorId: input.vendorId }, input.vendorId);
+    const snapshots = this.snapshotsByVendor(report).get(input.vendorId) ?? [];
+    return this.repo.transaction(async (transaction) => {
+      const { created, invoiceId } = await this.ensureDraft(report.cycle, input.vendorId, snapshots, actor, transaction);
+      const invoice = await this.mustFind(invoiceId, transaction);
+      this.assertDraft(invoice);
+      // the draft top-up may already have pulled this very order in (it belongs to the cycle): that is the requested end state
+      const existing = await this.repo.findLineByOrder(invoice.id, input.orderId, transaction);
+      if (existing) {
+        if (existing.state !== LINE_STATE.INCLUDED) throw new ConflictError("هذا الطلب موجود في الفاتورة بحالة غير محسوبة — استخدم قائمة الطلب لإرجاعه");
+        const totals = await this.recomputeTotals(invoice.id, transaction);
+        return { alreadyIncluded: true, created, invoiceId: Number(invoice.id), netAmount: totals.netAmount };
+      }
+      return { alreadyIncluded: false, created, invoiceId: Number(invoice.id), ...(await this.insertOrderLine(invoice, snapshot, actor, transaction)) };
     });
   }
 

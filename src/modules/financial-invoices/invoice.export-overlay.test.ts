@@ -36,18 +36,18 @@ const order = (orderId: number) => ({
 });
 const section = (orders: ReturnType<typeof order>[]) => ({
   items: [{
-    collectionTotal: 1000 * orders.length, companyDue: 400 * orders.length, fines: 0, homixMargin: 0, orders, ordersCount: orders.length, vendorDue: 0,
+    collectionTotal: 1000 * orders.length, companyDue: 400 * orders.length, fines: 0, homixMargin: 0, netAmount: -400 * orders.length, orders, ordersCount: orders.length, vendorDue: 0,
     vendorId: 5, vendorName: "ركة", vendorOwes: 400 * orders.length, vendorShippingCost: 0, warehouseCost: 600 * orders.length,
   }],
   summary: {
-    collectionTotal: 1000 * orders.length, companyDue: 400 * orders.length, fines: 0, homixMargin: 0, ordersCount: orders.length, vendorDue: 0,
+    collectionTotal: 1000 * orders.length, companyDue: 400 * orders.length, fines: 0, homixMargin: 0, netAmount: -400 * orders.length, ordersCount: orders.length, vendorDue: 0,
     vendorOwes: 400 * orders.length, vendorShippingCost: 0, warehouseCost: 600 * orders.length,
   },
 });
 const makeReport = (mode = "billingCycle") => ({
   cycle: { billingDay: 28, endDate: "2026-10-28T21:59:59.999Z", mode, referenceDate: "2026-10-28T21:59:59.999Z", startDate: "2026-10-13T22:00:00.000Z" },
   fullInvoice: section([order(100), order(101)]),
-  summary: { companyDue: 800, fines: 0, homixMargin: 0, totalSales: 2000, vendorDue: 0, vendorOwes: 800, vendorsCount: 1 },
+  summary: { companyDue: 800, fines: 0, homixMargin: 0, netAmount: -800, totalSales: 2000, vendorDue: 0, vendorOwes: 800, vendorsCount: 1 },
   vendorDeliveries: section([order(100), order(101)]),
   warehouseDeliveries: { items: [], summary: section([]).summary },
 }) as never as OrderFinancialReportResponse;
@@ -95,7 +95,34 @@ describe("effectiveReport (Excel export overlay)", () => {
     expect(row.vendorShippingCost).toBe(120);
     expect(result.fullInvoice.summary).toMatchObject({ companyDue: 680, fines: 50, ordersCount: 2, vendorShippingCost: 120 });
     expect(result.summary).toMatchObject({ companyDue: 680, fines: 50, totalSales: 2000 });
+    // signed net = vendorDue − companyDue − fines: line 100 = 0 − 280 − 50, line 101 = 0 − 400 − 0
+    expect(row.netAmount).toBe(-730);
+    expect(result.fullInvoice.summary.netAmount).toBe(-730);
+    expect(result.summary.netAmount).toBe(-730);
     expect(row.invoice).toMatchObject({ code: "INV-7", status: "draft", statusLabel: "معلّقة" });
+  });
+
+  it("Homix-delivered lines never count toward «المستحق لهوميكس» (row, section, top)", async () => {
+    const report = makeReport();
+    const warehouseOrder = { ...order(100), companyDueKind: "margin" as const, shipmentId: 100 };
+    report.fullInvoice.items[0]!.orders = [warehouseOrder as never, order(101) as never];
+    // the live report already sums vendorOwes lines only (order 101 = 400)
+    report.fullInvoice.items[0]!.companyDue = 400;
+    report.fullInvoice.items[0]!.vendorOwes = 400;
+    report.fullInvoice.summary.companyDue = 400;
+    report.fullInvoice.summary.vendorOwes = 400;
+    report.summary.companyDue = 400;
+    report.summary.vendorOwes = 400;
+    const repo = makeRepo({
+      included: BOTH, invoices: [invoice()],
+      lines: [lineRow({ companyDue: 400, companyDueOverride: 999, isWarehouseDelivery: true, finesOverride: 10, vendorDue: 800 })],
+    });
+    const result = await svc(repo).effectiveReport(report, {});
+    const row = result.fullInvoice.items[0]!;
+    expect(row.exportOrders.find((o) => o.orderId === 100)!.companyDueKind).toBe("margin");
+    expect(row.companyDue).toBe(400);
+    expect(result.fullInvoice.summary.companyDue).toBe(400);
+    expect(result.summary.companyDue).toBe(400);
   });
 
   it("a collection / cost / due override replaces those cells", async () => {
@@ -185,7 +212,8 @@ describe("OrderService.exportFinancialReport (workbook)", () => {
     }));
     const full = workbook.getWorksheet("full-invoice");
     const headers = full.getRow(1).values.filter(Boolean);
-    expect(headers).toEqual(expect.arrayContaining(["المستحق لهوميكس", "شحن البائع", "التسويات اليدوية", "صافي مستحق البائع", "كود الفاتورة", "حالة الفاتورة"]));
+    expect(headers).toEqual(expect.arrayContaining(["المستحق لهوميكس", "شحن البائع", "التسويات اليدوية", "الصافي", "اتجاه الصافي", "كود الفاتورة", "حالة الفاتورة"]));
+    expect(headers).not.toContain("صافي مستحق البائع");
     const col = (name: string) => full.getRow(1).values.indexOf(name);
     expect(cell(full, 2, col("الغرامات"))).toBe(50);
     expect(cell(full, 2, col("كود الفاتورة"))).toBe("INV-7");
@@ -195,9 +223,15 @@ describe("OrderService.exportFinancialReport (workbook)", () => {
     expect(totals.values[col("المستحق لهوميكس")]).toBe(680);
     expect(totals.values[col("الغرامات")]).toBe(50);
     expect(totals.values[col("شحن البائع")]).toBe(120);
+    // signed net of the row (-730) plus the manual adjustment (-30); negative = the vendor owes Homix
+    expect(cell(full, 2, col("الصافي"))).toBe(-760);
+    expect(cell(full, 2, col("اتجاه الصافي"))).toBe("صافي المستحق لهوميكس");
+    expect(totals.values[col("الصافي")]).toBe(-760);
+    expect(cell(workbook.getWorksheet("summary"), 9, 2)).toBe(-730);
     const lines = workbook.getWorksheet("lines");
     const noteCol = lines.getRow(1).values.indexOf("ملاحظات");
     expect(String(cell(lines, 2, noteCol))).toContain("تعديل يدوي");
+    expect(cell(lines, 2, lines.getRow(1).values.indexOf("الصافي"))).toBe(-330);
     expect(workbook.getWorksheet("adjustments").getRow(2).values).toEqual(expect.arrayContaining(["خصم تأخير", -30]));
   });
 

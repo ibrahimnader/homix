@@ -9,28 +9,19 @@ const optionalCents = (value: unknown): number | null =>
   value === null || value === undefined || value === "" ? null : toCents(value);
 
 type EffectiveInput = Pick<LineRow, "fines" | "vendorDue" | "companyDue" | "finesOverride" | "vendorDueOverride" | "companyDueOverride">
-  & Partial<Pick<LineRow, "warehouseCostOverride" | "vendorShippingCostOverride" | "collectionOverride" | "collectionTotal" | "warehouseCost" | "vendorShippingCost">>;
+  & Partial<Pick<LineRow, "warehouseCostOverride" | "vendorShippingCostOverride" | "collectionOverride" | "collectionTotal" | "warehouseCost" | "vendorShippingCost" | "companyDueKind" | "isWarehouseDelivery">>;
 
 /**
- * A snapshot is "cost based" when its stored dues follow the approved sheet formula
- * (vendorDue = max(0, cost - fines), companyDue = collection - cost). Older snapshots (selling-price rule) and
- * vendor-delivered lines (balance settlement) are not, and keep their own logic when something is overridden.
- */
-export const isCostBasedLine = (line: EffectiveInput): boolean => {
-  if (line.collectionTotal === undefined || line.warehouseCost === undefined) return false;
-  const cost = toCents(line.warehouseCost);
-  return toCents(line.vendorDue) === Math.max(cost - toCents(line.fines), 0)
-    && toCents(line.companyDue) === toCents(line.collectionTotal) - cost;
-};
-
-/**
- * Effective (override-aware) per-line amounts in piasters.
- *  cost / collection / vendor shipping = override ?? snapshot
- *  vendorDue  = vendorDueOverride  ?? derived
+ * Effective (override-aware) per-line amounts in piasters. Reference model (owner decision, Nov 2026):
+ *  cost / collection / vendor shipping / fines = override ?? snapshot
+ *  Homix delivery (kind `margin`)   : vendorDue = cost (GROSS, before fines), companyDue = 0 (the snapshot is the report's value;
+ *                                     a cost override re-derives it)
+ *  vendor delivery (kind `vendorOwes`): balance = collection − cost − shipping;
+ *                                       balance >= 0 → companyDue = balance, else vendorDue = −balance
+ *                                       (no cost/collection/shipping override → the snapshot dues, which are the report's)
+ *  vendorDue  = vendorDueOverride  ?? derived   (a GROSS vendor due)
  *  companyDue = companyDueOverride ?? derived
- * derived (cost-based line)  : vendorDue = max(0, cost - fines), companyDue = collection - cost
- * derived (any other line)   : snapshot dues; a fines override shifts vendorDue by the fines difference; a cost/collection/vendor-shipping
- *                              override re-settles the balance (collection - cost - vendor shipping) like a vendor delivery.
+ * Fines are their own column: they never alter vendorDue / companyDue and are subtracted once from the net.
  */
 export const effectiveLineCents = (line: EffectiveInput) => {
   const fines = toCents(line.fines);
@@ -45,20 +36,21 @@ export const effectiveLineCents = (line: EffectiveInput) => {
   const collection = collectionOverride ?? toCents(line.collectionTotal);
   // override replaces the system value; vendorShippingCost may be absent on partial inputs
   const shipping = shippingOverride ?? toCents(line.vendorShippingCost ?? 0);
-  const costBased = isCostBasedLine(line);
+  const homixDelivery = !countsTowardCompanyDue(line);
 
   let derivedVendorDue: number;
   let derivedCompanyDue: number;
-  if (costBased) {
-    derivedVendorDue = Math.max(cost - effectiveFines, 0);
-    derivedCompanyDue = collection - cost;
+  if (homixDelivery) {
+    // a cost override re-derives the gross due; otherwise the snapshot (the report's value) stands
+    derivedVendorDue = costOverride !== null ? cost : toCents(line.vendorDue);
+    derivedCompanyDue = costOverride !== null ? 0 : toCents(line.companyDue);
   } else if (costOverride !== null || collectionOverride !== null || shippingOverride !== null) {
     const balance = collection - cost - shipping;
     derivedCompanyDue = Math.max(balance, 0);
-    derivedVendorDue = Math.max(Math.max(-balance, 0) - effectiveFines, 0);
+    derivedVendorDue = Math.max(-balance, 0);
   } else {
     derivedCompanyDue = toCents(line.companyDue);
-    derivedVendorDue = finesOverride === null ? toCents(line.vendorDue) : Math.max(toCents(line.vendorDue) + fines - finesOverride, 0);
+    derivedVendorDue = toCents(line.vendorDue);
   }
   return {
     collection,
@@ -70,8 +62,18 @@ export const effectiveLineCents = (line: EffectiveInput) => {
   };
 };
 
+/** «مستحق هوميكس» يخصّ بنود تسليم البائع فقط؛ البند بلا نوع يُحسب بحسب isWarehouseDelivery (مخزن = لا يُحتسب). */
+export const countsTowardCompanyDue = (line: { companyDueKind?: "margin" | "vendorOwes" | null; isWarehouseDelivery?: boolean | null }): boolean =>
+  (line.companyDueKind ?? (line.isWarehouseDelivery ? "margin" : "vendorOwes")) === "vendorOwes";
+
+/** Signed line net in piasters: vendorDue − companyDue (vendor deliveries only) − fines. */
+export const lineNetCents = (line: EffectiveInput): number => {
+  const effective = effectiveLineCents(line);
+  return effective.vendorDue - (countsTowardCompanyDue(line) ? effective.companyDue : 0) - effective.fines;
+};
+
 export const computeTotals = (
-  lines: Array<Pick<LineRow, "state" | "fines" | "vendorDue" | "companyDue" | "finesOverride" | "vendorDueOverride" | "companyDueOverride" | "collectionTotal" | "warehouseCost" | "vendorShippingCost"> & Partial<Pick<LineRow, "warehouseCostOverride" | "vendorShippingCostOverride" | "collectionOverride">>>,
+  lines: Array<Pick<LineRow, "state" | "fines" | "vendorDue" | "companyDue" | "finesOverride" | "vendorDueOverride" | "companyDueOverride" | "collectionTotal" | "warehouseCost" | "vendorShippingCost"> & Partial<Pick<LineRow, "warehouseCostOverride" | "vendorShippingCostOverride" | "collectionOverride" | "companyDueKind" | "isWarehouseDelivery">>>,
   adjustments: Array<Pick<AdjustmentRow, "kind" | "amount" | "removedAt">>,
 ): InvoiceTotals => {
   let ordersCount = 0;
@@ -85,7 +87,7 @@ export const computeTotals = (
     shipping += effective.shipping;
     fines += effective.fines;
     vendorDue += effective.vendorDue;
-    companyDue += effective.companyDue;
+    if (countsTowardCompanyDue(line)) companyDue += effective.companyDue;
   }
   const adjustmentsCents = sumAdjustmentCents(adjustments);
   return {
@@ -93,7 +95,8 @@ export const computeTotals = (
     collectionTotal: fromCents(collection),
     companyDueTotal: fromCents(companyDue),
     finesTotal: fromCents(fines),
-    netAmount: fromCents(vendorDue + adjustmentsCents),
+    // signed: > 0 Homix owes the vendor, < 0 the vendor owes Homix, 0 settled
+    netAmount: fromCents(vendorDue - companyDue - fines + adjustmentsCents),
     ordersCount,
     vendorDueTotal: fromCents(vendorDue),
     vendorShippingCost: fromCents(shipping),
@@ -166,4 +169,5 @@ export const snapshotFromReportOrder = (order: {
   };
 };
 
-export const dueParty = (netAmount: number): "vendor" | "homix" => (netAmount >= 0 ? "vendor" : "homix");
+/** Derived from the sign of the net: vendor (Homix pays him), homix (the vendor owes Homix), null (settled). */
+export const dueParty = (netAmount: number): "vendor" | "homix" | null => (netAmount > 0 ? "vendor" : netAmount < 0 ? "homix" : null);

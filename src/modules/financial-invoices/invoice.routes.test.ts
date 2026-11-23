@@ -17,6 +17,10 @@ const spies = {
   bulkTransition: jest.spyOn(invoiceService, "bulkTransition").mockResolvedValue({ results: [], succeeded: 0 } as never),
   cycleOverview: jest.spyOn(invoiceService, "cycleOverview").mockResolvedValue({ includedOrderIds: {}, invoices: [], lines: [] } as never),
   detail: jest.spyOn(invoiceService, "detail").mockResolvedValue({ adjustments: [], invoice: {}, lines: [] } as never),
+  ensureLiveDraft: jest.spyOn(invoiceService, "ensureLiveDraft").mockResolvedValue({ invoiceId: 3, created: true } as never),
+  liveAddOrder: jest.spyOn(invoiceService, "liveAddOrder").mockResolvedValue({ netAmount: 1 } as never),
+  liveLineAction: jest.spyOn(invoiceService, "liveLineAction").mockResolvedValue({ state: "frozen" } as never),
+  liveOrderCandidates: jest.spyOn(invoiceService, "liveOrderCandidates").mockResolvedValue([] as never),
   generate: jest.spyOn(invoiceService, "generate").mockResolvedValue({ invoices: [] } as never),
   invoicedLines: jest.spyOn(invoiceService, "invoicedLines").mockResolvedValue({ items: [] } as never),
   reviewLive: jest.spyOn(invoiceService, "reviewLive").mockResolvedValue({ alreadyReviewed: false } as never),
@@ -97,7 +101,7 @@ test("validation: bad status, bad billing day, transferAmount on a non-transfer,
 
 test("status filter is parsed from a comma list and the actor is the authenticated user", async () => {
   await request(finance).get("/financial-invoices?status=reviewed,frozen&receipt=missing");
-  expect(spies.list).toHaveBeenCalledWith(expect.objectContaining({ receipt: "missing", statuses: ["reviewed", "frozen"] }), {});
+  expect(spies.list).toHaveBeenCalledWith(expect.objectContaining({ receipt: "missing", statuses: ["reviewed", "frozen"] }), { canSettle: true });
   await request(finance).post("/financial-invoices/generate").send({ billingDay: 28, referenceDate: "2026-10-20" });
   expect(spies.generate).toHaveBeenCalledWith({ billingDay: 28, referenceDate: "2026-10-20" }, { id: 7 });
 });
@@ -114,7 +118,7 @@ test("cycle overview: needs finance_view, validates periodEnd and scopes vendors
   expect((await request(finance).get("/financial-invoices/cycle?periodEnd=28-10-2026")).status).toBe(400);
   expect(spies.cycleOverview).not.toHaveBeenCalled();
   expect((await request(finance).get("/financial-invoices/cycle?periodEnd=2026-10-28&vendorId=4")).status).toBe(200);
-  expect(spies.cycleOverview).toHaveBeenCalledWith({ periodEnd: "2026-10-28", vendorId: 4 }, {});
+  expect(spies.cycleOverview).toHaveBeenCalledWith({ periodEnd: "2026-10-28", vendorId: 4 }, { canSettle: true });
   await request(vendor).get("/financial-invoices/cycle?periodEnd=2026-10-28&vendorId=99");
   expect(spies.cycleOverview).toHaveBeenLastCalledWith({ periodEnd: "2026-10-28", vendorId: 99 }, { vendorId: 5 });
   expect((await request(orphanVendor).get("/financial-invoices/cycle?periodEnd=2026-10-28")).status).toBe(403);
@@ -144,7 +148,7 @@ test("vendor shipping override is accepted (and cleared with null), rejects nega
 test("invoiced lines: separate filters and a vendor id list are validated and parsed", async () => {
   await request(finance).get("/financial-invoices/lines?operationNumber=OP-1&orderNumber=316&productCode=rka&invoiceCode=INV-2026&vendorId=3,4&q=old");
   expect(spies.invoicedLines).toHaveBeenCalledWith(
-    expect.objectContaining({ invoiceCode: "INV-2026", operationNumber: "OP-1", orderNumber: "316", productCode: "rka", q: "old", vendorId: [3, 4] }), {});
+    expect.objectContaining({ invoiceCode: "INV-2026", operationNumber: "OP-1", orderNumber: "316", productCode: "rka", q: "old", vendorId: [3, 4] }), { canSettle: true });
   expect((await request(finance).get("/financial-invoices/lines?vendorId=abc")).status).toBe(400);
   expect((await request(finance).get("/financial-invoices/lines?operationNumber=")).status).toBe(400);
 });
@@ -164,7 +168,7 @@ test("vendor options: staff with finance_view only, never vendors", async () => 
 
 test("archive list accepts a separate invoiceCode filter", async () => {
   await request(finance).get("/financial-invoices?invoiceCode=INV-9&vendorId=4");
-  expect(spies.list).toHaveBeenCalledWith(expect.objectContaining({ invoiceCode: "INV-9", vendorId: 4 }), {});
+  expect(spies.list).toHaveBeenCalledWith(expect.objectContaining({ invoiceCode: "INV-9", vendorId: 4 }), { canSettle: true });
 });
 
 test("review-live: staff with finance_settle only, validated body, actor from the token", async () => {
@@ -179,4 +183,40 @@ test("review-live: staff with finance_settle only, validated body, actor from th
   expect(spies.reviewLive).toHaveBeenCalledWith(body, { id: 7 });
   expect((await request(finance).post("/financial-invoices/review-live-all").send({ billingDay: 13 })).status).toBe(200);
   expect(spies.reviewLiveAll).toHaveBeenCalledWith({ billingDay: 13 }, { id: 7 });
+});
+
+describe("live-row actions", () => {
+  const body = { action: "freeze", billingDay: 28, orderId: 100, referenceDate: "2026-11-28", vendorId: 5 };
+
+  test("staff with finance_settle reach the service with the actor; vendor and view-only get 403", async () => {
+    const response = await request(finance).post("/financial-invoices/live/line-action").send(body);
+    expect(response.status).toBe(200);
+    expect(spies.liveLineAction).toHaveBeenCalledWith(expect.objectContaining({ action: "freeze", orderId: 100, vendorId: 5 }), { id: 7 });
+    expect((await request(finance).post("/financial-invoices/live/ensure-draft").send({ billingDay: 28, vendorId: 5 })).body.data).toMatchObject({ invoiceId: 3 });
+    expect((await request(finance).post("/financial-invoices/live/lines").send({ billingDay: 28, orderId: 100, vendorId: 5 })).status).toBe(200);
+    expect((await request(finance).get("/financial-invoices/live/order-candidates?vendorId=5&q=31")).status).toBe(200);
+    expect(spies.liveOrderCandidates).toHaveBeenCalledWith(5, "31");
+    spies.liveLineAction.mockClear();
+    for (const app of [vendor, viewer]) {
+      expect((await request(app).post("/financial-invoices/live/line-action").send(body)).status).toBe(403);
+      expect((await request(app).post("/financial-invoices/live/lines").send(body)).status).toBe(403);
+      expect((await request(app).post("/financial-invoices/live/ensure-draft").send(body)).status).toBe(403);
+      expect((await request(app).get("/financial-invoices/live/order-candidates?vendorId=5&q=31")).status).toBe(403);
+    }
+    expect(spies.liveLineAction).not.toHaveBeenCalled();
+  });
+
+  test("validates the body (unknown action, bad billing day)", async () => {
+    expect((await request(finance).post("/financial-invoices/live/line-action").send({ ...body, action: "nuke" })).status).toBe(400);
+    expect((await request(finance).post("/financial-invoices/live/line-action").send({ ...body, billingDay: 5 })).status).toBe(400);
+  });
+});
+
+test("vendor bank scope: only finance_settle staff get canSettle; viewers do not; a vendor is scoped to his own id (never canSettle)", async () => {
+  await request(finance).get("/financial-invoices/12");
+  expect(spies.detail).toHaveBeenLastCalledWith(12, { canSettle: true });
+  await request(viewer).get("/financial-invoices/12");
+  expect(spies.detail).toHaveBeenLastCalledWith(12, { canSettle: false });
+  await request(vendor).get("/financial-invoices/12");
+  expect(spies.detail).toHaveBeenLastCalledWith(12, { vendorId: 5 });
 });

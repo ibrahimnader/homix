@@ -14,6 +14,22 @@ export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   transferred: "تم التحويل",
 };
 
+/**
+ * Status label that follows the direction of the net: a transferred invoice with net > 0 was paid to the vendor,
+ * with net < 0 the transfer was received from the vendor (net 0 keeps the neutral label).
+ */
+export const invoiceStatusLabel = (status: InvoiceStatus, netAmount: number): string => {
+  if (status === "transferred") {
+    if (netAmount > 0) return "تم التحويل للبائع";
+    if (netAmount < 0) return "تم استلام التحويل من البائع";
+  }
+  return INVOICE_STATUS_LABELS[status];
+};
+
+/** Direction label of a signed net (> 0 Homix owes the vendor, < 0 the vendor owes Homix, 0 settled). */
+export const netDirectionLabel = (netAmount: number): string =>
+  netAmount > 0 ? "صافي المستحق للبائع" : netAmount < 0 ? "صافي المستحق لهوميكس" : "لا يوجد مستحق";
+
 /** Statuses a vendor user may ever see (never drafts or frozen invoices). */
 export const VENDOR_VISIBLE_STATUSES: InvoiceStatus[] = [INVOICE_STATUS.REVIEWED, INVOICE_STATUS.TRANSFERRED];
 

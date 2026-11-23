@@ -23,4 +23,12 @@ describe("deploy migration statements for invoice-level overrides", () => {
     expect(source).toContain(`'margin', 'vendorOwes'`);
     expect(source).toMatch(/UPDATE financial_invoice_lines l[\s\S]*?o\."deliveryBy" = 1 THEN 'margin' ELSE 'vendorOwes'[\s\S]*?l\."companyDueKind" IS NULL/);
   });
+
+  test.each([["deploy script", deploy], ["migration", migration]])("%s keeps netAmount signed and the line due columns unconstrained (net may be negative: no migration needed)", (_name, source) => {
+    expect(source).toContain('"netAmount" NUMERIC(14,2) NOT NULL DEFAULT 0');
+    expect(source).not.toMatch(/CHECK\s*\([^)]*"netAmount"/);
+    expect(source).not.toMatch(/CHECK\s*\([^)]*"(vendorDue|companyDue)"\s*>=/);
+    // the only sign constraint on money is the magnitude of the transferred amount (direction comes from the net's sign)
+    expect(source).toContain('"transferAmount" IS NULL OR "transferAmount" >= 0');
+  });
 });

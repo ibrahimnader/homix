@@ -1,4 +1,4 @@
-import { INVOICE_STATUS_LABELS, LINE_STATE, type InvoiceStatus, type LineState } from "./invoice.constants";
+import { invoiceStatusLabel, LINE_STATE, type InvoiceStatus, type LineState } from "./invoice.constants";
 import { fromCents, toCents } from "./invoice.money";
 import type { OrderFinancialReportOrderRow, OrderFinancialReportResponse, OrderFinancialReportSectionSummary, OrderFinancialReportVendorRow } from "../orders/order.types";
 
@@ -109,9 +109,11 @@ const recompute = (row: OrderFinancialReportVendorRow, orders: ExportOrder[]): O
   return {
     ...row,
     collectionTotal: pick((o) => o.collectionTotal),
-    companyDue: pick((o) => o.companyDue),
+    // مستحق هوميكس = بنود تسليم البائع فقط (vendorOwes)؛ تسليم المخزن لا يُحتسب
+    companyDue: pick((o) => (o.companyDueKind === "vendorOwes" ? o.companyDue : 0)),
     fines: pick((o) => o.fines),
-    homixMargin: pick((o) => (o.companyDueKind === "margin" ? o.companyDue : 0)),
+    // signed per-row net (reference model): Σ vendorDue (gross) − Σ companyDue (vendor deliveries) − Σ fines
+    netAmount: pick((o) => o.vendorDue - (o.companyDueKind === "vendorOwes" ? o.companyDue : 0) - o.fines),
     ordersCount: counted.length,
     vendorDue: pick((o) => o.vendorDue),
     vendorOwes: pick((o) => (o.companyDueKind === "vendorOwes" ? o.companyDue : 0)),
@@ -174,12 +176,12 @@ function overlayVendor(tab: TabKey, row: OrderFinancialReportVendorRow, invoices
     exportOrders: orders,
     invoice: {
       adjustments: invoice.adjustments, adjustmentsTotal: invoice.adjustmentsTotal, code: invoice.code, netAmount: invoice.netAmount,
-      status: invoice.status, statusLabel: INVOICE_STATUS_LABELS[invoice.status],
+      status: invoice.status, statusLabel: invoiceStatusLabel(invoice.status, invoice.netAmount),
     },
   };
 }
 
-const SUMMARY_KEYS = ["collectionTotal", "companyDue", "fines", "homixMargin", "ordersCount", "vendorDue", "vendorOwes", "vendorShippingCost", "warehouseCost"] as const;
+const SUMMARY_KEYS = ["collectionTotal", "companyDue", "fines", "netAmount", "ordersCount", "vendorDue", "vendorOwes", "vendorShippingCost", "warehouseCost"] as const;
 
 const sectionSum = (rows: OrderFinancialReportVendorRow[], key: (typeof SUMMARY_KEYS)[number]): number => sum(rows.map((row) => Number(row[key]) || 0));
 
@@ -207,7 +209,7 @@ export function overlayReport(report: OrderFinancialReportResponse, invoices: Ov
       ...report.summary,
       companyDue: fromCents(toCents(report.summary.companyDue) + delta("companyDue")),
       fines: fromCents(toCents(report.summary.fines) + delta("fines")),
-      homixMargin: fromCents(toCents(report.summary.homixMargin) + delta("homixMargin")),
+      netAmount: fromCents(toCents(report.summary.netAmount) + delta("netAmount")),
       totalSales: fromCents(toCents(report.summary.totalSales) + delta("collectionTotal")),
       vendorDue: fromCents(toCents(report.summary.vendorDue) + delta("vendorDue")),
       vendorOwes: fromCents(toCents(report.summary.vendorOwes) + delta("vendorOwes")),

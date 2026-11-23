@@ -69,6 +69,16 @@ export const reviewLiveBody = z.object({
   vendorId: id,
 });
 
+/** Live-row line actions: address the draft by (vendor, cycle) instead of an invoice id; the server creates the draft if needed. */
+export const liveLineActionBody = reviewLiveBody.extend({
+  action: z.enum(LINE_ACTIONS),
+  orderId: id,
+  reason: z.string().trim().max(500).optional(),
+});
+export const liveAddOrderBody = reviewLiveBody.extend({ orderId: id });
+export const liveDraftBody = reviewLiveBody;
+export const liveCandidatesQuery = z.object({ q: z.string().trim().min(1).max(100), vendorId: id });
+
 export const reviewLiveAllBody = reviewLiveBody.omit({ vendorId: true });
 
 export const transitionBody = z.object({

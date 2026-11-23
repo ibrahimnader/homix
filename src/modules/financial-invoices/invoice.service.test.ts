@@ -29,10 +29,11 @@ const report = (endDate: string, orders: ReturnType<typeof reportOrder>[] = [rep
 }) as never;
 
 const makeRepo = (current: InvoiceRow = invoice()) => {
-  const state = { adjustments: [] as never[], current, lines: [] as LineRow[] };
+  const state = { adjustments: [] as never[], banks: new Map<number, Record<string, string | null>>(), current, lines: [] as LineRow[] };
   const repo = {
     findInvoice: jest.fn(async () => state.current),
     findLine: jest.fn(async (_i: unknown, lineId: number) => state.lines.find((row) => Number(row.id) === Number(lineId))),
+    findLineByOrder: jest.fn(async (_i: unknown, orderId: number) => state.lines.find((row) => Number(row.orderId) === Number(orderId))),
     findLockedOrderIds: jest.fn(async () => new Set<number>()),
     findOrderForInvoicing: jest.fn(),
     insertAdjustment: jest.fn(async (_i: unknown, input: Record<string, unknown>) => ({ ...input, createdAt: NOW, id: 3, removedAt: null })),
@@ -40,6 +41,7 @@ const makeRepo = (current: InvoiceRow = invoice()) => {
     insertLines: jest.fn(async (_i: unknown, snapshots: Array<{ orderId: number }>) => snapshots.map((row) => row.orderId)),
     listAdjustments: jest.fn(async () => state.adjustments),
     listLines: jest.fn(async () => state.lines),
+    listVendorBanks: jest.fn(async (ids: number[]) => new Map([...state.banks].filter(([id]) => ids.map(Number).includes(id)))),
     listPickableDeferred: jest.fn(async () => [] as LineRow[]),
     nextInvoiceSequence: jest.fn(async () => 7),
     refreshLineSnapshot: jest.fn(async () => undefined),
@@ -294,7 +296,7 @@ describe("cycleOverview (live report overlay)", () => {
     const result = await service(repo).cycleOverview({ periodEnd: "2026-10-28" }, {});
     expect(result.invoices.map((row) => [row.vendorId, row.status])).toEqual([[5, "draft"], [6, "frozen"]]);
     expect(result.lines).toHaveLength(2);
-    expect(result.lines[0]).toMatchObject({ fines: 0, finesOverride: 0, invoiceId: 1, overrideReason: "سبب داخلي", vendorDue: 800, vendorId: 5 });
+    expect(result.lines[0]).toMatchObject({ fines: 0, finesOverride: 0, invoiceId: 1, overrideReason: "سبب داخلي", vendorDue: 750, vendorId: 5 });
     expect(result.includedOrderIds).toEqual({ 1: [100, 101] });
     expect(repo.listCycleInvoices).toHaveBeenCalledWith(expect.objectContaining({ statuses: undefined, vendorId: undefined }));
   });
@@ -583,5 +585,165 @@ describe("reviewLiveAll", () => {
     const { repo } = makeRepo();
     await expect(service(repo, jest.fn(async () => report("2026-11-28T21:59:59.999Z"))).reviewLiveAll({ billingDay: 28 }, actor)).rejects.toThrow(/الدورة لم تنتهِ بعد/);
     expect(repo.upsertDraft).not.toHaveBeenCalled();
+  });
+});
+
+describe("live-row actions (ensure the draft, then act in one transaction)", () => {
+  const open = () => jest.fn(async () => report("2026-11-28T21:59:59.999Z"));
+  const live = { billingDay: 28 as const, vendorId: 5 };
+
+  test("ensureLiveDraft creates the draft on first use and reuses it afterwards (open cycle allowed)", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow()];
+    const first = await service(repo, open()).ensureLiveDraft(live, actor);
+    expect(first).toMatchObject({ created: true, invoiceId: 1, status: "draft", vendorId: 5 });
+    repo.upsertDraft.mockResolvedValue({ created: false, invoice: state.current });
+    const second = await service(repo, open()).ensureLiveDraft(live, actor);
+    expect(second).toMatchObject({ created: false, invoiceId: 1 });
+  });
+
+  test("concurrent calls converge on one draft: one creator, same id, orders on another invoice never duplicated", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow()];
+    repo.findLockedOrderIds.mockResolvedValue(new Set([100]));
+    repo.upsertDraft.mockResolvedValueOnce({ created: true, invoice: state.current }).mockResolvedValue({ created: false, invoice: state.current });
+    const svc = service(repo, open());
+    const [a, b] = await Promise.all([svc.ensureLiveDraft(live, actor), svc.ensureLiveDraft(live, actor)]);
+    expect([a.created, b.created].sort()).toEqual([false, true]);
+    expect(a.invoiceId).toBe(b.invoiceId);
+    for (const call of repo.insertLines.mock.calls) expect((call[1] as Array<{ orderId: number }>).map((row) => row.orderId)).not.toContain(100);
+  });
+
+  test("liveLineAction creates the draft and freezes the order in ONE transaction, audited", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow()];
+    const result = await service(repo, open()).liveLineAction({ ...live, action: "freeze", orderId: 100, reason: "مراجعة" }, actor);
+    expect(repo.transaction).toHaveBeenCalledTimes(1);
+    expect(repo.upsertDraft).toHaveBeenCalled();
+    expect(repo.setLineState).toHaveBeenCalledWith(11, "frozen", "مراجعة", 9, expect.anything());
+    expect(repo.insertEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "line.freeze", invoiceId: 1 }), expect.anything());
+    expect(result).toMatchObject({ created: true, invoiceId: 1, state: "frozen" });
+  });
+
+  test.each(["defer", "delete"] as const)("liveLineAction %s follows the same rule table as the dialog", async (action) => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow()];
+    await service(repo, open()).liveLineAction({ ...live, action, orderId: 100 }, actor);
+    expect(repo.setLineState).toHaveBeenCalledWith(11, action === "defer" ? "deferred" : "removed", null, 9, expect.anything());
+  });
+
+  test("a line state that does not fit the action is a 409, nothing is written", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow({ state: "deferred" })];
+    await expect(service(repo, open()).liveLineAction({ ...live, action: "freeze", orderId: 100 }, actor)).rejects.toThrow(/غير متاح/);
+    expect(repo.setLineState).not.toHaveBeenCalled();
+  });
+
+  test.each(["reviewed", "frozen", "transferred"] as const)("%s invoices stay immutable: 409, no line changes, no top-up", async (status) => {
+    const locked = invoice({ status });
+    const { repo, state } = makeRepo(locked);
+    state.lines = [lineRow()];
+    repo.upsertDraft.mockResolvedValue({ created: false, invoice: locked });
+    const svc = service(repo, open());
+    await expect(svc.liveLineAction({ ...live, action: "freeze", orderId: 100 }, actor)).rejects.toThrow(/مقفلة/);
+    repo.findOrderForInvoicing.mockResolvedValue({ effectiveDeliveryDate: "2026-11-01T09:00:00Z", id: 100, status: 5 });
+    await expect(svc.liveAddOrder({ ...live, orderId: 100 }, actor)).rejects.toThrow();
+    expect(repo.setLineState).not.toHaveBeenCalled();
+    expect(repo.insertLines).not.toHaveBeenCalled();
+    expect(repo.updateTotals).not.toHaveBeenCalled();
+  });
+
+  test("an order that is not on the invoice (billed elsewhere) is a 409", async () => {
+    const { repo } = makeRepo();
+    await expect(service(repo, open()).liveLineAction({ ...live, action: "delete", orderId: 999 }, actor)).rejects.toThrow(/غير مضمّن/);
+    expect(repo.setLineState).not.toHaveBeenCalled();
+  });
+
+  test("liveAddOrder creates the draft then inserts the picked order; refuses one billed elsewhere", async () => {
+    const { repo } = makeRepo();
+    repo.findOrderForInvoicing.mockResolvedValue({ effectiveDeliveryDate: "2026-10-01T09:00:00Z", id: 300, status: 5 });
+    const getReport = jest.fn(async () => report("2026-11-28T21:59:59.999Z", [reportOrder(300)]));
+    const result = await service(repo, getReport).liveAddOrder({ ...live, orderId: 300 }, actor);
+    expect(result).toMatchObject({ created: true, invoiceId: 1, alreadyIncluded: false });
+    expect(repo.insertEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "line.added" }), expect.anything());
+
+    const clash = makeRepo();
+    clash.repo.findOrderForInvoicing.mockResolvedValue({ effectiveDeliveryDate: "2026-10-01T09:00:00Z", id: 300, status: 5 });
+    clash.repo.insertLines.mockResolvedValue([] as never);
+    await expect(service(clash.repo, getReport).liveAddOrder({ ...live, orderId: 300 }, actor)).rejects.toThrow(/فاتورة أخرى/);
+  });
+
+  test("liveAddOrder is idempotent when the draft top-up already counted the order", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow({ orderId: 300 })];
+    repo.findOrderForInvoicing.mockResolvedValue({ effectiveDeliveryDate: "2026-10-01T09:00:00Z", id: 300, status: 5 });
+    const getReport = jest.fn(async () => report("2026-11-28T21:59:59.999Z", [reportOrder(300)]));
+    const result = await service(repo, getReport).liveAddOrder({ ...live, orderId: 300 }, actor);
+    expect(result).toMatchObject({ alreadyIncluded: true, invoiceId: 1 });
+    expect(repo.insertEvent).not.toHaveBeenCalledWith(expect.objectContaining({ action: "line.added" }), expect.anything());
+  });
+});
+
+describe("vendor bank data by direction (staff finance_settle and the vendor himself only)", () => {
+  const bankRow = { bankAccountHolderName: "أحمد", bankAccountNumber: "123456", bankName: "CIB", instaPayNumber: "010", walletNumber: null };
+  const expected = { accountHolder: "أحمد", accountNumber: "123456", bankName: "CIB", instaPayNumber: "010", walletNumber: null };
+
+  test("finance_settle staff get the vendor bank on the invoice detail; staff without it do not", async () => {
+    const { repo, state } = makeRepo(invoice({ status: "reviewed", vendorId: 5 }));
+    state.banks.set(5, bankRow);
+    expect((await service(repo).detail(1, { canSettle: true })).vendorBank).toEqual(expected);
+    expect(await service(repo).detail(1, { canSettle: false })).not.toHaveProperty("vendorBank");
+    expect(await service(repo).detail(1, {})).not.toHaveProperty("vendorBank");
+  });
+
+  test("a vendor sees only his own bank on his own invoice; another vendor gets 404 and never the data", async () => {
+    const { repo, state } = makeRepo(invoice({ status: "reviewed", vendorId: 5 }));
+    state.banks.set(5, bankRow);
+    state.banks.set(6, { ...bankRow, bankName: "OTHER" });
+    expect((await service(repo).detail(1, { vendorId: 5 })).vendorBank).toEqual(expected);
+    await expect(service(repo).detail(1, { vendorId: 6 })).rejects.toThrow(/غير موجودة/);
+    // the lookup is keyed on the token's vendor, never on someone else's id
+    expect(repo.listVendorBanks).toHaveBeenLastCalledWith([5]);
+  });
+
+  test("no bank data registered: allowed callers get null (the UI shows the «لم تُسجَّل» note)", async () => {
+    const { repo } = makeRepo(invoice({ status: "reviewed", vendorId: 5 }));
+    expect((await service(repo).detail(1, { canSettle: true })).vendorBank).toBeNull();
+    expect((await service(repo).detail(1, { vendorId: 5 })).vendorBank).toBeNull();
+  });
+
+  test("blank strings count as no data", async () => {
+    const { repo, state } = makeRepo(invoice({ status: "reviewed", vendorId: 5 }));
+    state.banks.set(5, { bankAccountHolderName: "  ", bankAccountNumber: "", bankName: null, instaPayNumber: " ", walletNumber: null });
+    expect((await service(repo).detail(1, { canSettle: true })).vendorBank).toBeNull();
+  });
+
+  test("live report seller rows: staff (settle) get every vendor's bank, a vendor only his own row, viewers nothing", async () => {
+    const { repo, state } = makeRepo();
+    state.banks.set(5, bankRow);
+    state.banks.set(6, { ...bankRow, bankName: "OTHER" });
+    const mk = () => ({
+      fullInvoice: { items: [{ vendorId: 5 }, { vendorId: 6 }] },
+      vendorDeliveries: { items: [{ vendorId: 5 }] },
+      warehouseDeliveries: { items: [{ vendorId: 6 }] },
+    });
+    const staff = await service(repo).withVendorBanks(mk() as never, { canSettle: true }) as ReturnType<typeof mk> & { fullInvoice: { items: Array<{ vendorBank?: unknown }> } };
+    expect(staff.fullInvoice.items[0]!.vendorBank).toEqual(expected);
+    expect((staff.fullInvoice.items[1]!.vendorBank as { bankName: string }).bankName).toBe("OTHER");
+    const own = await service(repo).withVendorBanks(mk() as never, { vendorId: 5 }) as typeof staff;
+    expect(own.fullInvoice.items[0]!.vendorBank).toEqual(expected);
+    expect(own.fullInvoice.items[1]).not.toHaveProperty("vendorBank");
+    expect(repo.listVendorBanks).toHaveBeenLastCalledWith([5, 5]);
+    const viewer = await service(repo).withVendorBanks(mk() as never, { canSettle: false }) as typeof staff;
+    expect(viewer.fullInvoice.items[0]).not.toHaveProperty("vendorBank");
+  });
+
+  test("the transferred status label follows the direction of the net", () => {
+    const { repo } = makeRepo();
+    const svc = service(repo);
+    expect(svc.toInvoiceDto(invoice({ netAmount: 100, status: "transferred" })).statusLabel).toBe("تم التحويل للبائع");
+    expect(svc.toInvoiceDto(invoice({ netAmount: -100, status: "transferred" })).statusLabel).toBe("تم استلام التحويل من البائع");
+    expect(svc.toInvoiceDto(invoice({ netAmount: -100, status: "transferred" })).dueParty).toBe("homix");
+    expect(svc.toInvoiceDto(invoice({ netAmount: 0, status: "reviewed" })).dueParty).toBeNull();
   });
 });

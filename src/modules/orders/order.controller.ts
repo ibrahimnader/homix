@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 
+import { canSettle } from "../financial-invoices/invoice.access";
 import { unwrap } from "../../shared/result";
 import type { OrderService } from "./order.service";
 
@@ -33,7 +34,7 @@ export class OrderController {
   public financialReport = async (request: Request, response: Response): Promise<void> => {
     response.status(200).json({
       data: unwrap(
-        await this.orderService.financialReport(request.query as never, request.vendorId),
+        await this.orderService.financialReport(request.query as never, request.vendorId, { canSettle: canSettle(request.user as never) }),
       ),
       status: true,
     });

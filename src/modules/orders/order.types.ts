@@ -111,6 +111,8 @@ export type OrderFinancialReportVendorRow = {
   fines: number;
   /** Σ companyDue of Homix-delivered orders (collection − cost) */
   homixMargin: number;
+  /** صافي المستحق = vendorDue − companyDue − fines (موقّع: السالب يعني أن البائع مدين لهوميكس) */
+  netAmount: number;
   orders: OrderFinancialReportOrderRow[];
   ordersCount: number;
   vendorDue: number;
@@ -147,6 +149,8 @@ export type OrderFinancialReportSectionSummary = {
   companyDue: number;
   fines: number;
   homixMargin: number;
+  /** صافي المستحق = vendorDue − companyDue − fines (موقّع) */
+  netAmount: number;
   ordersCount: number;
   vendorDue: number;
   vendorOwes: number;
@@ -174,6 +178,8 @@ export type OrderFinancialReportResponse = {
     fines: number;
     /** Σ companyDue of Homix-delivered orders (collection − cost) */
     homixMargin: number;
+    /** صافي المستحق = vendorDue − companyDue − fines (موقّع) */
+    netAmount: number;
     totalSales: number;
     vendorDue: number;
     /** Σ companyDue of vendor-delivered orders (owed by the vendor to Homix) */

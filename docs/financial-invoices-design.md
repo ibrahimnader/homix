@@ -49,7 +49,7 @@ the rest of the schema.
 | billingDay SMALLINT CHECK IN (13,28) | |
 | periodStart / periodEnd TIMESTAMPTZ | Cairo cycle bounds, from the report's `cycle` |
 | status VARCHAR(16) CHECK | `draft` (UI: معلّقة), `reviewed`, `frozen`, `transferred` |
-| ordersCount INT, collectionTotal, warehouseCost, vendorShippingCost, finesTotal, vendorDueTotal, companyDueTotal, adjustmentsTotal (signed), netAmount (signed) | stored totals; `netAmount = vendorDueTotal + adjustmentsTotal`. `netAmount >= 0` payable to vendor, `< 0` payable to Homix |
+| ordersCount INT, collectionTotal, warehouseCost, vendorShippingCost, finesTotal, vendorDueTotal, companyDueTotal, adjustmentsTotal (signed), netAmount (signed) | stored totals; `netAmount = vendorDueTotal − companyDueTotal − finesTotal + adjustmentsTotal` (signed). `> 0` payable to the vendor, `< 0` payable to Homix, `0` settled |
 | reviewedAt/By, frozenAt/By, transferredAt/By | |
 | frozenDurationMs BIGINT | accumulated frozen time (excluded from the days counter) |
 | transferAmount NUMERIC NULL | actual transferred amount (>= 0, magnitude) |
@@ -72,10 +72,7 @@ Indexes: `UNIQUE (orderId) WHERE state IN ('included','frozen','removed')` — a
 actively in at most one invoice and a permanently removed order is never re-invoiced;
 `(invoiceId, state)`; `(orderId)`.
 
-Effective values: `fines = finesOverride ?? fines`;
-`vendorDue = vendorDueOverride ?? (finesOverride == null ? vendorDue : max(vendorDue + fines - finesOverride, 0))`;
-`companyDue = companyDueOverride ?? companyDue`. Collection total, warehouse cost and vendor
-shipping are **not** editable (see conservative decisions).
+Effective values: see «Amounts: formulas» (fines never alter the dues; `vendorDueOverride` is the gross due).
 
 ### `financial_invoice_adjustments`
 `id, invoiceId FK, label, kind ('addition'|'deduction'), amount > 0, createdAt/By, removedAt/By`.
@@ -174,33 +171,53 @@ POST   /:id/lines/:lineId/action
 POST   /:id/receipt              GET /:id/receipt        DELETE /:id/receipt
 ```
 
-## Amounts: formulas and "company due" (المستحق لهوميكس)
+## Amounts: formulas (reference model, owner decision Nov 2026)
 
-Per order (the live report `getFinancialReport` is the single source; invoice lines are snapshots of it):
+Per counted line (the live report `getFinancialReport` is the single source; invoice lines are snapshots of it):
 
-| Order type | vendorDue | companyDue | companyDueKind |
+| Order type | «مستحق البائع» (`vendorDue`, GROSS) | «مستحق هوميكس» (`companyDue`) | `companyDueKind` |
 |---|---|---|---|
-| Homix delivered (`deliveryBy` = Homix, delivered or not yet) | `max(0, cost − fines)` | `collection − cost` (not clamped) | `margin` |
-| Vendor delivered | `max(max(cost + vendorShipping − toBeCollected, 0) − fines, 0)` | `max(toBeCollected − cost − vendorShipping, 0)` | `vendorOwes` |
+| Homix delivery (`deliveryBy` = Homix, delivered or not yet) | `cost` (before fines) | `0` | `margin` |
+| Vendor delivery | `balance < 0 ? −balance : 0` | `balance > 0 ? balance : 0` | `vendorOwes` |
 
-- The UI and the Excel export show **one** column, «المستحق لهوميكس» (`companyDue`): what Homix is entitled to — its margin on warehouse deliveries (collection − cost), or what the vendor owes Homix on vendor deliveries; both are amounts due to Homix, so one label fits. `companyDueKind` (`margin` / `vendorOwes`) and the `homixMargin` / `vendorOwes` API fields are kept for later use, but no label depends on them.
-- **Company due never enters the invoice net**: `net = Σ vendorDue (effective) + adjustments (addition +, deduction −)`; due party = vendor when `net >= 0`, otherwise Homix with the absolute value. There is no combined total («الإجمالي الكلي» was removed: it subtracted fines twice and mixed unrelated things).
-- Report API: each order has `companyDueKind`; each vendor row and section summary keeps `companyDue` (total, backward compatible) and adds `homixMargin` and `vendorOwes`; top `summary` has the same two. The Excel export (section sheets, totals row, summary sheet) has the single column «المستحق لهوميكس» = `companyDue`.
-- Invoice lines store the kind in `financial_invoice_lines."companyDueKind"` (nullable, CHECK in `margin`, `vendorOwes`), set at snapshot/refresh time; existing lines are backfilled idempotently from `orders."deliveryBy"` (Homix → `margin`, otherwise `vendorOwes`). A NULL kind is shown as `margin` for warehouse deliveries and `vendorOwes` otherwise.
-- Effective line values: `cost = warehouseCostOverride ?? snapshot`, `collection = collectionOverride ?? snapshot`, `vendorDue = vendorDueOverride ?? max(0, cost − fines)`, `companyDue = companyDueOverride ?? collection − cost` (overrides always win, whatever the kind; legacy snapshots keep their own fines-delta logic).
+with `balance = collection − cost − vendorShipping` for vendor deliveries (`calculateVendorDeliverySettlement`; vendor shipping «شحن البائع» is applied once per order, exactly as before). A line never has both dues. **Fines are their own column** (`الغرامات`), never netted into a due and applied to every line (also vendor deliveries where the vendor owes Homix: fines increase his debt). The old rule «fines ignored when balance > 0» and the per-line floor `max(0, cost − fines)` are removed.
+
+```
+net = Σ vendorDue (gross) − Σ companyDue (vendorOwes lines) − Σ fines + Σ manual adjustments (addition +, deduction −)
+```
+
+- **Net is signed**: `net > 0` Homix owes the vendor (`dueParty = vendor`), `net < 0` the vendor owes Homix (`dueParty = homix`), `net = 0` settled (`dueParty = null`). `netAmount` is stored signed; `transferAmount` stays an absolute amount (default `abs(net)`), the direction comes from the sign of the net. No DB constraint forbids a negative `netAmount`/line amounts (only `transferAmount >= 0`), so no migration is needed.
+- State machine unchanged (review blocked until the cycle ends, etc.). The *transferred* step label follows the direction: `net > 0` «تم التحويل للبائع», `net < 0` «تم استلام التحويل من البائع» (`invoiceStatusLabel`), `net = 0` «تم التحويل». Direction label of the net: «صافي المستحق للبائع» / «صافي المستحق لهوميكس» / «لا يوجد مستحق».
+- «مستحق هوميكس» exists only on vendor deliveries (`vendorOwes`); Homix-delivered lines show «—» and contribute 0 to every row/section/top total and card. The Homix margin (`collection − cost`) is never displayed (`homixMargin` is informational in the report only).
+- Report API: rows, section summaries and the top summary carry a signed `netAmount = vendorDue − companyDue − fines` (field names otherwise unchanged; `companyDue === vendorOwes`). Invoice totals: `computeTotals` → `vendorDueTotal` (gross), `companyDueTotal` (included `vendorOwes` lines only; a NULL kind falls back to `isWarehouseDelivery`), `finesTotal`, `adjustmentsTotal`, `netAmount` as above. Stored totals/lines of invoices created before this change keep their old values until `refreshDraft` / `db:refresh-old-invoices` recomputes them.
+- Effective line values: `cost = warehouseCostOverride ?? snapshot`, `collection = collectionOverride ?? snapshot`, `shipping = vendorShippingCostOverride ?? snapshot`, `fines = finesOverride ?? snapshot`; `vendorDue = vendorDueOverride ?? derived` (an override is the GROSS vendor due), `companyDue = companyDueOverride ?? derived`. Derived = the snapshot (the report's value); a cost override on a Homix delivery re-derives `vendorDue = cost`; a cost/collection/shipping override on a vendor delivery re-settles `balance`. A fines override only changes the fines column. Overrides always win whatever the kind; an override on a Homix-delivered line's `companyDue` is kept but never summed.
+- Invoice lines store the kind in `financial_invoice_lines."companyDueKind"` (nullable, CHECK in `margin`, `vendorOwes`), backfilled idempotently from `orders."deliveryBy"`.
 - Vendors are never shown override values, original values or reasons.
-- **Vendor shipping override (شحن البائع)**: `vendorShippingCostOverride` (nullable `NUMERIC(14,2)`, CHECK `>= 0`; migration in `add-financial-invoices.js` and `db:deploy-dev2`) replaces the system `vendorShippingCost` of that line, exactly like fines: set/cleared (`null` = back to the system value) with `PATCH /:id/lines/:lineId`, draft only (409 otherwise), audited in `line.overridden` (`changes.vendorShippingCostOverride: {from, to}`), and refused (409) on Homix-delivered lines because shipping only applies to vendor deliveries. Effective `shipping = override ?? snapshot` feeds (a) the vendor-delivery re-settlement `balance = collection − cost − shipping` for lines that are not cost-based (`companyDue = max(balance, 0)`, `vendorDue = max(max(−balance, 0) − fines, 0)`, still overridable by explicit due overrides) and (b) the invoice total `vendorShippingCost` (counted lines only). Cost-based (Homix-delivered) line dues are unaffected. Vendors receive only the effective `vendorShippingCost` (never the override or `originalVendorShippingCost`). `refreshDraft` never touches the override. The Excel export applies it like every other override (see below).
+- **Vendor shipping override (شحن البائع)**: `vendorShippingCostOverride` (nullable `NUMERIC(14,2)`, CHECK `>= 0`) replaces the system `vendorShippingCost` of that line; draft only (409 otherwise), audited in `line.overridden`, refused (409) on Homix-delivered lines. It feeds the vendor-delivery re-settlement above and the invoice total `vendorShippingCost`. Vendors receive only the effective value.
+
+### Worked examples
+
+| Case | Lines | vendorDue | companyDue | fines | net |
+|---|---|---|---|---|---|
+| All warehouse with fines | costs 1200 (fine 100) + 500 (fine 700) | 1700 | 0 | 800 | **+900** (= Σcost − fines) |
+| Mixed | Homix 1200 (fine 100) + vendor balance +350 (fine 20) | 1200 | 350 | 120 | **+730** |
+| Vendor owes Homix + fines | vendor balance +350, fine 50 | 0 | 350 | 50 | **−400** (the vendor owes Homix) |
+| Net zero | Homix 100 + vendor balance +100 | 100 | 100 | 0 | **0** (settled) |
+
+### Statements and printed documents (bank block by direction)
+
+The printed equation always adds up exactly. Cards: «مستحق البائع» (gross), «مستحق هوميكس», «الغرامات», «صافي المستحق» (labelled by sign). Totals box: when `net >= 0` — مستحق البائع (إجمالي) − مستحق هوميكس − الغرامات = الصافي; when `net < 0` — مستحق هوميكس + الغرامات − مستحق البائع (إجمالي) = الصافي (absolute value shown, the label says to whom). Transfer block by the sign of the net: `net > 0` → «بيانات حساب البائع — <name>» with the vendor's bank data and «سيتم تحويل الصافي المستحق للبائع على الحساب الموضح وفق دورة السداد.» (or «لم تُسجَّل بيانات بنكية لهذا البائع بعد.»); `net < 0` → «بيانات التحويل البنكي — هوميكس» with «يُرجى تحويل الصافي المستحق لهوميكس وإرسال صورة إيصال التحويل.»; `net = 0` → no bank block.
+
+The vendor's bank data (`users.bankName / bankAccountHolderName / bankAccountNumber / walletNumber / instaPayNumber` of the user row with `users.vendorId` = the vendor; an active user with data wins) is exposed as `vendorBank { bankName, accountHolder, accountNumber, walletNumber, instaPayNumber } | null` **only** to staff holding `finance_settle` (and admins) and to the vendor himself for his own invoices: on `GET /financial-invoices/:id` and on the seller rows of `GET /orders/financialReport`. Other staff get the key omitted; another vendor gets 404 on a foreign invoice and never sees another vendor's row.
 
 ## Conservative decisions (mockup ambiguity or conflict with accounting)
 
 1. Custom date range produces **no invoice**; only 13/28 cycles are invoiced. Custom range
    stays a live report view (the report already supports it).
 2. Open (not yet closed) cycles cannot be generated.
-3. Cost (`warehouseCost`) and collection are not editable per order; only fines, vendor due and
-   company due. Mockup edited "cost"; changing it would break reconciliation with orders.
-4. Fines override adjusts vendor due by the difference (floored at 0, like the report).
-5. Net can be negative (payable to Homix) and is **not** clamped; mockup's per-order
-   `max(0, ...)` is already applied by the report per order.
+3. Cost (`warehouseCost`) and collection are not editable per order in the UI flow of the mockup; fines, vendor due, company due, cost, collection and vendor shipping carry overrides (see formulas). Mockup edited "cost"; changing it would break reconciliation with orders.
+4. A fines override only changes the fines column (fines are subtracted once from the net).
+5. Net can be negative (the vendor owes Homix) and is **not** clamped; no per-line floor exists any more.
 6. Vendors never see drafts or frozen invoices.
 7. Billable orders are exactly what the live report counts (status `DELIVERED`); isolated in
    `invoice.eligibility.ts`.
@@ -212,6 +229,6 @@ Per order (the live report `getFinancialReport` is the single source; invoice li
 `GET /orders/financialReport/export` is built from the live report with the cycle's invoices laid over it, the backend twin of the frontend `liveOverlay.ts` (`invoice.export-overlay.ts`, fed by `InvoiceService.effectiveReport`). One implementation serves the toolbar «Excel تصدير» button and the per-vendor export buttons of the three tabs (same endpoint, `vendorId` narrows it).
 
 - Cycle lookup: billing cycles use the invoices whose `periodEnd` is the report's cycle end (Cairo day), exactly like `GET /financial-invoices/cycle`. Custom date ranges have no invoices and stay live. A vendor+cycle with no invoice also stays live.
-- Effective values: per line `fines`, `vendorDue`, `companyDue` always follow the invoice (override-aware, `effectiveLineCents`); `collection`, `warehouseCost` and vendor shipping follow it only when overridden (the screen rule). Deferred / frozen / removed lines and orders missing from the invoice are not counted; counted lines outside the cycle window are added to the matching tab. Row, section and top totals move by the same delta as the screen KPIs (`vendorDue`, `companyDue`, `fines`, collection, cost, shipping, counts). The header stays «المستحق لهوميكس».
-- Sheets: `summary`, `full-invoice` (extra columns: vendor shipping, manual adjustments, net amount, invoice code and status), `vendor-deliveries`, `warehouse-deliveries`, `lines` (order level, effective values, line state, and a notes column «تعديل يدوي: <fields> — <reason>»; edited cells are also filled yellow) and `adjustments` (live adjustments, additions positive / deductions negative).
+- Effective values: per line `fines`, `vendorDue`, `companyDue` always follow the invoice (override-aware, `effectiveLineCents`); `collection`, `warehouseCost` and vendor shipping follow it only when overridden (the screen rule). Deferred / frozen / removed lines and orders missing from the invoice are not counted; counted lines outside the cycle window are added to the matching tab. Row, section and top totals move by the same delta as the screen KPIs (`vendorDue`, `companyDue`, `fines`, `netAmount`, collection, cost, shipping, counts). The header stays «المستحق لهوميكس».
+- Sheets: `summary`, `full-invoice` (columns: مستحق البائع / المستحق لهوميكس / الغرامات / manual adjustments / «الصافي» signed + «اتجاه الصافي» label, vendor shipping, invoice code and status; every section sheet has «الصافي» + «اتجاه الصافي»; the `lines` sheet has a per-line «الصافي»), `vendor-deliveries`, `warehouse-deliveries`, `lines` (order level, effective values, line state, and a notes column «تعديل يدوي: <fields> — <reason>»; edited cells are also filled yellow) and `adjustments` (live adjustments, additions positive / deductions negative).
 - Vendors: forced to their own reviewed / transferred invoices (drafts and frozen invoices are not visible, so the export is live for those), counted lines only, effective values only. No override flags, notes, reasons, original values or uncounted lines are written to their workbook.

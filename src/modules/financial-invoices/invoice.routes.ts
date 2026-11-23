@@ -7,10 +7,13 @@ import { RECEIPT_FOLDER } from "./invoice.constants";
 import { InvoiceRepository } from "./invoice.repo";
 import {
   activityQuery, addOrderBody, adjustmentBody, bulkTransitionBody, candidatesQuery, cycleQuery, generateBody, invoiceAdjustmentParams,
-  invoiceIdParams, invoiceLineParams, invoiceListQuery, invoicedLinesQuery, lineActionBody, lineOverrideBody,
+  invoiceIdParams, invoiceLineParams, invoiceListQuery, invoicedLinesQuery, lineActionBody, lineOverrideBody, liveAddOrderBody, liveCandidatesQuery, liveDraftBody, liveLineActionBody,
   reconciliationBody, reconciliationQuery, reviewLiveAllBody, reviewLiveBody, transitionBody,
 } from "./invoice.schemas";
 import { InvoiceService, type Scope } from "./invoice.service";
+import { canSettle } from "./invoice.access";
+import { issuesQuery } from "./invoice.issues.schemas";
+import { InvoiceIssuesService } from "./invoice.issues.service";
 
 const requirePermission = require("../../../app/middlewares/requirePermission");
 const fileUploadMiddleware = require("../../../config/fileUploadMiddleware");
@@ -22,7 +25,7 @@ export const invoiceService = new InvoiceService({
   repo: new InvoiceRepository(),
 });
 
-type AuthUser = { id: number; userType?: string; vendorId?: number | null };
+type AuthUser = { id: number; permissions?: Record<string, unknown> | null; userType?: string; vendorId?: number | null };
 const userOf = (request: Request): AuthUser => request.user as unknown as AuthUser;
 
 /**
@@ -35,7 +38,7 @@ export const scopeOf = (request: Request): Scope => {
     if (!user.vendorId) throw new ForbiddenError("Forbidden");
     return { vendorId: Number(user.vendorId) };
   }
-  return {};
+  return { canSettle: canSettle(user) };
 };
 
 /** Mutations are staff-only. 403 (unlike the legacy isNotVendor, which answers 200). */
@@ -68,7 +71,7 @@ export const invoiceRouter = express.Router();
  *       - { in: query, name: invoiceTo, schema: { type: string, format: date } }
  *       - { in: query, name: transferredFrom, schema: { type: string, format: date } }
  *       - { in: query, name: transferredTo, schema: { type: string, format: date } }
- *       - { in: query, name: dueParty, schema: { type: string, enum: [vendor, homix] } }
+ *       - { in: query, name: dueParty, description: "vendor = net > 0, homix = net < 0 (net 0 matches neither)", schema: { type: string, enum: [vendor, homix] } }
  *       - { in: query, name: receipt, schema: { type: string, enum: [uploaded, missing] } }
  *       - { in: query, name: overdue, schema: { type: boolean } }
  *       - { in: query, name: search, schema: { type: string } }
@@ -135,6 +138,27 @@ invoiceRouter.get("/cycle", view, validateRequest({ query: cycleQuery }), asyncH
  */
 invoiceRouter.get("/lines", view, validateRequest({ query: invoicedLinesQuery }), asyncHandler(async (request, response) => {
   response.json({ status: true, data: await invoiceService.invoicedLines(request.query as never, scopeOf(request)) });
+}));
+
+/**
+ * @swagger
+ * /financial-invoices/issues:
+ *   get:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: "«أخطاء وتصحيحات» - automatic data review of saved invoices (duplicates, missing numbers, dues conflicts, changed orders, net drift)"
+ *     description: Staff only (finance_settle); vendors get 403. Read-only. Duplicate checks also look at counted lines of the same orders outside the filter.
+ *     parameters:
+ *       - { in: query, name: month, schema: { type: string, example: "2026-10" }, description: "YYYY-MM of the invoice cycle end (Cairo)" }
+ *       - { in: query, name: billingDay, schema: { type: integer, enum: [13, 28] } }
+ *       - { in: query, name: vendorId, schema: { type: integer } }
+ *     responses:
+ *       200: { description: "{ status, data: { counts: { errors, warnings, total }, issues, scopedInvoices, truncated } }" }
+ *       403: { description: Vendor users or missing finance_settle }
+ */
+const issuesService = new InvoiceIssuesService();
+invoiceRouter.get("/issues", ...settle, validateRequest({ query: issuesQuery }), asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await issuesService.find(request.query as never) });
 }));
 
 /**
@@ -270,6 +294,99 @@ invoiceRouter.post("/review-live-all", ...settle, validateRequest({ body: review
 
 /**
  * @swagger
+ * /financial-invoices/live/ensure-draft:
+ *   post:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: Create-or-reuse the draft invoice of one vendor's live cycle and return its id
+ *     description: Staff only (finance_settle). Idempotent and race-safe (one draft per vendor+cycle; concurrent calls converge). Existing lines/overrides are untouched and orders already on another invoice are never duplicated. A non-draft invoice is returned as is (its status tells the caller it is locked). Allowed while the cycle is still open.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [vendorId, billingDay]
+ *             properties:
+ *               vendorId: { type: integer }
+ *               billingDay: { type: integer, enum: [13, 28] }
+ *               referenceDate: { type: string, format: date }
+ *     responses:
+ *       200: { description: "{ cycle, invoiceId, created, added, status, vendorId, skippedDeferred }" }
+ *       403: { description: Vendor users or missing finance_settle }
+ * /financial-invoices/live/line-action:
+ *   post:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: "Live row order menu: freeze / unfreeze / defer (move to the next cycle) / delete / restore, creating the draft first"
+ *     description: Staff only (finance_settle). One transaction - ensure the draft, then apply the same rules as /{id}/lines/{lineId}/action. 409 when the invoice is reviewed/frozen/transferred, the action does not fit the line state, or the order is not on this invoice.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [vendorId, billingDay, orderId, action]
+ *             properties:
+ *               vendorId: { type: integer }
+ *               billingDay: { type: integer, enum: [13, 28] }
+ *               referenceDate: { type: string, format: date }
+ *               orderId: { type: integer }
+ *               action: { type: string, enum: [defer, freeze, unfreeze, delete, restore] }
+ *               reason: { type: string }
+ *     responses:
+ *       200: { description: "{ state, netAmount, created, invoiceId }" }
+ *       403: { description: Vendor users or missing finance_settle }
+ *       409: { description: Invoice locked, action not allowed for the line state, or order not on the invoice }
+ * /financial-invoices/live/lines:
+ *   post:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: Add an order to the vendor's live-cycle invoice, creating the draft first
+ *     description: Staff only (finance_settle). One transaction. Idempotent for an order already counted on the invoice. 409 when the invoice is locked, or the order is delivered to another vendor / already on another invoice / permanently removed.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [vendorId, billingDay, orderId]
+ *             properties:
+ *               vendorId: { type: integer }
+ *               billingDay: { type: integer, enum: [13, 28] }
+ *               referenceDate: { type: string, format: date }
+ *               orderId: { type: integer }
+ *     responses:
+ *       200: { description: "{ netAmount, created, invoiceId, alreadyIncluded }" }
+ *       403: { description: Vendor users or missing finance_settle }
+ *       409: { description: Invoice locked or order not addable }
+ * /financial-invoices/live/order-candidates:
+ *   get:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: Order picker for «إضافة طلب» on a live vendor section (no invoice needed)
+ *     parameters:
+ *       - { in: query, name: vendorId, required: true, schema: { type: integer } }
+ *       - { in: query, name: q, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: Up to 10 delivered orders of the vendor not on any active invoice }
+ */
+invoiceRouter.post("/live/ensure-draft", ...settle, validateRequest({ body: liveDraftBody }), asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await invoiceService.ensureLiveDraft(request.body, actorOf(request)) });
+}));
+invoiceRouter.post("/live/line-action", ...settle, validateRequest({ body: liveLineActionBody }), asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await invoiceService.liveLineAction(request.body, actorOf(request)) });
+}));
+invoiceRouter.post("/live/lines", ...settle, validateRequest({ body: liveAddOrderBody }), asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await invoiceService.liveAddOrder(request.body, actorOf(request)) });
+}));
+invoiceRouter.get("/live/order-candidates", ...settle, validateRequest({ query: liveCandidatesQuery }), asyncHandler(async (request, response) => {
+  const { q, vendorId } = request.query as unknown as { q: string; vendorId: number };
+  response.json({ status: true, data: await invoiceService.liveOrderCandidates(vendorId, q) });
+}));
+
+/**
+ * @swagger
  * /financial-invoices/bulk-transition:
  *   post:
  *     security: [{ bearerAuth: [] }]
@@ -302,7 +419,7 @@ invoiceRouter.post("/bulk-transition", ...settle, validateRequest({ body: bulkTr
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: integer } }
  *     responses:
- *       200: { description: "{ invoice, lines, adjustments }" }
+ *       200: { description: "{ invoice, lines, adjustments, vendorBank? } - vendorBank { bankName, accountHolder, accountNumber, walletNumber, instaPayNumber } | null is present ONLY for finance_settle staff and for the vendor on his own invoice (omitted for other staff; another vendor gets 404). netAmount is signed: > 0 Homix owes the vendor (dueParty vendor), < 0 the vendor owes Homix (dueParty homix), 0 settled (dueParty null)." }
  *       404: { description: "Not found (also returned for another vendor's invoice)" }
  */
 invoiceRouter.get("/:id", view, validateRequest({ params: invoiceIdParams }), asyncHandler(async (request, response) => {

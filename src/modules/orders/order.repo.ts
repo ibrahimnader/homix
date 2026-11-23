@@ -447,6 +447,7 @@ const createFinancialSummary = (): OrderFinancialReportSectionSummary => ({
   companyDue: 0,
   fines: 0,
   homixMargin: 0,
+  netAmount: 0,
   ordersCount: 0,
   vendorDue: 0,
   vendorOwes: 0,
@@ -459,6 +460,7 @@ const createFinancialRow = (vendorId: number | null, vendorName: string): OrderF
   companyDue: 0,
   fines: 0,
   homixMargin: 0,
+  netAmount: 0,
   orders: [],
   ordersCount: 0,
   vendorDue: 0,
@@ -477,6 +479,8 @@ const appendFinancialRow = (
     companyDue: number;
     companyDueKind: CompanyDueKind;
     fines: number;
+    /** Homix's own share on Homix-delivered orders (collection − cost); informational only */
+    margin?: number;
     ordersCount: number;
     vendorDue: number;
     vendorShippingCost: number;
@@ -484,12 +488,17 @@ const appendFinancialRow = (
   },
 ): void => {
   const isMargin = values.companyDueKind === "margin";
-  summary.homixMargin += isMargin ? values.companyDue : 0;
+  summary.homixMargin += isMargin ? values.margin ?? 0 : 0;
   summary.vendorOwes += isMargin ? 0 : values.companyDue;
-  row.homixMargin += isMargin ? values.companyDue : 0;
+  row.homixMargin += isMargin ? values.margin ?? 0 : 0;
   row.vendorOwes += isMargin ? 0 : values.companyDue;
+  // net = Σ vendorDue (gross) − Σ companyDue (vendor deliveries only) − Σ fines; signed, may be negative
+  const lineNet = values.vendorDue - (isMargin ? 0 : values.companyDue) - values.fines;
+  summary.netAmount += lineNet;
+  row.netAmount += lineNet;
   summary.collectionTotal += values.collectionTotal;
-  summary.companyDue += values.companyDue;
+  // «مستحق هوميكس» = ما يدين به الصانع فقط (تسليمات البائع)؛ حصة هوميكس في تسليمات المخزن لا تُحتسب ولا تُعرض
+  summary.companyDue += isMargin ? 0 : values.companyDue;
   summary.fines += values.fines;
   summary.ordersCount += values.ordersCount;
   summary.vendorDue += values.vendorDue;
@@ -497,7 +506,7 @@ const appendFinancialRow = (
   summary.warehouseCost += values.warehouseCost;
 
   row.collectionTotal += values.collectionTotal;
-  row.companyDue += values.companyDue;
+  row.companyDue += isMargin ? 0 : values.companyDue;
   row.fines += values.fines;
   row.ordersCount += values.ordersCount;
   row.vendorDue += values.vendorDue;
@@ -1117,7 +1126,6 @@ export class OrderRepository {
       const vendorSettlement = isVendorDelivery
         ? calculateVendorDeliverySettlement({
             collectionTotal: vendorCollectionTotal,
-            fines,
             productCost: warehouseCost,
             vendorShippingCost,
           })
@@ -1125,8 +1133,9 @@ export class OrderRepository {
       // every order Homix delivers (also "delivered but shipment not yet delivered") is cost-based
       const homixSettlement = isVendorDelivery
         ? null
-        : calculateWarehouseDeliverySettlement({ collectionTotal, fines, productCost: warehouseCost });
+        : calculateWarehouseDeliverySettlement({ collectionTotal, productCost: warehouseCost });
       const reportCompanyDue = vendorSettlement?.companyDue ?? homixSettlement?.companyDue ?? 0;
+      const reportMargin = homixSettlement?.margin ?? 0;
       const reportVendorDue = vendorSettlement?.vendorDue ?? homixSettlement?.vendorDue ?? 0;
       const companyDueKind: CompanyDueKind = isVendorDelivery ? "vendorOwes" : "margin";
       const orderDetail = {
@@ -1155,6 +1164,7 @@ export class OrderRepository {
         companyDue: reportCompanyDue,
         companyDueKind,
         fines,
+        margin: reportMargin,
         ordersCount: 1,
         vendorDue: reportVendorDue,
         vendorShippingCost: isVendorDelivery ? vendorShippingCost : 0,
@@ -1191,6 +1201,7 @@ export class OrderRepository {
           companyDue: reportCompanyDue,
           companyDueKind,
           fines,
+          margin: reportMargin,
           ordersCount: 1,
           vendorDue: reportVendorDue,
           // شحن المورد لا ينطبق على التسليم من المخزن
@@ -1199,6 +1210,13 @@ export class OrderRepository {
         });
         warehouseRow.orders.push(orderDetail);
       }
+    }
+
+    for (const target of [
+      fullInvoiceSummary, vendorDeliveriesSummary, warehouseDeliveriesSummary,
+      ...fullInvoiceRows.values(), ...vendorDeliveryRows.values(), ...warehouseDeliveryRows.values(),
+    ]) {
+      target.netAmount = Math.round(target.netAmount * 100) / 100;
     }
 
     const fullInvoice: OrderFinancialReportSection = {
@@ -1228,6 +1246,7 @@ export class OrderRepository {
       summary: {
         companyDue: fullInvoice.summary.companyDue,
         homixMargin: fullInvoice.summary.homixMargin,
+        netAmount: fullInvoice.summary.netAmount,
         vendorOwes: fullInvoice.summary.vendorOwes,
         fines: fullInvoice.summary.fines,
         totalSales: fullInvoice.summary.collectionTotal,

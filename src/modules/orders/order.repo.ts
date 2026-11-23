@@ -1,4 +1,5 @@
 import moment from "moment-timezone";
+import { buildOrderNumberCondition } from "./order-number-filter";
 import { col, fn, literal, Op } from "sequelize";
 
 import { governorateDisplayLabel } from "../../shared/governorate/governorate.resolver";
@@ -103,15 +104,8 @@ const buildFilters = (filters: OrderListQuery, vendorId?: number | null): Record
     }
   };
 
-  if (filters.orderNumber) {
-    andConditions.push({
-      [Op.or]: [
-        sequelize.where(sequelize.fn("lower", sequelize.col("Order.name")), { [Op.like]: `%${filters.orderNumber.toLowerCase()}%` }),
-        sequelize.where(sequelize.fn("lower", sequelize.col("Order.number")), { [Op.like]: `%${filters.orderNumber.toLowerCase()}%` }),
-        sequelize.where(sequelize.fn("lower", sequelize.col("Order.orderNumber")), { [Op.like]: `%${filters.orderNumber.toLowerCase()}%` }),
-      ],
-    });
-  }
+  const orderNumberCondition = buildOrderNumberCondition(filters.orderNumber);
+  if (orderNumberCondition) andConditions.push(orderNumberCondition);
 
   if (filters.operationCode) {
     andConditions.push(sequelize.where(sequelize.fn("lower", sequelize.col("Order.code")), { [Op.like]: `%${filters.operationCode.toLowerCase()}%` }));

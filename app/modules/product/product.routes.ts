@@ -2,6 +2,7 @@ import express from "express";
 
 import { ForbiddenError } from "../../../src/shared/errors";
 import { asyncHandler, validateRequest } from "../../../src/shared/http";
+import { productImageUpload } from "../../../src/shared/http/image-upload";
 import { USER_TYPES } from "../../../config/constants";
 import { createSystemProductSchema, duplicateProductSchema, productIdParamsSchema } from "./product.schemas";
 
@@ -55,6 +56,50 @@ const { handleShopifyProductWebhook } = require("./product.webhook") as typeof i
 ProductsRouter.post("/webhook", handleShopifyProductWebhook);
 
 ProductsRouter.post("/", verifyToken, requirePermission("products_edit"), productsController.createProduct);
+
+/**
+ * @swagger
+ * /products/image:
+ *   post:
+ *     security:
+ *       - bearerAuth: []
+ *     tags:
+ *       - Products
+ *     summary: Upload a product image
+ *     description: >
+ *       Stores one image (JPG/PNG/WEBP/GIF, max 5MB; the real type is checked from the file bytes, not the
+ *       name) and returns its public URL, to be sent as `image` in `POST /products/system` or
+ *       `POST /products/{id}/duplicate`. Requires `products_edit`; vendors are always rejected with 403.
+ *       Files live under UPLOADS_DIR (needs a persistent disk in production).
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [image]
+ *             properties:
+ *               image: { type: string, format: binary }
+ *     responses:
+ *       201:
+ *         description: Image stored; `data.url` is the absolute public URL
+ *       400:
+ *         description: No file, a non-image/unsupported type, or content that is not a real image
+ *       401:
+ *         description: Missing or invalid bearer token
+ *       403:
+ *         description: Vendor or missing products_edit
+ *       413:
+ *         description: Image larger than 5MB
+ */
+ProductsRouter.post(
+  "/image",
+  verifyToken,
+  staffOnlyProductWrite,
+  requirePermission("products_edit"),
+  productImageUpload,
+  asyncHandler(productsController.uploadProductImage),
+);
 
 /**
  * @swagger

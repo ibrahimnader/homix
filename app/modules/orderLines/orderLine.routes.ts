@@ -5,6 +5,18 @@ const OrderLineController = require("./orderLine.controller") as typeof import("
 const IsNotLogistic = require("../../middlewares/isNotLogistic") as typeof import("../../middlewares/isNotLogistic");
 const requirePermission = require("../../middlewares/requirePermission") as (permissionKey: string) => express.RequestHandler;
 
+const { USER_TYPES } = require("../../../config/constants") as { USER_TYPES: { VENDOR: string } };
+
+/** Order lines carry the money fields (cost, itemShipping, toBeCollected) and roll them into the order totals,
+ *  so a vendor may never edit one, whatever their permission map says. Real 403 (the legacy guards answer 200). */
+const staffOnlyLineEdit: express.RequestHandler = (request, response, next) => {
+  if (String((request.user as { userType?: unknown } | undefined)?.userType) === String(USER_TYPES.VENDOR)) {
+    response.status(403).json({ message: "البائع لا يملك صلاحية تعديل منتجات الطلب", status: false });
+    return;
+  }
+  next();
+};
+
 const OrderLineRouter = express.Router();
 
 /**
@@ -47,7 +59,7 @@ const OrderLineRouter = express.Router();
  *       404:
  *         description: Order line not found
  */
-OrderLineRouter.put("/:orderLineId", verifyToken, IsNotLogistic, requirePermission("orders_edit"), OrderLineController.updateOrderLine);
+OrderLineRouter.put("/:orderLineId", verifyToken, staffOnlyLineEdit, IsNotLogistic, requirePermission("orders_edit"), OrderLineController.updateOrderLine);
 /**
  * @swagger
  * /orderLines/{orderLineId}/notes/{noteId}:

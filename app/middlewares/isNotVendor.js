@@ -8,7 +8,7 @@ const isNotVendor = (req, res, next) => {
   ) {
     return next();
   }
-  return res.json({
+  return res.status(403).json({
     status: false,
     message: "Unauthorized",
   });

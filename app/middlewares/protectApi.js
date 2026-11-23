@@ -59,6 +59,12 @@ const verifyToken = async (req, res, next) => {
     });
   }
 
+  /* A vendor account with no vendorId would be treated as unscoped (staff) by every `request.vendorId ? scoped : all`
+     check downstream, so it is refused here instead. */
+  if (user.userType === USER_TYPES.VENDOR && !user.vendorId) {
+    return res.status(403).json({ status: false, message: "Forbidden" });
+  }
+
   req.user = user;
   req.vendorId = user.userType === USER_TYPES.VENDOR ? user.vendorId : null;
   return next();

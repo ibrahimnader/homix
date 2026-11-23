@@ -6,6 +6,8 @@ import { shipmentLegacyGateway } from "./shipment.legacy-gateway";
 import { ShipmentRepository } from "./shipment.repo";
 import { normalizeOrderMutationPayload, toPlain } from "../orders/order.helpers";
 import { assertFinancialEditAllowed, SHIPMENT_FINANCIAL_FIELDS } from "../orders/order-financial-guard";
+import { applyGroupedShipmentTypeSync, withLinkedOrderIds } from "../orders/grouped-shipment-sync";
+import type { GroupedSyncSource } from "../orders/grouped-shipment-sync";
 import { guardRegressions, isRegressionConfirmed, regressionAuditRows, stripConfirmRegression } from "../orders/order-regression-gate";
 import type { OrderRegression } from "../orders/order-regression-guard";
 import type {
@@ -34,7 +36,7 @@ import type {
 } from "./shipment.types";
 import type { ShipmentMutationPayload, ShipmentRequestUser } from "./shipment.internal-types";
 import { RETURN_TO_VENDOR_STATUS, SHIPMENT_RETURN_TYPE, SHIPMENT_STATUS } from "./shipment.constants";
-import { DELIVERY_BY } from "../../../config/constants";
+import { DELIVERY_BY, USER_TYPES } from "../../../config/constants";
 import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
 import type { DashboardMetricSnapshot } from "../dashboard/dashboard.types";
 import {
@@ -506,6 +508,28 @@ export class ShipmentService {
     response.end();
   }
 
+  /* «توصيل مجمع»: a changed shipmentType follows the sibling orders (same orderNumber). Vendors never reach
+     this (they cannot edit the field), so the cascade is staff-only by construction. */
+  private async syncGroupedSiblings(
+    existing: Array<unknown | null>,
+    payload: Record<string, unknown>,
+    user: ShipmentRequestUser,
+    ids: number[],
+  ): Promise<number[]> {
+    if (!Object.prototype.hasOwnProperty.call(payload, "shipmentType")) return [];
+    if (String(user?.userType) === String(USER_TYPES.VENDOR)) return [];
+    const sources: GroupedSyncSource[] = [];
+    existing.forEach((entity, index) => {
+      if (!entity) return;
+      const plain = toPlain(entity);
+      sources.push({
+        id: ids[index]!, orderNumber: plain.orderNumber, code: plain.code,
+        beforeType: plain.shipmentType, nextType: payload.shipmentType,
+      });
+    });
+    return applyGroupedShipmentTypeSync(sources, user.id);
+  }
+
   public async updateShipment(shipmentId: number, rawPayload: ShipmentMutationPayload, user: ShipmentRequestUser): Promise<Result<unknown>> {
     const { payload, flag } = stripConfirmRegression(rawPayload);
     const existingShipment = typeof this.shipmentRepository.findShipmentEntity === "function"
@@ -527,6 +551,7 @@ export class ShipmentService {
       throw new NotFoundError("Shipment not found");
     }
     await this.auditConfirmedRegressions(confirmedRegressions, user);
+    const linkedOrderIds = await this.syncGroupedSiblings([existingShipment], payload, user, [shipmentId]);
 
     await this.refreshAggregateForShipments([existingShipment, shipment, payload]);
     /* Only after the update succeeded; notification failures are swallowed inside. A derived change of the
@@ -557,7 +582,7 @@ export class ShipmentService {
         }
       }
     }
-    return success(shipment);
+    return success(withLinkedOrderIds(shipment, linkedOrderIds));
   }
 
   public async bulkUpdateShipments(
@@ -583,6 +608,7 @@ export class ShipmentService {
     const confirmedRegressions = await this.guardShipmentRegressions(existingShipments, payload, [flag], user);
     const updatedCount = await this.shipmentRepository.bulkUpdateShipments(shipmentIds, payload, user.id);
     await this.auditConfirmedRegressions(confirmedRegressions, user);
+    const linkedOrderIds = await this.syncGroupedSiblings(existingShipments, payload, user, shipmentIds);
     await this.refreshAggregateForShipments([...existingShipments, payload]);
     /* ONE aggregated notification per recipient (not one per row). The rows are re-read once, after the bulk
        write, so derived status changes are included and rows that did not really change are dropped. */
@@ -607,7 +633,7 @@ export class ShipmentService {
       await notifyShipmentStatusChanges(changes, user.id);
       await notifyShipmentScheduleStatusChanges(scheduleChanges, user.id);
     }
-    return success({ message: "Shipments updated successfully", updatedCount });
+    return success(withLinkedOrderIds({ message: "Shipments updated successfully", updatedCount }, linkedOrderIds));
   }
 
   public async deleteShipment(shipmentId: number): Promise<Result<{ message: string }>> {

@@ -1,3 +1,4 @@
+import { applyGroupedShipmentTypeSync, withLinkedOrderIds } from "./grouped-shipment-sync";
 import { AppError, ConflictError, ForbiddenError, NotFoundError, UnauthorizedError } from "../../shared/errors";
 import type { Result } from "../../shared/result";
 import { success } from "../../shared/result";
@@ -178,8 +179,26 @@ export class OrderService {
       : [];
     const response = ensureLegacySuccess(await this.legacyGateway.updateOrder(orderId, normalizedPayload, user));
     await this.auditConfirmedRegressions(confirmedRegressions, user);
+    const linkedOrderIds = await this.syncGroupedSiblings([existingOrder], [orderId], normalizedPayload as Record<string, unknown>, user);
     await this.refreshAggregateForDates([existingOrder ? this.getOrderDate(existingOrder) : null, normalizedPayload.orderDate, this.getOrderDate(response.data)]);
-    return success(response.data ?? {});
+    return success(withLinkedOrderIds(response.data ?? {}, linkedOrderIds));
+  }
+
+  /* «توصيل مجمع»: see grouped-shipment-sync.ts. Runs after the legacy write; `payload` is already vendor-restricted,
+     so a vendor's request never carries shipmentType here. */
+  private async syncGroupedSiblings(
+    existing: Array<unknown | null>,
+    ids: number[],
+    payload: Record<string, unknown>,
+    user: OrderRequestUser,
+  ): Promise<number[]> {
+    if (!Object.prototype.hasOwnProperty.call(payload, "shipmentType") || isVendorUser(user)) return [];
+    const sources = existing.flatMap((entity, index) => {
+      if (!entity) return [];
+      const plain = toPlain(entity);
+      return [{ id: ids[index]!, orderNumber: plain.orderNumber, code: plain.code, beforeType: plain.shipmentType, nextType: payload.shipmentType }];
+    });
+    return applyGroupedShipmentTypeSync(sources, user.id);
   }
 
   public async bulkUpdate(
@@ -204,12 +223,15 @@ export class OrderService {
     const confirmedRegressions = await this.assertRegressionConfirmed(existingOrders, orderData, confirmRegression, user);
     const response = ensureLegacySuccess(await this.legacyGateway.bulkUpdate(normalizedPayload, user));
     await this.auditConfirmedRegressions(confirmedRegressions, user);
+    const linkedOrderIds = await this.syncGroupedSiblings(
+      orderIds.map((id) => existingOrders.find((order) => toPlain(order).id === id) ?? null), orderIds, orderData, user,
+    );
     const nextOrderDate = this.getBulkOrderDate(normalizedPayload);
     await this.refreshAggregateForDates([
       ...existingOrders.map((order) => this.getOrderDate(order)),
       nextOrderDate,
     ]);
-    return success({ message: response.message ?? "Orders updated successfully" });
+    return success(withLinkedOrderIds({ message: response.message ?? "Orders updated successfully" }, linkedOrderIds));
   }
 
   public async deleteOrder(orderId: number, user: OrderRequestUser): Promise<Result<{ message: string }>> {

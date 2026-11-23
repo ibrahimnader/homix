@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 
 const { AppError } = require("../../middlewares/errors") as typeof import("../../middlewares/errors");
 const productsService = require("./product.service") as typeof import("./product.service");
+const { imageStorage } = require("../../../src/shared/storage/image-storage") as typeof import("../../../src/shared/storage/image-storage");
 const { canEditOrderFinancials } = require("../../../src/modules/orders/order-financial-guard") as typeof import("../../../src/modules/orders/order-financial-guard");
 
 const getId = (req: Request): string => {
@@ -77,6 +78,14 @@ class ProductsController {
       const message = error instanceof Error ? error.message : "Failed to fetch product";
       return next(new AppError(message, 500));
     }
+  }
+
+  /** POST /products/image — stores one product image and returns its public URL (the product's `image` value). */
+  public static async uploadProductImage(req: Request, res: Response): Promise<Response> {
+    const uploaded = (req as Request & { uploadedImage?: { buffer: Buffer; extension: string } }).uploadedImage;
+    if (!uploaded) return res.status(400).json({ message: "اختر صورة للرفع", status: false });
+    const { url } = await imageStorage.save({ buffer: uploaded.buffer, extension: uploaded.extension, folder: "products" });
+    return res.status(201).json({ data: { url }, message: "تم رفع الصورة", status: true, statusCode: 201 });
   }
 
   /** POST /products/system — brand-new product created inside the system. */

@@ -4,6 +4,7 @@ import { sequelize } from "../../infrastructure/database";
 import { ConflictError, NotFoundError } from "../../shared/errors";
 import { shipmentCustomerEditSchema } from "./shipment.schemas";
 import { buildLogMessage } from "../orders/order.helpers";
+import { buildOrderNumberCondition } from "../orders/order-number-filter";
 import { isShipmentTimelineLog } from "./shipment.timeline";
 import {
   getManagedOptionLabels,
@@ -231,33 +232,17 @@ const buildShipmentWhereClause = (
     andConditions.push(where(fn("lower", col("Order.code")), { [Op.like]: `%${filters.operationCode.toLowerCase()}%` }));
   }
 
-  if (filters.orderNumber) {
-    andConditions.push({
-      [Op.or]: [
-        where(fn("lower", col("Order.name")), { [Op.like]: `%${filters.orderNumber.toLowerCase()}%` }),
-        where(fn("lower", col("Order.number")), { [Op.like]: `%${filters.orderNumber.toLowerCase()}%` }),
-        where(fn("lower", col("Order.orderNumber")), { [Op.like]: `%${filters.orderNumber.toLowerCase()}%` }),
-      ],
-    });
-  }
+  const orderNumberCondition = buildOrderNumberCondition(filters.orderNumber);
+  if (orderNumberCondition) andConditions.push(orderNumberCondition);
 
   // Shipment numbers are derived (SH + order number), so the filter is applied
   // against the order number with the SH prefix stripped off.
   if (filters.shipmentNumber) {
-    const orderNumberPart = filters.shipmentNumber
-      .trim()
-      .replace(new RegExp(`^${SHIPMENT_NUMBER_PREFIX}`, "i"), "")
-      .toLowerCase();
+    const orderNumberCondition = buildOrderNumberCondition(
+      filters.shipmentNumber.trim().replace(new RegExp(`^${SHIPMENT_NUMBER_PREFIX}`, "i"), ""),
+    );
 
-    if (orderNumberPart) {
-      andConditions.push({
-        [Op.or]: [
-          where(fn("lower", col("Order.name")), { [Op.like]: `%${orderNumberPart}%` }),
-          where(fn("lower", col("Order.number")), { [Op.like]: `%${orderNumberPart}%` }),
-          where(fn("lower", col("Order.orderNumber")), { [Op.like]: `%${orderNumberPart}%` }),
-        ],
-      });
-    }
+    if (orderNumberCondition) andConditions.push(orderNumberCondition);
   }
 
   if (filters.orderSource) {
@@ -1762,15 +1747,8 @@ export class ShipmentRepository {
       andConditions.push(where(col("orderLines.product.vendor.id"), { [Op.eq]: vendorId }));
     }
 
-    if (filters.orderNumber) {
-      andConditions.push({
-        [Op.or]: [
-          where(fn("lower", col("Order.name")), { [Op.like]: `%${filters.orderNumber.toLowerCase()}%` }),
-          where(fn("lower", col("Order.number")), { [Op.like]: `%${filters.orderNumber.toLowerCase()}%` }),
-          where(fn("lower", col("Order.orderNumber")), { [Op.like]: `%${filters.orderNumber.toLowerCase()}%` }),
-        ],
-      });
-    }
+    const accountsOrderNumberCondition = buildOrderNumberCondition(filters.orderNumber);
+    if (accountsOrderNumberCondition) andConditions.push(accountsOrderNumberCondition);
 
     if (filters.paymentMethod) {
       andConditions.push(where(col("Order.paymentStatus"), { [Op.eq]: Number(filters.paymentMethod) }));

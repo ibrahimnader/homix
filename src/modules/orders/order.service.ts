@@ -13,10 +13,15 @@ import {
   REGRESSION_FORBIDDEN_CODE, REGRESSION_NEEDS_CONFIRMATION_CODE, type OrderRegression,
 } from "./order-regression-guard";
 import type { LegacyOrderResponse, OrderDetailsResponse, OrderFinancialReportQuery, OrderFinancialReportResponse, OrderListQuery, OrderListResponse, OrderMetaResponse, OrderMutationPayload, OrderRequestUser, OrderSummaryResponse } from "./order.types";
+import { liveExportReport as toLiveExportReport, LINE_STATE_LABELS, type ExportReport } from "../financial-invoices/invoice.export-overlay";
 import type { Response } from "express";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
 const ExcelJS = require("exceljs");
+
+export type FinancialReportOverlay = {
+  effectiveReport(report: OrderFinancialReportResponse, scope: { vendorId?: number | null }, vendorId?: number): Promise<ExportReport>;
+};
 
 const ensureLegacySuccess = <TData>(response: LegacyOrderResponse<TData>): LegacyOrderResponse<TData> => {
   if (response.status !== false) {
@@ -73,6 +78,8 @@ export class OrderService {
   public constructor(
     private readonly orderRepository: OrderRepository,
     private readonly legacyGateway: LegacyOrderGateway = orderLegacyGateway,
+    /** Lays the cycle's invoices over the live report for the Excel export (InvoiceService.effectiveReport). */
+    private readonly invoiceOverlay?: FinancialReportOverlay,
   ) {}
 
   /**
@@ -336,7 +343,12 @@ export class OrderService {
   }
 
   public async exportFinancialReport(response: Response, query: OrderFinancialReportQuery, vendorId?: number | null): Promise<void> {
-    const report = await this.orderRepository.getFinancialReport(query, vendorId);
+    const liveReport = await this.orderRepository.getFinancialReport(query, vendorId);
+    const staffVendor = Number(query.vendorId);
+    // same numbers as the screen / PDF: invoice overrides, adjustments and line states laid over the live report
+    const report = this.invoiceOverlay
+      ? await this.invoiceOverlay.effectiveReport(liveReport, { vendorId: vendorId ?? null }, Number.isInteger(staffVendor) && staffVendor > 0 ? staffVendor : undefined)
+      : toLiveExportReport(liveReport);
     response.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -363,10 +375,7 @@ export class OrderService {
     });
     summarySheet.commit();
 
-    const addSectionSheet = (
-      name: string,
-      section: OrderFinancialReportResponse["fullInvoice"],
-    ): void => {
+    const addSectionSheet = (name: string, section: ExportReport["fullInvoice"], withAdjustments: boolean): void => {
       const worksheet = workbook.addWorksheet(name);
       worksheet.columns = [
         { header: "البائع", key: "vendorName", width: 28 },
@@ -375,26 +384,106 @@ export class OrderService {
         { header: "مستحق البائع", key: "vendorDue", width: 18 },
         { header: "المستحق لهوميكس", key: "companyDue", width: 18 },
         { header: "سعر التكلفة", key: "warehouseCost", width: 18 },
+        { header: "شحن البائع", key: "vendorShippingCost", width: 18 },
         { header: "الغرامات", key: "fines", width: 18 },
+        ...(withAdjustments ? [
+          { header: "التسويات اليدوية", key: "adjustmentsTotal", width: 18 },
+          { header: "صافي مستحق البائع", key: "netAmount", width: 18 },
+        ] : []),
+        { header: "كود الفاتورة", key: "invoiceCode", width: 18 },
+        { header: "حالة الفاتورة", key: "invoiceStatus", width: 18 },
       ];
 
-      section.items.forEach((item) => worksheet.addRow(item));
+      let adjustmentsTotal = 0;
+      section.items.forEach((item) => {
+        const adjustments = withAdjustments ? (item.invoice?.adjustmentsTotal ?? 0) : 0;
+        adjustmentsTotal += adjustments;
+        worksheet.addRow({
+          ...item,
+          adjustmentsTotal: withAdjustments ? adjustments : undefined,
+          invoiceCode: item.invoice?.code ?? "",
+          invoiceStatus: item.invoice?.statusLabel ?? "",
+          netAmount: withAdjustments ? Math.round((item.vendorDue + adjustments) * 100) / 100 : undefined,
+        });
+      });
       worksheet.addRow({});
       worksheet.addRow({
+        adjustmentsTotal: withAdjustments ? Math.round(adjustmentsTotal * 100) / 100 : undefined,
         collectionTotal: section.summary.collectionTotal,
-        fines: section.summary.fines,
         companyDue: section.summary.companyDue,
+        fines: section.summary.fines,
+        netAmount: withAdjustments ? Math.round((section.summary.vendorDue + adjustmentsTotal) * 100) / 100 : undefined,
         ordersCount: section.summary.ordersCount,
         vendorDue: section.summary.vendorDue,
         vendorName: "الإجمالي",
+        vendorShippingCost: section.summary.vendorShippingCost,
         warehouseCost: section.summary.warehouseCost,
       });
       worksheet.commit();
     };
 
-    addSectionSheet("full-invoice", report.fullInvoice);
-    addSectionSheet("vendor-deliveries", report.vendorDeliveries);
-    addSectionSheet("warehouse-deliveries", report.warehouseDeliveries);
+    addSectionSheet("full-invoice", report.fullInvoice, true);
+    addSectionSheet("vendor-deliveries", report.vendorDeliveries, false);
+    addSectionSheet("warehouse-deliveries", report.warehouseDeliveries, false);
+
+    // order-level detail of the comprehensive tab: effective values, line state and «تعديل يدوي» marking
+    const linesSheet = workbook.addWorksheet("lines");
+    linesSheet.columns = [
+      { header: "البائع", key: "vendorName", width: 28 },
+      { header: "كود الفاتورة", key: "invoiceCode", width: 18 },
+      { header: "حالة الفاتورة", key: "invoiceStatus", width: 16 },
+      { header: "رقم العملية", key: "operationNumber", width: 18 },
+      { header: "رقم الطلب", key: "orderNumber", width: 18 },
+      { header: "كود المنتج", key: "productCode", width: 18 },
+      { header: "حالة الدفع", key: "paymentStatusLabel", width: 16 },
+      { header: "إجمالي التحصيل", key: "collectionTotal", width: 16 },
+      { header: "سعر التكلفة", key: "warehouseCost", width: 16 },
+      { header: "شحن البائع", key: "vendorShippingCost", width: 16 },
+      { header: "الغرامات", key: "fines", width: 16 },
+      { header: "مستحق البائع", key: "vendorDue", width: 16 },
+      { header: "المستحق لهوميكس", key: "companyDue", width: 16 },
+      { header: "حالة البند", key: "lineState", width: 16 },
+      { header: "ملاحظات", key: "note", width: 40 },
+    ];
+    report.fullInvoice.items.forEach((item) => {
+      item.exportOrders.forEach((order) => {
+        const row = linesSheet.addRow({
+          ...order,
+          invoiceCode: item.invoice?.code ?? "",
+          invoiceStatus: item.invoice?.statusLabel ?? "",
+          lineState: order.state === "live" ? "" : LINE_STATE_LABELS[order.state],
+          note: order.note ?? "",
+          vendorName: item.vendorName,
+        });
+        // a manually edited cell carries the marking in its value's neighbour (notes) and a visible fill
+        order.overridden.forEach((key) => {
+          row.getCell(key).fill = { fgColor: { argb: "FFFFF2CC" }, pattern: "solid", type: "pattern" };
+        });
+      });
+    });
+    linesSheet.commit();
+
+    // manual invoice adjustments (additions / deductions), one row each
+    const adjustmentsSheet = workbook.addWorksheet("adjustments");
+    adjustmentsSheet.columns = [
+      { header: "البائع", key: "vendorName", width: 28 },
+      { header: "كود الفاتورة", key: "invoiceCode", width: 18 },
+      { header: "البيان", key: "label", width: 36 },
+      { header: "النوع", key: "kind", width: 14 },
+      { header: "المبلغ", key: "amount", width: 16 },
+    ];
+    report.fullInvoice.items.forEach((item) => {
+      (item.invoice?.adjustments ?? []).forEach((adjustment) => {
+        adjustmentsSheet.addRow({
+          amount: adjustment.kind === "addition" ? adjustment.amount : -adjustment.amount,
+          invoiceCode: item.invoice?.code ?? "",
+          kind: adjustment.kind === "addition" ? "إضافة" : "خصم",
+          label: adjustment.label,
+          vendorName: item.vendorName,
+        });
+      });
+    });
+    adjustmentsSheet.commit();
 
     await workbook.commit();
     response.end();

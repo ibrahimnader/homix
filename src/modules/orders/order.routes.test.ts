@@ -58,6 +58,7 @@ jest.mock("../../infrastructure/database", () => ({
   sequelize: {
     col: jest.fn((value: string) => value),
     fn: jest.fn((...args: string[]) => args.join(".")),
+    query: jest.fn().mockResolvedValue([]),
     where: jest.fn((_left: unknown, right: unknown) => right),
   },
 }));

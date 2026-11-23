@@ -19,6 +19,8 @@ import {
   orderSummaryQuerySchema,
   sellerChatQuickRepliesSchema,
 } from "./order.schemas";
+import { InvoiceRepository } from "../financial-invoices/invoice.repo";
+import { InvoiceService } from "../financial-invoices/invoice.service";
 import { OrderService } from "./order.service";
 
 const verifyToken = require("../../../app/middlewares/protectApi");
@@ -38,7 +40,11 @@ const staffOnlyCreate: express.RequestHandler = (request, _response, next) => {
 };
 
 const orderRepository = new OrderRepository();
-const orderService = new OrderService(orderRepository);
+const invoiceOverlay = new InvoiceService({
+  getReport: (reportQuery, vendorId) => orderRepository.getFinancialReport(reportQuery, vendorId),
+  repo: new InvoiceRepository(),
+});
+const orderService = new OrderService(orderRepository, undefined, invoiceOverlay);
 const orderController = new OrderController(orderService);
 import { handleShopifyOrderWebhook } from "./order.webhook";
 
@@ -373,7 +379,7 @@ orderRouter.get(
  *       - bearerAuth: []
  *     tags: [Orders]
  *     summary: Export invoice-based financial report to Excel
- *     description: Downloads the same split financial invoice data as `/orders/financialReport` in Excel format.
+ *     description: Downloads the split financial invoice as Excel. Built from the live report with the cycle invoices laid over it (overrides, manual adjustments, line states) — the same effective numbers as the screen and the PDF; vendors only get effective values of their own reviewed/transferred invoices.
  *     parameters:
  *       - in: query
  *         name: vendorId

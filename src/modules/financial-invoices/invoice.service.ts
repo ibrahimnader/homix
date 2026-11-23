@@ -11,6 +11,7 @@ import {
 } from "./invoice.constants";
 import { isBillableOrderStatus } from "./invoice.eligibility";
 import { canTransition, computeTotals, dueParty, daysCounter, effectiveLineCents, isOverdue, snapshotFromReportOrder } from "./invoice.logic";
+import { overlayReport, type ExportReport, type OverlayInvoice, type OverlayLine } from "./invoice.export-overlay";
 import { fromCents, toCents } from "./invoice.money";
 import type { InvoiceListFilters, InvoiceRepository, Tx } from "./invoice.repo";
 import type { Actor, AdjustmentRow, InvoiceRow, LineRow, LineSnapshot } from "./invoice.types";
@@ -274,6 +275,58 @@ export class InvoiceService {
           return { ...(isStaff ? dto : this.toVendorLineDto(dto)), invoiceId: Number(row.invoiceId), outsideCycle: Boolean(row.outsideCycle), vendorId: Number(row.vendorId) };
         }),
     };
+  }
+
+  /**
+   * The live report with the cycle's invoices laid over it, for the Excel export (same overlay as the screen / PDF).
+   * Custom ranges have no invoices and stay live. Vendors only get their own reviewed/transferred invoices, counted lines
+   * and effective amounts: override flags, reasons and uncounted lines never leave this method for a vendor scope.
+   */
+  public async effectiveReport(report: OrderFinancialReportResponse, scope: Scope, vendorId?: number): Promise<ExportReport> {
+    const isVendor = Boolean(scope.vendorId);
+    if (report.cycle.mode === "customRange") return overlayReport(report, [], isVendor);
+    const periodEnd = cairoDay(report.cycle.endDate);
+    const invoices = await this.repo.listCycleInvoices({
+      periodEndFrom: dayStart(periodEnd),
+      periodEndTo: dayEnd(periodEnd),
+      statuses: isVendor ? [...VENDOR_VISIBLE_STATUSES] : undefined,
+      vendorId: scope.vendorId ? Number(scope.vendorId) : vendorId,
+    });
+    const ids = invoices.map((row) => Number(row.id));
+    const [overlayRows, included, adjustments] = await Promise.all([
+      this.repo.listCycleOverlayLines(ids),
+      this.repo.listIncludedOrderIds(ids),
+      Promise.all(ids.map((id) => this.repo.listAdjustments(id))),
+    ]);
+    const overlayInvoices: OverlayInvoice[] = invoices.map((row, index) => ({
+      adjustments: (adjustments[index] ?? []).filter((item) => !item.removedAt).map((item) => ({ amount: num(item.amount), kind: item.kind, label: item.label })),
+      adjustmentsTotal: num(row.adjustmentsTotal),
+      code: row.code,
+      id: Number(row.id),
+      includedOrderIds: included.filter((item) => Number(item.invoiceId) === Number(row.id)).map((item) => Number(item.orderId)),
+      lines: overlayRows
+        .filter((line) => Number(line.invoiceId) === Number(row.id) && (!isVendor || line.state === LINE_STATE.INCLUDED))
+        .map((line): OverlayLine => {
+          const dto = this.toLineDto(line);
+          // real flags drive which value is used (same for staff and vendor); the export hides them from vendors (overrideInfo)
+          const flag = (value: unknown) => value !== null && value !== undefined;
+          return {
+            collectionOverridden: flag(line.collectionOverride), collectionTotal: dto.collectionTotal,
+            companyDue: dto.companyDue, companyDueKind: dto.companyDueKind, companyDueOverridden: flag(line.companyDueOverride),
+            fines: dto.fines, finesOverridden: flag(line.finesOverride), isWarehouseDelivery: dto.isWarehouseDelivery,
+            operationNumber: dto.operationNumber, orderId: dto.orderId, orderNumber: dto.orderNumber, outsideCycle: Boolean(line.outsideCycle),
+            paymentStatus: dto.paymentStatus, paymentStatusLabel: dto.paymentStatusLabel, productCode: dto.productCode,
+            reason: isVendor ? null : (line.overrideReason ?? line.stateReason ?? null),
+            state: line.state, vendorDue: dto.vendorDue, vendorDueOverridden: flag(line.vendorDueOverride),
+            vendorShippingCost: dto.vendorShippingCost, vendorShippingOverridden: flag(line.vendorShippingCostOverride),
+            warehouseCost: dto.warehouseCost, warehouseCostOverridden: flag(line.warehouseCostOverride),
+          };
+        }),
+      netAmount: num(row.netAmount),
+      status: row.status,
+      vendorId: Number(row.vendorId),
+    }));
+    return overlayReport(report, overlayInvoices, isVendor);
   }
 
   /** Staff-only list for the vendor filter (finance_view is enough; vendors never reach it). */

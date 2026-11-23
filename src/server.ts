@@ -12,6 +12,7 @@ import { DashboardAggregateService } from "./modules/dashboard/dashboard-aggrega
 import { recalculateRuleFines } from "./modules/fines/recalculate-fines";
 import type { DashboardMetricSnapshot } from "./modules/dashboard/dashboard.types";
 import { logger } from "./shared/logger/logger";
+import { addSocketId, removeSocketId } from "./shared/socket/socket-registry";
 
 const createDefaultData = require("../config/defaultData.seeder");
 require("../config/shopify");
@@ -59,12 +60,16 @@ const registerSocketHandlers = (): void => {
         return;
       }
 
-      const user = (await userModel.findByPk(payload.userId)) as LegacyUserRecord | null;
+      /* `socketIds` is excluded from the user default scope (it is large and every request loads the user), so it is
+         requested explicitly here. The user id is remembered on the socket: the disconnect handler could not find it in
+         the handshake query, so ids were never removed and the column grew without bound. */
+      const user = (await userModel.findByPk(payload.userId, { attributes: ["id", "socketIds"] })) as LegacyUserRecord | null;
       if (!user) {
         return;
       }
 
-      user.socketIds = [...(user.socketIds ?? []), socket.id];
+      socket.data.userId = String(payload.userId);
+      user.socketIds = addSocketId(user.socketIds, socket.id);
       await user.save();
       socket.emit("notification", {
         message: "Successfully subscribed to notifications",
@@ -72,17 +77,17 @@ const registerSocketHandlers = (): void => {
     });
 
     socket.on("disconnect", async () => {
-      const userId = socket.handshake.query.userId;
-      if (typeof userId !== "string") {
+      const subscribedUserId: unknown = socket.data.userId ?? socket.handshake.query.userId;
+      if (typeof subscribedUserId !== "string") {
         return;
       }
 
-      const user = (await userModel.findByPk(userId)) as LegacyUserRecord | null;
+      const user = (await userModel.findByPk(subscribedUserId, { attributes: ["id", "socketIds"] })) as LegacyUserRecord | null;
       if (!user) {
         return;
       }
 
-      user.socketIds = (user.socketIds ?? []).filter((id) => id !== socket.id);
+      user.socketIds = removeSocketId(user.socketIds, socket.id);
       await user.save();
     });
   });

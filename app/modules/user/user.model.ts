@@ -98,7 +98,9 @@ const User = sequelize.define(
     paranoid: true,
     timestamps: true,
     defaultScope: {
-      attributes: { exclude: ["password"] },
+      // `socketIds` is only needed by the socket handlers/notification publisher (they request it explicitly);
+      // excluded here because the auth lookup loads the user on every request and the column can be large.
+      attributes: { exclude: ["password", "socketIds"] },
     },
     scopes: {
       withPassword: {

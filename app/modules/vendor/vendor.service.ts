@@ -380,7 +380,9 @@ class VendorsService {
     const vendors = (await Vendor.findAll({
       include: [
         {
+          // the list only needs the vendor login (email, active flag): never ship whole user rows
           as: "user",
+          attributes: ["id", "email", "firstName", "lastName", "vendorId"],
           model: User,
           required: false,
         },

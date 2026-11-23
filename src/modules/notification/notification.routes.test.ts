@@ -62,6 +62,25 @@ describe("notificationRouter", () => {
     expect(notificationModel.update.mock.calls[0][1].where.userId).toBe(7);
   });
 
+  it("scopes mark-all to unread rows of the user, and category narrows entityType", async () => {
+    notificationModel.update.mockClear();
+    await request(app).put("/notifications").send({}).expect(200);
+    expect(notificationModel.update.mock.calls[0][1].where).toEqual({ readAt: null, userId: 7 });
+
+    notificationModel.update.mockClear();
+    await request(app).put("/notifications").send({ category: "orders" }).expect(200);
+    const where = notificationModel.update.mock.calls[0][1].where;
+    expect(where.userId).toBe(7);
+    expect(where.readAt).toBeNull();
+    expect(where.entityType).toBeDefined();
+  });
+
+  it("rejects an unknown category on mark-all", async () => {
+    const response = await request(app).put("/notifications").send({ category: "bogus" });
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+  });
+
   it("marks a single notification as read for the current user only", async () => {
     notificationModel.update.mockClear();
     const response = await request(app).put("/notifications/12/read").send({});

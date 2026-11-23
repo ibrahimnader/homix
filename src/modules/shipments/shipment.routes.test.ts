@@ -1919,6 +1919,106 @@ describe("shipmentRouter", () => {
     }
   });
 
+  it("applies an inclusive Cairo-day disbursement date range and the accounting status to expenses list and export", async () => {
+    shipmentExpenseModel.findAll.mockClear();
+    const query = { accountingStatus: 2, disbursementDateFrom: "2026-05-01", disbursementDateTo: "2026-05-31" };
+
+    const listResponse = await request(app).get("/shipments/accounts/expenses").query({ ...query, page: 1, size: 20 });
+    const exportResponse = await request(app)
+      .get("/shipments/accounts/expenses/export")
+      .query(query)
+      .buffer(true)
+      .parse(binaryParser);
+    expect(listResponse.status).toBe(200);
+    expect(exportResponse.status).toBe(200);
+
+    expect(shipmentExpenseModel.findAll).toHaveBeenCalledTimes(2);
+    for (const call of shipmentExpenseModel.findAll.mock.calls) {
+      const where = (call[0] as { where: { accountingDate?: unknown; disbursementDate: Record<symbol, Date> } }).where;
+      expect(where.accountingDate).toBeUndefined();
+      expect(where.disbursementDate[Op.gte]?.toISOString()).toBe("2026-04-30T21:00:00.000Z");
+      expect(where.disbursementDate[Op.lte]?.toISOString()).toBe("2026-05-31T20:59:59.999Z");
+    }
+    // The mocked row is pending (status 1), so filtering by status 2 empties the list.
+    expect(listResponse.body.data.items).toEqual([]);
+  });
+
+  it("rejects an invalid disbursement date filter or payload with 400", async () => {
+    const badQuery = await request(app).get("/shipments/accounts/expenses").query({ disbursementDateFrom: "not-a-date" });
+    const badBody = await request(app).post("/shipments/accounts/expenses").send({
+      amount: 10, disbursementDate: "not-a-date", reason: "x", type: 1,
+    });
+    expect(badQuery.status).toBe(400);
+    expect(badBody.status).toBe(400);
+  });
+
+  it("stores the expense disbursement date on create and update and returns it", async () => {
+    shipmentExpenseModel.create.mockClear();
+    shipmentExpenseModel.create.mockResolvedValueOnce({
+      accountingStatus: 1, amount: "150", disbursementDate: "2026-05-09T21:00:00.000Z", id: 9, reason: "مواد تغليف", type: 2,
+    });
+    const created = await request(app).post("/shipments/accounts/expenses").send({
+      amount: 150, disbursementDate: "2026-05-09T21:00:00.000Z", reason: "مواد تغليف", type: 2,
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.data.disbursementDate).toBe("2026-05-09T21:00:00.000Z");
+    expect(shipmentExpenseModel.create).toHaveBeenCalledWith(expect.objectContaining({
+      disbursementDate: "2026-05-09T21:00:00.000Z",
+    }));
+
+    const record = {
+      accountingStatus: 1, amount: "150", id: 9, reason: "مواد تغليف", type: 2,
+      update: jest.fn().mockImplementation(async function update(this: Record<string, unknown>, patch: Record<string, unknown>) { Object.assign(this, patch); }),
+    };
+    shipmentExpenseModel.findByPk.mockResolvedValueOnce(record);
+    const cleared = await request(app).put("/shipments/accounts/expenses/9").send({ disbursementDate: null });
+    expect(cleared.status).toBe(200);
+    expect(record.update).toHaveBeenCalledWith(expect.objectContaining({ disbursementDate: null }));
+    expect(cleared.body.data.disbursementDate).toBeNull();
+  });
+
+  describe("inline received-amount edit (accounts)", () => {
+    const delivered = { accountingStatus: 1, id: 9802, receivedAmount: "100", receivedAmountManuallySet: true, shipmentStatus: 4 };
+
+    it("needs finance_settle: 403 for ship_edit alone and no write happens", async () => {
+      mockAuthenticatedUser = { id: 3, permissions: { ship_edit: true }, userType: "3" };
+      const record = makeShipmentRecord(delivered);
+      orderModel.findByPk.mockResolvedValue(record);
+      const response = await request(app).put("/shipments/accounts/deliveries/9802").send({ receivedAmount: 50 });
+      expect(response.status).toBe(403);
+      expect(record.update).not.toHaveBeenCalled();
+    });
+
+    it("rejects a negative or non-numeric amount with 400", async () => {
+      for (const receivedAmount of [-1, "abc"]) {
+        const response = await request(app).put("/shipments/accounts/deliveries/9802").send({ receivedAmount });
+        expect(response.status).toBe(400);
+      }
+    });
+
+    it("writes the amount, flags it manual, and records one audit row with from/to/user", async () => {
+      mockAuthenticatedUser = { id: 7, permissions: { finance_settle: true }, userType: "3" };
+      const record = makeShipmentRecord(delivered);
+      orderModel.findByPk.mockResolvedValue(record);
+      logModel.create.mockClear();
+      const response = await request(app).put("/shipments/accounts/deliveries/9802").send({ receivedAmount: 0 });
+      expect(response.status).toBe(200);
+      expect(record.update).toHaveBeenCalledWith(expect.objectContaining({ receivedAmount: 0, receivedAmountManuallySet: true }));
+      expect(logModel.create).toHaveBeenCalledWith({
+        action: "update", entityId: 9802, entityType: "order", field: "receivedAmount", from: "100", to: "0", userId: 7,
+      });
+    });
+
+    it("writes no audit row when the amount is unchanged", async () => {
+      mockAuthenticatedUser = { id: 7, permissions: { finance_settle: true }, userType: "3" };
+      orderModel.findByPk.mockResolvedValue(makeShipmentRecord(delivered));
+      logModel.create.mockClear();
+      const response = await request(app).put("/shipments/accounts/deliveries/9802").send({ receivedAmount: 100 });
+      expect(response.status).toBe(200);
+      expect(logModel.create).not.toHaveBeenCalled();
+    });
+  });
+
   it("exports delivery accounts as an Excel workbook", async () => {
     orderModel.findAndCountAll.mockResolvedValueOnce({
       count: 1,
@@ -1986,6 +2086,7 @@ describe("shipmentRouter", () => {
       "المبلغ",
       "حالة المحاسبة",
     ]);
+    expect(worksheet.getCell("F1").value).toBe("تاريخ الصرف");
     expect(shipmentExpenseModel.findAll).toHaveBeenCalled();
   });
 

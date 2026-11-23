@@ -642,7 +642,9 @@ export class OrderRepository {
       const plainNote = toPlain(note);
       return { attachments: Array.isArray(plainNote.attachments) ? plainNote.attachments.map((attachment) => ({ createdAt: toIsoString(toPlain(attachment).createdAt) ?? "", description: toText(toPlain(attachment).description), id: toNumber(toPlain(attachment).id), name: toText(toPlain(attachment).name), url: toText(toPlain(attachment).url) })) : [], createdAt: toIsoString(plainNote.createdAt) ?? "", id: toNumber(plainNote.id), text: toText(plainNote.text), userName: `${toText(toPlain(plainNote.user).firstName)} ${toText(toPlain(plainNote.user).lastName)}`.trim() };
     }) : [];
-    const logs = await logModel.findAll({ order: [["createdAt", "DESC"]], where: { entityId: orderId, entityType: "order" } });
+    const allLogs = await logModel.findAll({ order: [["createdAt", "DESC"]], where: { entityId: orderId, entityType: "order" } });
+    /* The staff-only invoice draft note must not leak to vendors through the event log. */
+    const logs = vendorId ? allLogs.filter((log: unknown) => toText(toPlain(log).field) !== "invoiceNotes") : allLogs;
     const usersResult = await userModel.findAll({ attributes: ["firstName", "id", "lastName"], where: { id: { [Op.in]: logs.map((log: unknown) => toNumber(toPlain(log).userId)).filter(Boolean) } } });
     const users = Array.isArray(usersResult) ? usersResult : [];
     const userNames = new Map(users.map((user: unknown) => { const plainUser = toPlain(user); return [toNumber(plainUser.id), `${toText(plainUser.firstName)} ${toText(plainUser.lastName)}`.trim()]; }));
@@ -804,6 +806,7 @@ export class OrderRepository {
         deliveryStatus: summary.deliveryStatus,
         deliveryDate: toIsoString(plainOrder.deliveryDate),
         itemsCount: orderLines.length,
+        invoiceNotes: vendorId ? "" : toText(plainOrder.invoiceNotes),
         notes: toText(plainOrder.notes),
         shippedFromInventory: Boolean(plainOrder.shippedFromInventory),
         shipmentType: toText(plainOrder.shipmentType),

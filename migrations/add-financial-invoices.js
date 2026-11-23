@@ -103,6 +103,14 @@ module.exports = {
           CHECK (("warehouseCostOverride" IS NULL OR "warehouseCostOverride" >= 0) AND ("collectionOverride" IS NULL OR "collectionOverride" >= 0));
       END IF;
     END $$`);
+    // invoice-level override of the vendor shipping cost (شحن البائع) of a line
+    await run('ALTER TABLE financial_invoice_lines ADD COLUMN IF NOT EXISTS "vendorShippingCostOverride" NUMERIC(14,2)');
+    await run(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'financial_invoice_lines_shipping_override_chk') THEN
+        ALTER TABLE financial_invoice_lines ADD CONSTRAINT financial_invoice_lines_shipping_override_chk
+          CHECK ("vendorShippingCostOverride" IS NULL OR "vendorShippingCostOverride" >= 0);
+      END IF;
+    END $$`);
     // company due has two meanings: Homix margin (Homix delivered) or a debt the vendor owes (vendor delivered)
     await run('ALTER TABLE financial_invoice_lines ADD COLUMN IF NOT EXISTS "companyDueKind" VARCHAR(12)');
     await run(`DO $$ BEGIN

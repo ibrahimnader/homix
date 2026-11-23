@@ -133,6 +133,11 @@ const Order = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: true,
     },
+    /* «مسودة ملاحظات» — نص حر يكتبه الموظفون ويُطبع في فاتورة الطلب (لا يراه البائع). */
+    invoiceNotes: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
     downPayment: {
       type: DataTypes.DECIMAL,
       allowNull: true,

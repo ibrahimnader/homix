@@ -320,6 +320,18 @@ describe("cycleOverview (live report overlay)", () => {
     expect(result.lines[0]).not.toHaveProperty("stateReason");
     expect(result.lines[0]).not.toHaveProperty("originalFines");
   });
+
+  test("the cycle overview overlays an overridden line for staff and hides the override from vendors", async () => {
+    const mk = () => cycleRepo(
+      [invoice({ id: 3, status: "reviewed", vendorId: 5 })],
+      [{ ...lineRow({ invoiceId: 3, vendorShippingCost: 50, vendorShippingCostOverride: 120 }), outsideCycle: false, vendorId: 5 }],
+    );
+    const staff = await service(mk()).cycleOverview({ periodEnd: "2026-10-28" }, {});
+    expect(staff.lines[0]).toMatchObject({ vendorShippingCost: 120, vendorShippingCostOverride: 120 });
+    const vendor = await service(mk()).cycleOverview({ periodEnd: "2026-10-28" }, { vendorId: 5 });
+    expect(vendor.lines[0]).toMatchObject({ vendorShippingCost: 120 });
+    expect(vendor.lines[0]).not.toHaveProperty("vendorShippingCostOverride");
+  });
 });
 
 describe("cost/collection overrides and draft refresh", () => {
@@ -393,6 +405,55 @@ describe("cost/collection overrides and draft refresh", () => {
     expect(detail.lines[0]).toMatchObject({ collectionTotal: 1, warehouseCost: 4 });
     const staff = await service(own.repo).detail(1, {});
     expect(staff.lines[0]).toMatchObject({ collectionOverride: 1, warehouseCostOverride: 4, originalWarehouseCost: 600 });
+  });
+});
+
+describe("vendor shipping (شحن البائع) override", () => {
+  test("is saved with old -> new audit detail and recomputes totals", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow({ vendorShippingCost: 50 })];
+    (repo.setLineOverrides as jest.Mock).mockImplementation(async (_id: unknown, values: Record<string, unknown>) => { state.lines = state.lines.map((row) => ({ ...row, ...values })) as LineRow[]; });
+    await service(repo).setOverrides(1, 11, { vendorShippingCostOverride: 120 }, actor);
+    expect(repo.setLineOverrides).toHaveBeenCalledWith(11, expect.objectContaining({ vendorShippingCostOverride: 120 }), expect.anything());
+    expect(repo.insertEvent).toHaveBeenCalledWith(expect.objectContaining({
+      action: "line.overridden",
+      detail: expect.objectContaining({ changes: { vendorShippingCostOverride: { from: null, to: 120 } } }),
+    }), expect.anything());
+    expect(repo.updateTotals).toHaveBeenCalledWith(1, expect.objectContaining({ vendorShippingCost: 120 }), expect.anything());
+  });
+
+  test("null resets to the system value", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow({ vendorShippingCost: 50, vendorShippingCostOverride: 120 })];
+    (repo.setLineOverrides as jest.Mock).mockImplementation(async (_id: unknown, values: Record<string, unknown>) => { state.lines = state.lines.map((row) => ({ ...row, ...values })) as LineRow[]; });
+    await service(repo).setOverrides(1, 11, { vendorShippingCostOverride: null }, actor);
+    expect(repo.setLineOverrides).toHaveBeenCalledWith(11, expect.objectContaining({ vendorShippingCostOverride: null }), expect.anything());
+    expect(repo.updateTotals).toHaveBeenCalledWith(1, expect.objectContaining({ vendorShippingCost: 50 }), expect.anything());
+  });
+
+  test("is refused on Homix-delivered lines (shipping only applies to vendor deliveries)", async () => {
+    const { repo, state } = makeRepo();
+    state.lines = [lineRow({ isWarehouseDelivery: true })];
+    await expect(service(repo).setOverrides(1, 11, { vendorShippingCostOverride: 10 }, actor)).rejects.toThrow(/تسليمات البائع/);
+    expect(repo.setLineOverrides).not.toHaveBeenCalled();
+  });
+
+  test.each(["reviewed", "frozen", "transferred"] as const)("is refused (409) on %s invoices", async (status) => {
+    const { repo, state } = makeRepo(invoice({ status }));
+    state.lines = [lineRow()];
+    await expect(service(repo).setOverrides(1, 11, { vendorShippingCostOverride: 10 }, actor)).rejects.toThrow(/مقفلة/);
+    expect(repo.setLineOverrides).not.toHaveBeenCalled();
+  });
+
+  test("staff see override + system value; vendors only the effective shipping, never the override or original", async () => {
+    const { repo, state } = makeRepo(invoice({ status: "reviewed", vendorId: 5 }));
+    state.lines = [lineRow({ vendorShippingCost: 50, vendorShippingCostOverride: 120 })];
+    const staff = await service(repo).detail(1, {});
+    expect(staff.lines[0]).toMatchObject({ vendorShippingCost: 120, vendorShippingCostOverride: 120, originalVendorShippingCost: 50 });
+    const vendor = await service(repo).detail(1, { vendorId: 5 });
+    expect(vendor.lines[0]).toMatchObject({ vendorShippingCost: 120 });
+    expect(vendor.lines[0]).not.toHaveProperty("vendorShippingCostOverride");
+    expect(vendor.lines[0]).not.toHaveProperty("originalVendorShippingCost");
   });
 });
 

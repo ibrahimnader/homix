@@ -192,6 +192,7 @@ const FIELD_LABELS: Record<string, string> = {
   expectedDeliveryDate: "موعد التسليم المتوقع",
   governorate: "المحافظة",
   manufactureStatus: "حالة التصنيع",
+  invoiceNotes: "مسودة ملاحظات الفاتورة",
   notes: "الملاحظات",
   orderDate: "تاريخ الطلب",
   orderSource: "مصدر الطلب",
@@ -406,6 +407,11 @@ export const normalizeOrderMutationPayload = (
 ): Record<string, unknown> => {
   const payload = { ...payloadValue };
   const existing = existingValue ?? {};
+  if (Object.prototype.hasOwnProperty.call(payload, "invoiceNotes")) {
+    /* Blank clears the note (stored as NULL); the legacy updater would otherwise drop "" as "not provided". */
+    const trimmedNotes = typeof payload.invoiceNotes === "string" ? payload.invoiceNotes.trim() : "";
+    payload.invoiceNotes = trimmedNotes === "" ? null : trimmedNotes;
+  }
   const shipmentType = toText(payload.shipmentType, toText(existing.shipmentType)).trim();
   const nextStatus = toNumber(payload.status ?? existing.status);
 

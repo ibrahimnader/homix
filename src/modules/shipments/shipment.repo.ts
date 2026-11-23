@@ -1661,6 +1661,7 @@ export class ShipmentRepository {
       hidden?: boolean;
       receivedAmount?: number;
     },
+    userId?: number,
   ): Promise<boolean> {
     const order = await orderModel.findByPk(orderId);
     if (!order) {
@@ -1702,6 +1703,15 @@ export class ShipmentRepository {
         : {}),
       ...(costPriceTotal !== null ? { totalCost: costPriceTotal } : {}),
     });
+
+    /* Audit row for the accounts edit of the received amount (who changed what, from/to). */
+    if (payload.receivedAmount !== undefined) {
+      /* Before the first explicit edit the ledger shows amountToCollect, so "never set" is logged as null. */
+      const previousReceivedAmount = plainOrder.receivedAmountManuallySet === true || toNumber(plainOrder.receivedAmount) > 0
+        ? toNumber(plainOrder.receivedAmount)
+        : null;
+      await logOrderFieldChange(orderId, previousReceivedAmount, payload.receivedAmount, userId, "receivedAmount");
+    }
 
     return true;
   }
@@ -1865,16 +1875,28 @@ export class ShipmentRepository {
   public async listExpenseAccounts(filters: ExpenseAccountsListQuery): Promise<ExpenseAccountsListResponse> {
     const dateStart = filters.settledDateFrom ? toDateRangeBoundary(filters.settledDateFrom, "start") : null;
     const dateEnd = filters.settledDateTo ? toDateRangeBoundary(filters.settledDateTo, "end") : null;
-    const dateWhere = dateStart || dateEnd
-      ? {
-          accountingDate: {
-            ...(dateStart ? { [Op.gte]: dateStart } : {}),
-            ...(dateEnd ? { [Op.lte]: dateEnd } : {}),
-          },
-        }
-      : undefined;
+    const disbursementStart = filters.disbursementDateFrom ? toDateRangeBoundary(filters.disbursementDateFrom, "start") : null;
+    const disbursementEnd = filters.disbursementDateTo ? toDateRangeBoundary(filters.disbursementDateTo, "end") : null;
+    const dateWhere = {
+      ...(dateStart || dateEnd
+        ? {
+            accountingDate: {
+              ...(dateStart ? { [Op.gte]: dateStart } : {}),
+              ...(dateEnd ? { [Op.lte]: dateEnd } : {}),
+            },
+          }
+        : {}),
+      ...(disbursementStart || disbursementEnd
+        ? {
+            disbursementDate: {
+              ...(disbursementStart ? { [Op.gte]: disbursementStart } : {}),
+              ...(disbursementEnd ? { [Op.lte]: disbursementEnd } : {}),
+            },
+          }
+        : {}),
+    };
     const [rows, expenseTypeLabels] = await Promise.all([shipmentExpenseModel.findAll({
-      ...(dateWhere ? { where: dateWhere } : {}),
+      ...(Object.keys(dateWhere).length > 0 ? { where: dateWhere } : {}),
       order: [["accountingDate", "DESC"], ["createdAt", "DESC"]],
     }), getManagedOptionLabels(MANAGED_OPTION_GROUP.EXPENSE_TYPE)]);
     const items: ExpenseAccountItem[] = rows.map((row: unknown) => {
@@ -1886,6 +1908,7 @@ export class ShipmentRepository {
         accountingStatus,
         accountingStatusLabel: EXPENSE_STATUS_LABELS[accountingStatus] ?? String(accountingStatus),
         amount: toNumber(item.amount),
+        disbursementDate: toIsoString(item.disbursementDate),
         id: toNumber(item.id),
         reason: toText(item.reason),
         type,
@@ -2022,6 +2045,7 @@ export class ShipmentRepository {
       accountingDate: payload.accountingDate || null,
       accountingStatus: payload.accountingStatus ?? ACCOUNTING_STATUS.PENDING,
       amount: payload.amount,
+      disbursementDate: payload.disbursementDate || null,
       reason: payload.reason,
       type: payload.type,
     });
@@ -2032,6 +2056,7 @@ export class ShipmentRepository {
       accountingStatus,
       accountingStatusLabel: EXPENSE_STATUS_LABELS[accountingStatus] ?? String(accountingStatus),
       amount: toNumber(expense.amount),
+      disbursementDate: toIsoString(expense.disbursementDate),
       id: toNumber(expense.id),
       reason: toText(expense.reason),
       type: toNumber(expense.type),
@@ -2048,6 +2073,7 @@ export class ShipmentRepository {
     await expenseRecord.update({
       ...payload,
       ...(payload.accountingDate !== undefined ? { accountingDate: payload.accountingDate || null } : {}),
+      ...(payload.disbursementDate !== undefined ? { disbursementDate: payload.disbursementDate || null } : {}),
     });
     const expense = toPlain(expenseRecord);
     const expenseTypeLabels = await getManagedOptionLabels(MANAGED_OPTION_GROUP.EXPENSE_TYPE);
@@ -2057,6 +2083,7 @@ export class ShipmentRepository {
       accountingStatus,
       accountingStatusLabel: EXPENSE_STATUS_LABELS[accountingStatus] ?? String(accountingStatus),
       amount: toNumber(expense.amount),
+      disbursementDate: toIsoString(expense.disbursementDate),
       id: toNumber(expense.id),
       reason: toText(expense.reason),
       type: toNumber(expense.type),

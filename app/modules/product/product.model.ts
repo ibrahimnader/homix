@@ -42,6 +42,13 @@ const Product = sequelize.define(
       allowNull: false,
       defaultValue: true,
     },
+    // Created inside the system (new or duplicated), not imported from Shopify.
+    // Never touched by the Shopify sync and never reclassified by deploy migrations.
+    isSystemCreated: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
   },
   {
     tableName: "products",

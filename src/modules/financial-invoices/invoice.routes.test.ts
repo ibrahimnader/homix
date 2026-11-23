@@ -132,6 +132,15 @@ test("refresh is staff-only with finance_settle; overrides accept cost/collectio
   expect((await request(finance).patch("/financial-invoices/1/lines/2").send({})).status).toBe(400);
 });
 
+test("vendor shipping override is accepted (and cleared with null), rejects negatives, and is staff-only", async () => {
+  expect((await request(finance).patch("/financial-invoices/1/lines/2").send({ vendorShippingCostOverride: 75.5 })).status).toBe(200);
+  expect(spies.setOverrides).toHaveBeenLastCalledWith(1, 2, { vendorShippingCostOverride: 75.5 }, { id: 7 });
+  expect((await request(finance).patch("/financial-invoices/1/lines/2").send({ vendorShippingCostOverride: null })).status).toBe(200);
+  expect(spies.setOverrides).toHaveBeenLastCalledWith(1, 2, { vendorShippingCostOverride: null }, { id: 7 });
+  expect((await request(finance).patch("/financial-invoices/1/lines/2").send({ vendorShippingCostOverride: -1 })).status).toBe(400);
+  expect((await request(vendor).patch("/financial-invoices/1/lines/2").send({ vendorShippingCostOverride: 1 })).status).toBe(403);
+});
+
 test("invoiced lines: separate filters and a vendor id list are validated and parsed", async () => {
   await request(finance).get("/financial-invoices/lines?operationNumber=OP-1&orderNumber=316&productCode=rka&invoiceCode=INV-2026&vendorId=3,4&q=old");
   expect(spies.invoicedLines).toHaveBeenCalledWith(

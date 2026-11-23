@@ -231,9 +231,10 @@ export class ShipmentService {
 
   public async updateDeliveryAccount(
     orderId: number,
-    payload: { accountingDate?: string | null; accountingReference?: string; accountingStatus?: number },
+    payload: { accountingDate?: string | null; accountingReference?: string; accountingStatus?: number; receivedAmount?: number },
+    userId?: number,
   ): Promise<Result<{ message: string }>> {
-    const updated = await this.shipmentRepository.updateDeliveryAccount(orderId, payload);
+    const updated = await this.shipmentRepository.updateDeliveryAccount(orderId, payload, userId);
     if (!updated) {
       throw new NotFoundError("Delivery account not found");
     }
@@ -369,6 +370,7 @@ export class ShipmentService {
       { header: "السبب", key: "reason", width: 40 },
       { header: "المبلغ", key: "amount", width: 16 },
       { header: "حالة المحاسبة", key: "accountingStatusLabel", width: 20 },
+      { header: "تاريخ الصرف", key: "disbursementDate", width: 22 },
     ], report.items);
   }
 

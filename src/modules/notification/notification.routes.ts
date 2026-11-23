@@ -125,7 +125,7 @@ notificationRouter.delete(
  *     tags:
  *       - Notifications
  *     summary: Mark all notifications as read
- *     description: Marks the authenticated user's unread notifications as read. Send an empty body for all of them, or a category to mark only that tab.
+ *     description: Marks the authenticated user's unread notifications as read. Send an empty body for all of them, or a category to mark only that tab. Idempotent, answers 200 with updated 0 when nothing was unread.
  *     requestBody:
  *       required: true
  *       content:

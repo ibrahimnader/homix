@@ -98,10 +98,21 @@ const STEPS: Step[] = [
     ],
   },
   {
+    name: "shipmentExpenses.disbursementDate",
+    statements: [
+      `ALTER TABLE "shipmentExpenses" ADD COLUMN IF NOT EXISTS "disbursementDate" TIMESTAMPTZ`,
+      `CREATE INDEX IF NOT EXISTS shipment_expenses_disbursement_date_idx ON "shipmentExpenses" ("disbursementDate")`,
+    ],
+  },
+  {
     name: "orders.confirmationStatus",
     statements: [
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS "confirmationStatus" INTEGER`,
     ],
+  },
+  {
+    name: "order invoice draft notes (orders.invoiceNotes)",
+    statements: [`ALTER TABLE orders ADD COLUMN IF NOT EXISTS "invoiceNotes" TEXT`],
   },
   {
     name: "warehouse receiving (orders columns, receipt number sequence, movements)",
@@ -276,6 +287,14 @@ const STEPS: Step[] = [
         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'financial_invoice_lines_cost_overrides_chk') THEN
           ALTER TABLE financial_invoice_lines ADD CONSTRAINT financial_invoice_lines_cost_overrides_chk
             CHECK (("warehouseCostOverride" IS NULL OR "warehouseCostOverride" >= 0) AND ("collectionOverride" IS NULL OR "collectionOverride" >= 0));
+        END IF;
+      END $$`,
+      // invoice-level override of the vendor shipping cost (شحن البائع) of a line
+      `ALTER TABLE financial_invoice_lines ADD COLUMN IF NOT EXISTS "vendorShippingCostOverride" NUMERIC(14,2)`,
+      `DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'financial_invoice_lines_shipping_override_chk') THEN
+          ALTER TABLE financial_invoice_lines ADD CONSTRAINT financial_invoice_lines_shipping_override_chk
+            CHECK ("vendorShippingCostOverride" IS NULL OR "vendorShippingCostOverride" >= 0);
         END IF;
       END $$`,
       // company due has two meanings: Homix margin (Homix delivered) or a debt the vendor owes (vendor delivered)

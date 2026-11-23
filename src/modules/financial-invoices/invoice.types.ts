@@ -50,6 +50,7 @@ export type LineRow = {
   companyDue: string | number;
   finesOverride: string | number | null;
   warehouseCostOverride?: string | number | null;
+  vendorShippingCostOverride?: string | number | null;
   companyDueKind?: "margin" | "vendorOwes" | null;
   collectionOverride?: string | number | null;
   vendorDueOverride: string | number | null;

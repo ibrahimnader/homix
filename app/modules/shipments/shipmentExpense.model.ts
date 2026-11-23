@@ -32,6 +32,11 @@ const ShipmentExpense = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    // تاريخ الصرف: يوم دفع المصروف فعلياً — مستقل عن تاريخ المحاسبة.
+    disbursementDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     tableName: "shipmentExpenses",
@@ -41,6 +46,7 @@ const ShipmentExpense = sequelize.define(
       { fields: ["type"] },
       { fields: ["accountingStatus"] },
       { fields: ["accountingDate"] },
+      { fields: ["disbursementDate"] },
       { fields: ["deletedAt"] },
     ],
   },

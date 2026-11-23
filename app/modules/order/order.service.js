@@ -420,7 +420,8 @@ class OrderService {
           const variant = product.variants
             ? product.variants.find(
                 (variant) =>
-                  variant.shopifyId.toString() === line.variant_id.toString(),
+                  // System-created products have local variant ids and no shopifyId.
+                  String(variant.shopifyId ?? variant.id) === String(line.variant_id),
               )
             : null;
           const cost = variant ? Number(variant.cost) || 0 : 0;
@@ -1339,7 +1340,7 @@ class OrderService {
 
         for (const line of order.orderLines) {
           const variant = line.product.variants.find(
-            (variant) => String(variant.shopifyId) === String(line.variant_id),
+            (variant) => String(variant.shopifyId ?? variant.id) === String(line.variant_id),
           );
           worksheet.addRow({
             amountToCollect,
@@ -1725,6 +1726,8 @@ class OrderService {
         const newProduct = await Product.create({
           ...product,
           isCatalogProduct: false,
+          // The per-order copy is not a catalogue/system product (deploy migrations classify it by shopifyId).
+          isSystemCreated: false,
           vendorId: orderData.vendorId,
         });
         await orderLine.update({
@@ -1754,6 +1757,25 @@ class OrderService {
     }
 
     Object.keys(orderData).forEach((key) => {
+      if (key === "invoiceNotes") {
+        /* null clears the draft note; only a real change is logged, truncated to the logs column size. */
+        const before = order.invoiceNotes ?? null;
+        const after = orderData.invoiceNotes ?? null;
+        orderData.invoiceNotes = after;
+        if (before !== after) {
+          const clip = (value) => (value === null ? null : value.length > 250 ? `${value.slice(0, 250)}…` : value);
+          logs.push({
+            action: "update",
+            entityType: "order",
+            entityId: order.id,
+            userId: user.id,
+            field: key,
+            from: clip(before),
+            to: clip(after),
+          });
+        }
+        return;
+      }
       if (
         orderData[key] === undefined ||
         orderData[key] === null ||

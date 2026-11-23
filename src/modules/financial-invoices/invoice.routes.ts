@@ -463,6 +463,9 @@ invoiceRouter.post("/:id/lines", ...settle, validateRequest({ params: invoiceIdP
  *               finesOverride: { type: number, nullable: true }
  *               vendorDueOverride: { type: number, nullable: true }
  *               companyDueOverride: { type: number, nullable: true }
+ *               warehouseCostOverride: { type: number, nullable: true }
+ *               collectionOverride: { type: number, nullable: true }
+ *               vendorShippingCostOverride: { type: number, nullable: true, description: "شحن البائع — replaces the system vendor shipping cost of this line (vendor deliveries); null clears it" }
  *               reason: { type: string }
  *     responses:
  *       200: { description: "{ line, netAmount }" }

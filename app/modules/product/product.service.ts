@@ -1,6 +1,19 @@
 import { Op } from "sequelize";
 
 import { env } from "../../../src/config/env";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../../../src/shared/errors";
+import {
+  cloneVariantWithoutIds,
+  costChanged,
+  duplicateSkuBase,
+  generateUniqueSku,
+  newLocalVariantId,
+  parseLocalProductKey,
+  randomSkuBase,
+  toLocalProductKey,
+  type StoredVariant,
+} from "./product.system";
+import type { CreateSystemProductInput, DuplicateProductInput } from "./product.schemas";
 
 const { sequelize } = require("../../../src/infrastructure/database") as typeof import("../../../src/infrastructure/database");
 const VendorsService = require("../vendor/vendor.service") as typeof import("../vendor/vendor.service");
@@ -266,6 +279,23 @@ class ProductsService {
 
   public static async getProductsMappedByShopifyIds(productsIds: string[]) {
     const allVendorsMap: Record<string, VendorRecord> = {};
+
+    // System-created products have no Shopify id; orders reference them as `local:<id>`.
+    const localIds = productsIds.map((key) => parseLocalProductKey(key)).filter((id): id is number => id !== null);
+    productsIds = productsIds.filter((key) => parseLocalProductKey(key) === null);
+    const localProducts = localIds.length
+      ? ((await Product.findAll({
+          attributes: ["shopifyId", "id", "variants", "vendorId"],
+          include: [{ as: "vendor", model: Vendor }],
+          where: { id: { [Op.in]: localIds }, isSystemCreated: true },
+        })) as ProductRecord[])
+      : [];
+    const foundLocalIds = new Set(localProducts.map((product) => Number(product.id)));
+    const missingLocalId = localIds.find((id) => !foundLocalIds.has(id));
+    if (missingLocalId !== undefined) {
+      throw new NotFoundError(`Product ${toLocalProductKey(missingLocalId)} not found`);
+    }
+
     const products = (await Product.findAll({
       attributes: ["shopifyId", "id", "variants", "vendorId"],
       include: [
@@ -281,6 +311,11 @@ class ProductsService {
 
     const productsMap: Record<string, ProductRecord> = {};
     const existingShopifyIds = new Set<string>();
+
+    for (const product of localProducts) {
+      productsMap[toLocalProductKey((product as { id: number }).id)] = product;
+      allVendorsMap[String(product.vendorId)] = product.vendor as VendorRecord;
+    }
 
     for (const product of products) {
       productsMap[product.shopifyId] = product;
@@ -423,6 +458,12 @@ class ProductsService {
             where: { shopifyId: product.shopifyId },
           })) as ProductRecord | null;
 
+
+          // System-created products are owned by this app: a Shopify payload must never overwrite them.
+          if (existingProduct && (existingProduct as { isSystemCreated?: boolean }).isSystemCreated) {
+            return existingProduct;
+          }
+
           if (existingProduct) {
             await existingProduct.update({
               image: product.image,
@@ -449,6 +490,188 @@ class ProductsService {
     );
 
     return savedProducts.filter(Boolean);
+  }
+
+  /** True when any live product already uses `sku` in one of its variants (case-insensitive exact match). */
+  public static async skuExists(sku: string): Promise<boolean> {
+    const rows = (await sequelize.query(
+      `SELECT 1 FROM products
+        WHERE "deletedAt" IS NULL
+          AND EXISTS (
+            SELECT 1 FROM json_array_elements(CASE WHEN json_typeof("variants") = 'array' THEN "variants" ELSE '[]'::json END) AS variant
+             WHERE lower(variant->>'sku') = lower(:sku)
+          )
+        LIMIT 1`,
+      { replacements: { sku }, type: "SELECT" },
+    )) as unknown[];
+    return rows.length > 0;
+  }
+
+  /**
+   * Resolves the final sku of each variant: an explicit sku must be free (409 otherwise),
+   * an empty one is generated from `fallbackBase` (`<base>-C1`...).
+   */
+  private static async resolveVariantSkus<T extends { sku: string | null }>(
+    variants: T[],
+    fallbackBase: (index: number) => string,
+  ): Promise<Array<T & { sku: string }>> {
+    const reserved = new Set<string>();
+    const resolved: Array<T & { sku: string }> = [];
+    const isTaken = (candidate: string) => ProductsService.skuExists(candidate);
+
+    for (const [index, variant] of variants.entries()) {
+      let sku: string;
+      if (variant.sku) {
+        if (await isTaken(variant.sku)) {
+          throw new ConflictError(`كود المنتج ${variant.sku} مستخدم بالفعل`);
+        }
+        sku = variant.sku;
+      } else {
+        sku = await generateUniqueSku(fallbackBase(index), isTaken, reserved, { tryBaseFirst: false });
+      }
+      reserved.add(sku.toLowerCase());
+      resolved.push({ ...variant, sku });
+    }
+    return resolved;
+  }
+
+  private static async assertVendorExists(vendorId: number): Promise<void> {
+    const vendor = await Vendor.findByPk(vendorId);
+    if (!vendor) throw new ValidationError("البائع غير موجود");
+  }
+
+  private static async assertTypeExists(typeId: number | null | undefined): Promise<void> {
+    if (!typeId) return;
+    const type = await ProductType.findByPk(typeId);
+    if (!type) throw new ValidationError("نوع المنتج غير موجود");
+  }
+
+  /** Brand-new product created inside the system (no Shopify id). */
+  public static async createSystemProduct(
+    input: CreateSystemProductInput,
+    options: { canEditFinancials: boolean },
+  ): Promise<ProductsResponse> {
+    if (!options.canEditFinancials && input.variants.some((variant) => costChanged(variant.cost, 0))) {
+      throw new ForbiddenError("ليس لديك صلاحية تعديل التفاصيل المالية (سعر التكلفة)");
+    }
+    await ProductsService.assertVendorExists(input.vendorId);
+    await ProductsService.assertTypeExists(input.typeId);
+
+    const base = randomSkuBase();
+    const variants = await ProductsService.resolveVariantSkus(input.variants, (index) =>
+      input.variants.length > 1 ? `${base}-V${index + 1}` : base,
+    );
+
+    const product = await Product.create({
+      image: input.image ?? DEFAULT_PRODUCT_IMAGE,
+      isCatalogProduct: true,
+      isSystemCreated: true,
+      shopifyId: null,
+      title: input.title,
+      typeId: input.typeId ?? null,
+      variants: variants.map((variant) => ({
+        color: variant.color,
+        cost: variant.cost ?? 0,
+        id: newLocalVariantId(),
+        material: variant.material,
+        price: variant.price,
+        size: variant.size,
+        sku: variant.sku,
+        title: variant.title ?? "Default Title",
+      })),
+      vendorId: input.vendorId,
+    });
+
+    return { data: product, message: "Product created successfully", status: true, statusCode: 201 };
+  }
+
+  /**
+   * Duplicates a catalogue product into a new system product. Copies title, vendor, type,
+   * image, variants (price/cost/attributes) and category links; never the Shopify ids.
+   * `overrides` (the edited form) win over the copied values; codes are regenerated unique.
+   */
+  public static async duplicateProduct(
+    sourceId: number,
+    overrides: DuplicateProductInput,
+    options: { canEditFinancials: boolean },
+  ): Promise<ProductsResponse> {
+    const source = (await Product.findByPk(sourceId, {
+      include: [{ as: "categories", model: ProductCategory }],
+    })) as unknown as
+      | (ProductRecord & {
+          categories?: Array<{ categoryId: number | null }>;
+          image?: string | null;
+          isCatalogProduct?: boolean;
+          status?: number | null;
+          title: string;
+          typeId?: number | null;
+        })
+      | null;
+    if (!source || source.isCatalogProduct === false) throw new NotFoundError("المنتج غير موجود");
+
+    const sourceVariants = (Array.isArray(source.variants) ? source.variants : []) as StoredVariant[];
+    const vendorId = overrides.vendorId ?? source.vendorId;
+    const typeId = overrides.typeId !== undefined ? overrides.typeId : source.typeId ?? null;
+
+    if (!options.canEditFinancials && overrides.variants) {
+      const changed = overrides.variants.some((variant, index) => costChanged(variant.cost, sourceVariants[index]?.cost));
+      if (changed) throw new ForbiddenError("ليس لديك صلاحية تعديل التفاصيل المالية (سعر التكلفة)");
+    }
+    if (overrides.vendorId !== undefined) await ProductsService.assertVendorExists(vendorId);
+    if (overrides.typeId !== undefined) await ProductsService.assertTypeExists(typeId);
+
+    const fallbackBase = randomSkuBase();
+    let variants: StoredVariant[];
+    if (overrides.variants) {
+      const resolved = await ProductsService.resolveVariantSkus(overrides.variants, (index) =>
+        duplicateSkuBase(sourceVariants[index]?.sku ?? sourceVariants[0]?.sku, fallbackBase),
+      );
+      variants = resolved.map((variant, index) => ({
+        ...cloneVariantWithoutIds(sourceVariants[index] ?? {}, variant.sku),
+        color: variant.color,
+        cost: options.canEditFinancials ? (variant.cost ?? (Number(sourceVariants[index]?.cost) || 0)) : (Number(sourceVariants[index]?.cost) || 0),
+        material: variant.material,
+        price: variant.price,
+        size: variant.size,
+        title: variant.title,
+      }));
+    } else {
+      const reserved = new Set<string>();
+      variants = [];
+      for (const variant of sourceVariants) {
+        const sku = await generateUniqueSku(
+          duplicateSkuBase(variant.sku, fallbackBase),
+          (candidate) => ProductsService.skuExists(candidate),
+          reserved,
+        );
+        reserved.add(sku.toLowerCase());
+        variants.push(cloneVariantWithoutIds(variant, sku));
+      }
+    }
+
+    const created = await sequelize.transaction(async (transaction: unknown) => {
+      const product = (await Product.create(
+        {
+          image: overrides.image !== undefined ? overrides.image ?? DEFAULT_PRODUCT_IMAGE : source.image ?? DEFAULT_PRODUCT_IMAGE,
+          isCatalogProduct: true,
+          isSystemCreated: true,
+          shopifyId: null,
+          status: source.status ?? 0,
+          title: overrides.title ?? source.title,
+          typeId,
+          variants,
+          vendorId,
+        },
+        { transaction },
+      )) as unknown as { id: number };
+      const categoryLinks = (source.categories ?? [])
+        .filter((link) => link.categoryId)
+        .map((link) => ({ categoryId: link.categoryId, productId: product.id, shopifyId: null }));
+      if (categoryLinks.length) await ProductCategory.bulkCreate(categoryLinks, { transaction });
+      return product;
+    });
+
+    return { data: created, message: "Product duplicated successfully", status: true, statusCode: 201 };
   }
 
   public static async getAllCategories(): Promise<ProductsResponse> {

@@ -89,6 +89,10 @@ const run = async (): Promise<void> => {
     deletedAt: { allowNull: true, type: DataTypes.DATE },
   });
 
+  await ensureColumn("shipmentExpenses", "disbursementDate", {
+    allowNull: true,
+    type: DataTypes.DATE,
+  });
   await ensureColumn("orders", "scheduleStatus", {
     allowNull: true,
     type: DataTypes.INTEGER,

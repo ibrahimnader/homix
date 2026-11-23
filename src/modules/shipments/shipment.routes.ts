@@ -1225,6 +1225,16 @@ shipmentRouter.post(
  *         description: Accounting date to (YYYY-MM-DD), inclusive Cairo day.
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: disbursementDateFrom
+ *         description: Disbursement date (تاريخ الصرف) from (YYYY-MM-DD), inclusive Cairo day.
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: disbursementDateTo
+ *         description: Disbursement date (تاريخ الصرف) to (YYYY-MM-DD), inclusive Cairo day.
+ *         schema:
+ *           type: string
  *     responses:
  *       200:
  *         description: Expenses accounting rows

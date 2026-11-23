@@ -139,6 +139,41 @@ describe("effectiveLineCents with cost/collection overrides", () => {
   });
 });
 
+describe("vendor shipping (شحن البائع) override", () => {
+  // vendor delivery: collected 1,000, cost 600, system shipping 50 -> balance 350 for Homix
+  const vendorDelivered = (overrides: Partial<LineRow> = {}) => line({
+    collectionTotal: "1000", companyDue: "350", fines: "0", vendorDue: "0", vendorShippingCost: "50", warehouseCost: "600", ...overrides,
+  });
+
+  test("no override keeps the system shipping and the snapshot dues", () => {
+    expect(effectiveLineCents(vendorDelivered())).toMatchObject({ shipping: 5000, companyDue: 35000, vendorDue: 0 });
+  });
+  test("override replaces the system value and re-settles balance = collection - cost - shipping", () => {
+    expect(effectiveLineCents(vendorDelivered({ vendorShippingCostOverride: 120 }))).toMatchObject({ shipping: 12000, companyDue: 28000, vendorDue: 0 });
+    // shipping above the margin turns the balance into a vendor due (fines still reduce it)
+    expect(effectiveLineCents(vendorDelivered({ vendorShippingCostOverride: 500 }))).toMatchObject({ companyDue: 0, vendorDue: 10000 });
+    expect(effectiveLineCents(vendorDelivered({ vendorShippingCostOverride: 500, fines: "30" }))).toMatchObject({ vendorDue: 7000 });
+  });
+  test("an override of 0 is a real value, not 'no override'", () => {
+    expect(effectiveLineCents(vendorDelivered({ vendorShippingCostOverride: 0 }))).toMatchObject({ shipping: 0, companyDue: 40000 });
+  });
+  test("explicit due overrides still win over the shipping re-settlement", () => {
+    expect(effectiveLineCents(vendorDelivered({ vendorShippingCostOverride: 120, companyDueOverride: 9, vendorDueOverride: 8 }))).toMatchObject({ companyDue: 900, vendorDue: 800, shipping: 12000 });
+  });
+  test("cost-based (Homix delivered) lines keep their dues; the override never changes them", () => {
+    const homix = line({ collectionTotal: "2299", companyDue: "1099", fines: "100", vendorDue: "1100", warehouseCost: "1200", vendorShippingCostOverride: 70 });
+    expect(effectiveLineCents(homix)).toMatchObject({ companyDue: 109900, vendorDue: 110000 });
+  });
+  test("computeTotals sums the effective shipping of counted lines only", () => {
+    const totals = computeTotals([
+      vendorDelivered({ vendorShippingCostOverride: 120 }),
+      vendorDelivered(),
+      vendorDelivered({ vendorShippingCostOverride: 999, state: "frozen" }),
+    ], []);
+    expect(totals).toMatchObject({ vendorShippingCost: 170, companyDueTotal: 630, ordersCount: 2 });
+  });
+});
+
 describe("company due kinds", () => {
   test("the snapshot keeps the report's kind (margin / vendorOwes) and defaults to null", () => {
     const base = { collectionTotal: 100, companyDue: 40, fines: 0, orderId: 7, vendorDue: 60, warehouseCost: 60 };

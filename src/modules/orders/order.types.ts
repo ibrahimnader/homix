@@ -281,6 +281,7 @@ export type OrderDetailsView = {
   order: OrderListItem & {
     deliveryStatus: number | null;
     deliveryDate: string | null;
+    invoiceNotes: string;
     itemsCount: number;
     notes: string;
     shippedFromInventory: boolean;

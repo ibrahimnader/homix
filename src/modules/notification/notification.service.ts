@@ -73,13 +73,13 @@ export class NotificationService implements NotificationServiceContract {
       { readAt: new Date() },
     );
 
-    if (updatedRows < 1) {
-      throw new NotFoundError("Unread notifications not found");
-    }
-
+    /* Idempotent: "mark all as read" with nothing unread is already the desired state.
+       A 404 here made the panel's request fail (and its optimistic update get reverted by the next
+       list fetch) whenever the client's cache was stale, e.g. read on another device or tab. */
     return success({
       message: NOTIFICATIONS_MARKED_AS_READ_MESSAGE,
       status: true,
+      updated: updatedRows,
     });
   }
 

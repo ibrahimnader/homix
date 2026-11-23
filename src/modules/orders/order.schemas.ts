@@ -79,15 +79,25 @@ export const orderExportQuerySchema = orderListQuerySchema.omit({
   financialStatus: z.string().trim().optional(),
 });
 
+/** Staff draft note printed on the invoice. Capped so it always fits the one-page invoice; null/"" clears it. */
+export const INVOICE_NOTES_MAX_LENGTH = 1000;
+export const invoiceNotesSchema = z.string().max(INVOICE_NOTES_MAX_LENGTH, `invoiceNotes must be at most ${INVOICE_NOTES_MAX_LENGTH} characters`).nullable();
+
 /** `confirmRegression` (optional boolean) confirms an edit that moves a delivered/returned/replaced/in-inventory or invoiced order backwards. */
 export const orderMutationSchema = z.record(z.string(), z.unknown()).refine(
   (value) => value.confirmRegression === undefined || confirmRegressionSchema.safeParse(value.confirmRegression).success,
   { message: "confirmRegression must be a boolean" },
+).refine(
+  (value) => value.invoiceNotes === undefined || invoiceNotesSchema.safeParse(value.invoiceNotes).success,
+  { message: `invoiceNotes must be a string of at most ${INVOICE_NOTES_MAX_LENGTH} characters or null`, path: ["invoiceNotes"] },
 );
 
 export const orderBulkUpdateSchema = z.object({
   confirmRegression: confirmRegressionSchema.optional(),
-  orderData: orderMutationSchema,
+  orderData: orderMutationSchema.refine((value) => value.invoiceNotes === undefined, {
+    message: "invoiceNotes is edited per order, not in bulk",
+    path: ["invoiceNotes"],
+  }),
   orderIds: z.array(z.coerce.number().int().positive()).min(1),
 });
 

@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 
 const { AppError } = require("../../middlewares/errors") as typeof import("../../middlewares/errors");
 const productsService = require("./product.service") as typeof import("./product.service");
+const { canEditOrderFinancials } = require("../../../src/modules/orders/order-financial-guard") as typeof import("../../../src/modules/orders/order-financial-guard");
 
 const getId = (req: Request): string => {
   const id = req.params.id;
@@ -76,6 +77,22 @@ class ProductsController {
       const message = error instanceof Error ? error.message : "Failed to fetch product";
       return next(new AppError(message, 500));
     }
+  }
+
+  /** POST /products/system — brand-new product created inside the system. */
+  public static async createSystemProduct(req: Request, res: Response): Promise<Response> {
+    const result = await productsService.createSystemProduct(req.body, {
+      canEditFinancials: canEditOrderFinancials(req.user),
+    });
+    return res.status(result.statusCode).json(result);
+  }
+
+  /** POST /products/:id/duplicate — copy a product into a new system product, with edits. */
+  public static async duplicateProduct(req: Request, res: Response): Promise<Response> {
+    const result = await productsService.duplicateProduct(Number(getId(req)), req.body, {
+      canEditFinancials: canEditOrderFinancials(req.user),
+    });
+    return res.status(result.statusCode).json(result);
   }
 
   public static async createProduct(req: Request, res: Response): Promise<Response> {

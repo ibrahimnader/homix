@@ -29,4 +29,6 @@ export interface NotificationResponse {
 export interface NotificationActionResponse {
   message: string;
   status: true;
+  /** Rows changed by a mark-as-read call. */
+  updated?: number;
 }

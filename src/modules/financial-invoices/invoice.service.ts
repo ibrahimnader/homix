@@ -126,6 +126,7 @@ export class InvoiceService {
       originalCollection: num(line.collectionTotal),
       originalCompanyDue: num(line.companyDue),
       originalFines: num(line.fines),
+      originalVendorShippingCost: num(line.vendorShippingCost),
       originalVendorDue: num(line.vendorDue),
       originalWarehouseCost: num(line.warehouseCost),
       overrideReason: line.overrideReason,
@@ -137,7 +138,8 @@ export class InvoiceService {
       stateReason: line.stateReason,
       vendorDue: fromCents(effective.vendorDue),
       vendorDueOverride: line.vendorDueOverride === null ? null : num(line.vendorDueOverride),
-      vendorShippingCost: num(line.vendorShippingCost),
+      vendorShippingCost: fromCents(effective.shipping),
+      vendorShippingCostOverride: line.vendorShippingCostOverride === null || line.vendorShippingCostOverride === undefined ? null : num(line.vendorShippingCostOverride),
       warehouseCost: fromCents(effective.cost),
       warehouseCostOverride: line.warehouseCostOverride === null || line.warehouseCostOverride === undefined ? null : num(line.warehouseCostOverride),
     };
@@ -211,11 +213,11 @@ export class InvoiceService {
   /** Vendor view of a line: internal handling notes and pre-override amounts are not for vendors. */
   private toVendorLineDto<T extends ReturnType<InvoiceService["toLineDto"]>>(dto: T) {
     const {
-      overrideReason, stateReason, originalCollection, originalCompanyDue, originalFines, originalVendorDue, originalWarehouseCost,
-      collectionOverride, companyDueOverride, finesOverride, vendorDueOverride, warehouseCostOverride, ...visible
+      overrideReason, stateReason, originalCollection, originalCompanyDue, originalFines, originalVendorDue, originalWarehouseCost, originalVendorShippingCost,
+      collectionOverride, companyDueOverride, finesOverride, vendorDueOverride, vendorShippingCostOverride, warehouseCostOverride, ...visible
     } = dto;
-    void [overrideReason, stateReason, originalCollection, originalCompanyDue, originalFines, originalVendorDue, originalWarehouseCost,
-      collectionOverride, companyDueOverride, finesOverride, vendorDueOverride, warehouseCostOverride];
+    void [overrideReason, stateReason, originalCollection, originalCompanyDue, originalFines, originalVendorDue, originalWarehouseCost, originalVendorShippingCost,
+      collectionOverride, companyDueOverride, finesOverride, vendorDueOverride, vendorShippingCostOverride, warehouseCostOverride];
     return visible;
   }
 
@@ -653,7 +655,7 @@ export class InvoiceService {
     lineId: number,
     patch: {
       collectionOverride?: number | null; companyDueOverride?: number | null; finesOverride?: number | null; reason?: string;
-      vendorDueOverride?: number | null; warehouseCostOverride?: number | null;
+      vendorDueOverride?: number | null; vendorShippingCostOverride?: number | null; warehouseCostOverride?: number | null;
     },
     actor: Actor,
   ) {
@@ -663,7 +665,10 @@ export class InvoiceService {
       const line = await this.repo.findLine(invoice.id, lineId, transaction);
       if (!line) throw new NotFoundError("الطلب غير موجود في الفاتورة");
       if (line.state === LINE_STATE.REMOVED || line.state === LINE_STATE.DEFERRED) throw new ConflictError("لا يمكن تعديل طلب محذوف أو مؤجّل");
-      type Key = "collectionOverride" | "companyDueOverride" | "finesOverride" | "vendorDueOverride" | "warehouseCostOverride";
+      if (typeof patch.vendorShippingCostOverride === "number" && (line.isWarehouseDelivery || line.companyDueKind === "margin")) {
+        throw new ConflictError("شحن البائع ينطبق على تسليمات البائع فقط");
+      }
+      type Key = "collectionOverride" | "companyDueOverride" | "finesOverride" | "vendorDueOverride" | "vendorShippingCostOverride" | "warehouseCostOverride";
       const current = (key: Key): number | null => (line[key] === null || line[key] === undefined ? null : num(line[key]));
       const pick = (key: Key): number | null => (patch[key] === undefined ? current(key) : patch[key]!);
       const next = {
@@ -672,11 +677,12 @@ export class InvoiceService {
         finesOverride: pick("finesOverride"),
         overrideReason: patch.reason?.trim() || line.overrideReason,
         vendorDueOverride: pick("vendorDueOverride"),
+        vendorShippingCostOverride: pick("vendorShippingCostOverride"),
         warehouseCostOverride: pick("warehouseCostOverride"),
       };
       const before = {
         collectionOverride: current("collectionOverride"), companyDueOverride: current("companyDueOverride"), finesOverride: current("finesOverride"),
-        vendorDueOverride: current("vendorDueOverride"), warehouseCostOverride: current("warehouseCostOverride"),
+        vendorDueOverride: current("vendorDueOverride"), vendorShippingCostOverride: current("vendorShippingCostOverride"), warehouseCostOverride: current("warehouseCostOverride"),
       };
       await this.repo.setLineOverrides(line.id, next, transaction);
       const totals = await this.recomputeTotals(invoice.id, transaction);

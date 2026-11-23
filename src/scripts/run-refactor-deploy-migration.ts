@@ -123,6 +123,11 @@ const ensureCoreColumns = async (): Promise<void> => {
     defaultValue: true,
     type: DataTypes.BOOLEAN,
   });
+  await ensureColumn("products", "isSystemCreated", {
+    allowNull: false,
+    defaultValue: false,
+    type: DataTypes.BOOLEAN,
+  });
   await ensureColumn("orders", "deliveryBy", {
     allowNull: true,
     type: DataTypes.INTEGER,
@@ -208,9 +213,9 @@ const classifyCatalogProducts = async (): Promise<void> => {
   logStep("Classifying catalogue products");
   await runSql(`
     UPDATE products
-       SET "isCatalogProduct" = ("shopifyId" IS NOT NULL),
+       SET "isCatalogProduct" = ("shopifyId" IS NOT NULL OR "isSystemCreated"),
            "updatedAt" = NOW()
-     WHERE "isCatalogProduct" IS DISTINCT FROM ("shopifyId" IS NOT NULL)
+     WHERE "isCatalogProduct" IS DISTINCT FROM ("shopifyId" IS NOT NULL OR "isSystemCreated")
   `);
 };
 

@@ -1161,6 +1161,7 @@ const swaggerOptions = {
                   properties: {
                     deliveryStatus: { example: 3, nullable: true, type: "integer" },
                     deliveryDate: { example: "2026-05-05T00:00:00.000Z", nullable: true, type: "string", format: "date-time" },
+                    invoiceNotes: { description: "Staff draft note printed on the invoice; empty for vendors", example: "التسليم بعد الظهر", type: "string" },
                     itemsCount: { example: 1, type: "integer" },
                     notes: { example: "important note", type: "string" },
                     shippedFromInventory: { example: false, type: "boolean" },
@@ -1630,6 +1631,7 @@ const swaggerOptions = {
               },
             },
             name: { example: "#H9802", type: "string" },
+            invoiceNotes: { description: "Draft note printed on the invoice (max 1000 chars, null/blank clears). Staff only: ignored for vendors. Needs orders_edit.", example: "التسليم بعد الظهر", maxLength: 1000, nullable: true, type: "string" },
             notes: { example: "عميل يفضل الاتصال قبل التسليم", nullable: true, type: "string" },
             number: {
               oneOf: [{ type: "integer" }, { type: "string" }],
@@ -1985,6 +1987,7 @@ const swaggerOptions = {
             accountingStatus: { example: 1, type: "integer" },
             accountingStatusLabel: { example: "معلق", type: "string" },
             amount: { example: 330, type: "number" },
+            disbursementDate: { example: "2026-05-09T21:00:00.000Z", nullable: true, type: "string", format: "date-time" },
             reason: { example: "شحن شحنات خارج القاهرة", type: "string" },
             type: { example: 1, type: "integer" },
             typeLabel: { example: "شحن", type: "string" },
@@ -1996,6 +1999,7 @@ const swaggerOptions = {
             accountingDate: { example: "2026-05-11T00:00:00.000Z", nullable: true, type: "string", format: "date-time" },
             accountingStatus: { example: 1, type: "integer" },
             amount: { example: 150, type: "number" },
+            disbursementDate: { example: "2026-05-10T21:00:00.000Z", nullable: true, type: "string", format: "date-time" },
             reason: { example: "مواد تغليف", type: "string" },
             type: { example: 2, type: "integer" },
           },

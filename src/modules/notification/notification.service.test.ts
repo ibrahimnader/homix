@@ -38,13 +38,14 @@ describe("NotificationService", () => {
     expect(filters.entityType).toBeDefined();
   });
 
-  it("throws when markAsRead updates nothing", async () => {
+  it("succeeds idempotently when markAsRead updates nothing", async () => {
     const notificationRepository = {
       update: jest.fn().mockResolvedValue(0),
     } as Pick<NotificationRepository, "update"> as NotificationRepository;
     const service = new NotificationService(notificationRepository);
 
-    await expect(service.markAsRead(4)).rejects.toBeInstanceOf(NotFoundError);
+    const result = await service.markAsRead(4);
+    expect(result).toMatchObject({ ok: true, data: { status: true, updated: 0 } });
   });
 
   it("marks only one category as read for the user", async () => {

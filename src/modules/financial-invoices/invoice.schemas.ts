@@ -93,9 +93,10 @@ export const lineOverrideBody = z.object({
   finesOverride: money.nullable().optional(),
   reason: z.string().trim().max(500).optional(),
   vendorDueOverride: money.nullable().optional(),
+  vendorShippingCostOverride: money.nullable().optional(),
   warehouseCostOverride: money.nullable().optional(),
 }).refine(
-  (value) => [value.collectionOverride, value.companyDueOverride, value.finesOverride, value.vendorDueOverride, value.warehouseCostOverride].some((field) => field !== undefined),
+  (value) => [value.collectionOverride, value.companyDueOverride, value.finesOverride, value.vendorDueOverride, value.vendorShippingCostOverride, value.warehouseCostOverride].some((field) => field !== undefined),
   "لا توجد تعديلات",
 );
 

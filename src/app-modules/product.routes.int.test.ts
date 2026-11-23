@@ -17,6 +17,8 @@ describe("product routes", () => {
       },
       "./product.controller": {
         createProduct: jest.fn(),
+        createSystemProduct: jest.fn(),
+        duplicateProduct: jest.fn(),
         getProduct: jest.fn(),
         getProducts: (_req: express.Request, res: express.Response) => {
           res.json({ data: { products: [], totalPages: 0 }, status: true, statusCode: 200 });

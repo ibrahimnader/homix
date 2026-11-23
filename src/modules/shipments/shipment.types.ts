@@ -83,6 +83,8 @@ export type DeliveryAccountsListQuery = {
 
 export type ExpenseAccountsListQuery = {
   accountingStatus?: number;
+  disbursementDateFrom?: string;
+  disbursementDateTo?: string;
   page: number;
   settledDateFrom?: string;
   settledDateTo?: string;
@@ -94,6 +96,7 @@ export type ExpenseMutationInput = {
   accountingDate?: string | null;
   accountingStatus?: number;
   amount: number;
+  disbursementDate?: string | null;
   reason: string;
   type: number;
 };
@@ -391,6 +394,7 @@ export type ExpenseAccountItem = {
   accountingStatus: number;
   accountingStatusLabel: string;
   amount: number;
+  disbursementDate: string | null;
   reason: string;
   type: number;
   typeLabel: string;

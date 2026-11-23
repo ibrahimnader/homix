@@ -162,14 +162,15 @@ export class InvoiceRepository {
     lineId: number | string,
     values: {
       collectionOverride: number | null; companyDueOverride: number | null; finesOverride: number | null; overrideReason: string | null;
-      vendorDueOverride: number | null; warehouseCostOverride: number | null;
+      vendorDueOverride: number | null; vendorShippingCostOverride: number | null; warehouseCostOverride: number | null;
     },
     transaction: Tx,
   ): Promise<void> {
     await sequelize.query(
       `UPDATE financial_invoice_lines SET "finesOverride" = :finesOverride, "vendorDueOverride" = :vendorDueOverride,
          "companyDueOverride" = :companyDueOverride, "overrideReason" = :overrideReason,
-         "warehouseCostOverride" = :warehouseCostOverride, "collectionOverride" = :collectionOverride WHERE id = :lineId`,
+         "warehouseCostOverride" = :warehouseCostOverride, "collectionOverride" = :collectionOverride,
+         "vendorShippingCostOverride" = :vendorShippingCostOverride WHERE id = :lineId`,
       { replacements: { ...values, lineId }, transaction, type: QueryTypes.UPDATE },
     );
   }
@@ -324,7 +325,7 @@ export class InvoiceRepository {
        LEFT JOIN orders o ON o.id = l."orderId"
        WHERE l."invoiceId" IN (:invoiceIds)
          AND (l."finesOverride" IS NOT NULL OR l."vendorDueOverride" IS NOT NULL OR l."companyDueOverride" IS NOT NULL
-              OR l."warehouseCostOverride" IS NOT NULL OR l."collectionOverride" IS NOT NULL
+              OR l."warehouseCostOverride" IS NOT NULL OR l."collectionOverride" IS NOT NULL OR l."vendorShippingCostOverride" IS NOT NULL
               OR l.state <> 'included'
               OR o.id IS NULL OR COALESCE(o."deliveryDate", o."updatedAt") < i."periodStart" OR COALESCE(o."deliveryDate", o."updatedAt") > i."periodEnd")
        ORDER BY l.id`,

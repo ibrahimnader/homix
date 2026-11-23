@@ -343,6 +343,9 @@ export const shipmentExpenseAccountsQuerySchema = z.object({
   /** تاريخ المحاسبة من/إلى — شامل الطرفين (يوم القاهرة). */
   settledDateFrom: dateString.optional(),
   settledDateTo: dateString.optional(),
+  /** تاريخ الصرف من/إلى — شامل الطرفين (يوم القاهرة). */
+  disbursementDateFrom: dateString.optional(),
+  disbursementDateTo: dateString.optional(),
   page: z.coerce.number().int().min(1).default(DEFAULT_PAGE_NUMBER),
   size: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
   type: z.coerce.number().int().positive().optional(),
@@ -357,6 +360,8 @@ export const shipmentExpenseMutationSchema = z.object({
   accountingDate: dateString.optional().nullable(),
   accountingStatus: z.coerce.number().int().positive().optional(),
   amount: z.coerce.number().min(0),
+  /** تاريخ الصرف — اختياري، ويمكن مسحه بـ null. */
+  disbursementDate: dateString.optional().nullable(),
   reason: z.string().trim().min(1),
   type: z.coerce.number().int().positive(),
 });

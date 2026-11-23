@@ -136,7 +136,7 @@ export class ShipmentController {
     /* costPrice rewrites the order lines and totalCost, so it needs the financial key;
        receivedAmount stays under finance_settle. */
     assertFinancialEditAllowed(request.body, request.user, null, ["costPrice"]);
-    response.status(200).json({ ...unwrap(await this.shipmentService.updateDeliveryAccount(Number(request.params.orderId), request.body)), status: true });
+    response.status(200).json({ ...unwrap(await this.shipmentService.updateDeliveryAccount(Number(request.params.orderId), request.body, Number(request.user?.id) || undefined)), status: true });
   };
 
   /** "المرجع" هو مرفق مرفوع لا نص حر — يستقبل ملفًا واحدًا ويخزّن مساره في نفس حقل accountingReference. */

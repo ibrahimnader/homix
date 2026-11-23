@@ -10,10 +10,10 @@ describe("order number exact search", () => {
     expect(normalizeOrderNumberSearch("H1373")).toBe("h1373");
   });
 
-  it("builds an equality condition on all stored order-number columns, never LIKE", () => {
+  it("searches only the displayed orderNumber and the full name, never the legacy number column, never LIKE", () => {
     const condition = buildOrderNumberCondition("#1373") as Record<symbol, Array<{ logic: unknown }>>;
     const clauses = condition[Op.or] ?? [];
-    expect(clauses).toHaveLength(3);
+    expect(clauses).toHaveLength(2); // name + orderNumber; `number` collides (order #2278 stores number 1278)
     for (const clause of clauses) {
       expect(clause.logic).toEqual({ [Op.eq]: "1373" });
     }

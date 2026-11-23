@@ -36,6 +36,13 @@ const GOVERNORATE_ALIASES: Record<number, string[]> = {
     /* «جسر السويس» منطقة في القاهرة وليست محافظة السويس: الاسم الأطول يغلب «السويس» (محافظة 20). */
     "جسر السويس", "كوبري جسر السويس", "جسر السويس الجديد", "ميدان جسر السويس",
     "cairo", "new cairo", "nasr city", "maadi", "heliopolis", "helwan",
+    /* Latin spellings people type (Shopify addresses are often transliterated). */
+    "madinaty", "madinty", "madinati", "al rehab", "el rehab", "rehab city", "rehab",
+    "tagamoa", "tagamoa el khames", "fifth settlement", "5th settlement", "el shorouk", "shorouk",
+    "badr city", "obour city", "el obour", "mokattam", "zamalek", "downtown cairo", "shubra", "ain shams",
+    "el marg", "katameya", "mostakbal city", "new administrative capital", "sheraton heliopolis",
+    "el sayeda zeinab", "sayeda zeinab", "zeitoun", "matareya", "hadayek el qobba", "el basatin", "basateen",
+    "el sherouk", "el tagamoa", "tagamoa al khamis", "new capital", "العاصمة الادارية", "العاصمه الاداريه",
   ],
   2: [
     "الجيزة", "جيزة", "الهرم", "فيصل", "الدقي", "المهندسين", "العجوزة",
@@ -43,11 +50,15 @@ const GOVERNORATE_ALIASES: Record<number, string[]> = {
     "امبابة", "بولاق الدكرور", "الوراق", "كرداسة", "البدرشين", "الصف",
     "اطفيح", "العياط", "الحوامدية", "منشية القناطر", "ابو النمرس",
     "giza", "6th of october", "sheikh zayed", "dokki", "mohandessin", "haram",
+    "6 october", "6th october", "october city", "sixth of october", "zayed", "el sheikh zayed",
+    "faisal", "imbaba", "agouza", "hadayek el ahram", "pyramids", "el haram", "bulaq el dakrour",
+    "el warraq", "kerdasa", "abu rawash", "smart village", "hay el sefarat",
   ],
   3: [
     "الاسكندرية", "اسكندرية", "سكندرية", "العجمي", "برج العرب", "سموحة",
     "المنتزه", "سيدي بشر", "محرم بك", "ميامي", "العامرية",
-    "alexandria", "alex",
+    "alexandria", "alex", "smouha", "sidi bishr", "miami alexandria", "agami", "borg el arab", "montaza",
+    "stanley", "san stefano", "gleem", "glim", "el asafra", "asafra", "sporting", "kafr abdo", "el mandara", "mandara",
   ],
   4: ["الشرقية", "شرقية", "الزقازيق", "زقازيق", "بلبيس", "العاشر من رمضان", "منيا القمح", "ابو حماد", "فاقوس", "ههيا", "sharqia", "zagazig"],
   5: ["الدقهلية", "دقهلية", "ميت غمر", "السنبلاوين", "دكرنس", "بلقاس", "اجا", "منية النصر", "dakahlia"],
@@ -106,6 +117,11 @@ export const normalizeArabic = (value: unknown): string => {
     .replace(/[٠-٩]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
     .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - 0x06F0))
     .toLowerCase()
+    /* addresses are often glued together («4التجمع الخامسCairo»): split digit↔letter and Arabic↔Latin boundaries */
+    .replace(/(\d)(\p{L})/gu, "$1 $2")
+    .replace(/(\p{L})(\d)/gu, "$1 $2")
+    .replace(/([\u0600-\u06FF])([a-z])/g, "$1 $2")
+    .replace(/([a-z])([\u0600-\u06FF])/g, "$1 $2")
     .replace(NON_WORD, " ")
     .trim();
 };

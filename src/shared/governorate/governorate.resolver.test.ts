@@ -114,3 +114,30 @@ describe("«جسر السويس» is a Cairo district, not the Suez governorate"
     expect(matchGovernorate("محافظة السويس شارع الجيش")?.governorateId).toBe(20);
   });
 });
+
+describe("Latin spellings of Cairo/Giza/Alexandria areas", () => {
+  it.each([
+    ["b 6 group 65 3omara 78 12 C Madinaty Egypt ---مصر", 1],
+    ["Villa 5, Rehab City, Egypt", 1],
+    ["Tagamoa el Khames, New Cairo", 1],
+    ["12 Zayed, Sheikh Zayed City", 2],
+    ["6th October, El Hosary", 2],
+    ["Smouha, Alexandria", 3],
+  ])("resolves %s", (address, id) => {
+    expect(matchGovernorate(address)?.governorateId).toBe(id);
+  });
+
+  it("does not guess when the address has no recognizable place", () => {
+    expect(matchGovernorate("b 6 group 65 3omara 78 12 C Egypt")).toBeNull();
+  });
+});
+
+describe("glued address tokens and the new capital", () => {
+  it.each([
+    "شقة 3 الدور الأول عمارة 6 الأندلس عائلي 5 منطقة 4التجمع الخامسCairo-Egypt",
+    "79 zahra city 24 C Zahra new capital Egypt ---مصر",
+    "العاصمة الإدارية الجديدة - الحي الثالث",
+  ])("resolves %s to Cairo", (address) => {
+    expect(matchGovernorate(address)?.governorateId).toBe(1);
+  });
+});

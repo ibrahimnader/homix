@@ -36,6 +36,10 @@ const parseMonths = (argv: string[]): number | null => {
 };
 const months = parseMonths(process.argv);
 
+/* NOTE: this script deliberately does NOT touch "updatedAt". The financial report places a delivered order in a cycle
+   by coalesce(deliveryDate, updatedAt); bumping updatedAt here pulled old delivered orders (no deliveryDate) into the
+   current cycle's invoices. */
+
 /** حجم الدفعة — يبقي الترانزاكشن قصيراً على قاعدة بيانات بعيدة. */
 const BATCH_SIZE = 500;
 
@@ -108,7 +112,7 @@ export const backfillOrderGovernorate = async (): Promise<GovernorateBackfillRes
         await sequelize.query(
           `
             UPDATE orders
-            SET governorate = :governorate, "updatedAt" = NOW()
+            SET governorate = :governorate
             WHERE id IN (:ids)
               AND nullif(btrim(coalesce(governorate, '')), '') IS NULL
           `,

@@ -50,6 +50,31 @@ describe("notificationRouter", () => {
     expect(countCall[0].where).toEqual({ readAt: null, userId: 7 });
   });
 
+  it("returns a bounded page: default 50, clamped to 200, cursor fields in the response", async () => {
+    notificationModel.findAll.mockClear();
+    const first = await request(app).get("/notifications").expect(200);
+    expect(first.body.hasMore).toBe(false);
+    expect(first.body.nextCursor).toBeNull();
+    const listCall = () =>
+      notificationModel.findAll.mock.calls.find(([options]: [{ group?: unknown }]) => !options.group)[0];
+    expect(listCall().limit).toBe(51);
+
+    notificationModel.findAll.mockClear();
+    await request(app).get("/notifications?limit=100000").expect(200);
+    expect(listCall().limit).toBe(201);
+
+    notificationModel.findAll.mockClear();
+    await request(app).get("/notifications?limit=5&before=2026-11-02T09:00:00.000Z&beforeId=80").expect(200);
+    expect(listCall().limit).toBe(6);
+    expect(listCall().where.userId).toBe(7);
+  });
+
+  it("rejects an invalid cursor", async () => {
+    const response = await request(app).get("/notifications?before=not-a-date");
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+  });
+
   it("rejects an unknown category", async () => {
     const response = await request(app).get("/notifications?category=vendors");
     expect(response.status).toBeGreaterThanOrEqual(400);

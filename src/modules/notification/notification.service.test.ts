@@ -9,14 +9,17 @@ describe("NotificationService", () => {
     const counts = { orders: 2, shipments: 1, tickets: 0, total: 3 };
     const notificationRepository = {
       countUnreadByCategory: jest.fn().mockResolvedValue(counts),
-      findAll: jest.fn().mockResolvedValue([{ id: 1, userId: 2 }]),
-    } as Pick<NotificationRepository, "countUnreadByCategory" | "findAll"> as NotificationRepository;
+      findPage: jest.fn().mockResolvedValue({ hasMore: false, rows: [{ id: 1, userId: 2 }] }),
+    } as Pick<NotificationRepository, "countUnreadByCategory" | "findPage"> as NotificationRepository;
     const service = new NotificationService(notificationRepository);
 
     const result = await service.getNotifications(2);
 
     expect(result.ok).toBe(true);
-    expect(notificationRepository.findAll).toHaveBeenCalledWith({ userId: 2 });
+    expect(notificationRepository.findPage).toHaveBeenCalledWith(
+      { userId: 2 },
+      { before: undefined, beforeId: undefined, limit: 50 },
+    );
     expect(notificationRepository.countUnreadByCategory).toHaveBeenCalledWith(2);
     if (result.ok) {
       expect(result.data.counts).toEqual(counts);
@@ -27,15 +30,59 @@ describe("NotificationService", () => {
   it("always scopes the category filter by the user id", async () => {
     const notificationRepository = {
       countUnreadByCategory: jest.fn().mockResolvedValue(emptyCounts),
-      findAll: jest.fn().mockResolvedValue([]),
-    } as Pick<NotificationRepository, "countUnreadByCategory" | "findAll"> as NotificationRepository;
+      findPage: jest.fn().mockResolvedValue({ hasMore: false, rows: [] }),
+    } as Pick<NotificationRepository, "countUnreadByCategory" | "findPage"> as NotificationRepository;
     const service = new NotificationService(notificationRepository);
 
     await service.getNotifications(9, "tickets");
 
-    const filters = (notificationRepository.findAll as jest.Mock).mock.calls[0][0];
+    const filters = (notificationRepository.findPage as jest.Mock).mock.calls[0][0];
     expect(filters.userId).toBe(9);
     expect(filters.entityType).toBeDefined();
+  });
+
+  it("returns a bounded page with a keyset cursor and server-side counts independent of the page", async () => {
+    const counts = { orders: 1200, shipments: 30, tickets: 4, total: 1234 };
+    const rows = [
+      { createdAt: new Date("2026-11-02T10:00:00.000Z"), id: 90, userId: 2 },
+      { createdAt: new Date("2026-11-02T09:00:00.000Z"), id: 80, userId: 2 },
+    ];
+    const findPage = jest.fn().mockResolvedValue({ hasMore: true, rows });
+    const service = new NotificationService({
+      countUnreadByCategory: jest.fn().mockResolvedValue(counts),
+      findPage,
+    } as unknown as NotificationRepository);
+
+    const result = await service.getNotifications(2, undefined, { limit: 2 });
+
+    expect(findPage).toHaveBeenCalledWith({ userId: 2 }, { before: undefined, beforeId: undefined, limit: 2 });
+    expect(result).toMatchObject({
+      data: {
+        counts,
+        hasMore: true,
+        nextCursor: { before: "2026-11-02T09:00:00.000Z", beforeId: 80 },
+      },
+      ok: true,
+    });
+  });
+
+  it("has no cursor on the last page and clamps the page size to 200", async () => {
+    const findPage = jest.fn().mockResolvedValue({ hasMore: false, rows: [{ createdAt: new Date(), id: 1 }] });
+    const service = new NotificationService({
+      countUnreadByCategory: jest.fn().mockResolvedValue(emptyCounts),
+      findPage,
+    } as unknown as NotificationRepository);
+
+    const result = await service.getNotifications(2, "orders", {
+      before: new Date("2026-11-01T00:00:00.000Z"),
+      beforeId: 5,
+      limit: 100_000,
+    });
+
+    const [filters, options] = findPage.mock.calls[0];
+    expect(filters.userId).toBe(2);
+    expect(options).toEqual({ before: new Date("2026-11-01T00:00:00.000Z"), beforeId: 5, limit: 200 });
+    expect(result).toMatchObject({ data: { hasMore: false, nextCursor: null }, ok: true });
   });
 
   it("succeeds idempotently when markAsRead updates nothing", async () => {

@@ -20,8 +20,25 @@ export interface CreateNotificationInput {
   userId: number | null;
 }
 
+/** Keyset cursor of the next (older) page: pass `before` = createdAt and `beforeId` = id back to the API. */
+export interface NotificationCursor {
+  before: string;
+  beforeId: number;
+}
+
+export interface NotificationPageOptions {
+  /** Keyset position: only rows strictly older than (createdAt, id). */
+  before?: Date;
+  beforeId?: number;
+  limit: number;
+}
+
 export interface NotificationResponse {
   counts: NotificationCounts;
+  /** True when older notifications exist beyond this page. */
+  hasMore: boolean;
+  /** Cursor of the next page, null on the last page. */
+  nextCursor: NotificationCursor | null;
   notifications: NotificationAttributes[];
   status: true;
 }

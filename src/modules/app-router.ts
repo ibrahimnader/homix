@@ -310,6 +310,16 @@ const swaggerOptions = {
               },
               type: "object",
             },
+            hasMore: { description: "Older notifications exist beyond this page", example: false, type: "boolean" },
+            nextCursor: {
+              description: "Pass before/beforeId back to GET /notifications for the next page; null on the last page",
+              nullable: true,
+              properties: {
+                before: { format: "date-time", type: "string" },
+                beforeId: { type: "integer" },
+              },
+              type: "object",
+            },
             notifications: {
               items: { $ref: "#/components/schemas/NotificationItem" },
               type: "array",

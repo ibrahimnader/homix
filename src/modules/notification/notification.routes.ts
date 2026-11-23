@@ -29,7 +29,7 @@ export const notificationRouter = express.Router();
  *     tags:
  *       - Notifications
  *     summary: Get current user's notifications
- *     description: Returns only the authenticated user's own notifications, newest first. Every item carries a category (orders, shipments or tickets) and the response carries unread counts per category.
+ *     description: Returns one bounded page (default 50, max 200) of the authenticated user's own notifications, newest first; follow nextCursor for older ones. Every item carries a category (orders, shipments or tickets) and the response carries unread counts per category.
  *     parameters:
  *       - in: query
  *         name: category
@@ -38,9 +38,28 @@ export const notificationRouter = express.Router();
  *         schema:
  *           type: string
  *           enum: [orders, shipments, tickets]
+ *       - in: query
+ *         name: limit
+ *         required: false
+ *         description: Page size, default 50, clamped to 1..200.
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: before
+ *         required: false
+ *         description: Cursor, createdAt (ISO) of the last item of the previous page. Use with beforeId.
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *       - in: query
+ *         name: beforeId
+ *         required: false
+ *         description: Cursor tie-breaker, id of the last item of the previous page.
+ *         schema:
+ *           type: integer
  *     responses:
  *       200:
- *         description: Notification list
+ *         description: One page of notifications (counts always cover every unread notification, not just the page)
  *         content:
  *           application/json:
  *             schema:
@@ -56,6 +75,8 @@ export const notificationRouter = express.Router();
  *                       category: orders
  *                       readAt: null
  *                       createdAt: 2026-05-02T00:45:00.000Z
+ *                   hasMore: false
+ *                   nextCursor: null
  *                   counts:
  *                     orders: 1
  *                     shipments: 0

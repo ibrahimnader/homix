@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 
 import { unwrap } from "../../shared/result";
-import type { NotificationListQuery } from "./notification.schemas";
+import type { NotificationListQuery, NotificationMarkReadBody } from "./notification.schemas";
 import type { NotificationServiceContract } from "./notification.service";
 
 export class NotificationController {
@@ -13,13 +13,17 @@ export class NotificationController {
   };
 
   public getNotifications = async (request: Request, response: Response): Promise<void> => {
-    const { category } = request.query as NotificationListQuery;
-    const result = await this.notificationService.getNotifications(request.user!.id, category);
+    const { before, beforeId, category, limit } = request.query as unknown as NotificationListQuery;
+    const result = await this.notificationService.getNotifications(
+      request.user!.id,
+      category,
+      { before, beforeId, limit },
+    );
     response.status(200).json(unwrap(result));
   };
 
   public markAsRead = async (request: Request, response: Response): Promise<void> => {
-    const { category } = (request.body ?? {}) as NotificationListQuery;
+    const { category } = (request.body ?? {}) as NotificationMarkReadBody;
     const result = await this.notificationService.markAsRead(request.user!.id, category);
     response.status(200).json(unwrap(result));
   };

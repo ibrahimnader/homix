@@ -2,6 +2,7 @@ import { Op, QueryTypes, type Transaction } from "sequelize";
 
 import { logger } from "../../shared/logger";
 import { sequelize } from "../../infrastructure/database";
+import { DashboardRefreshCoordinator } from "./dashboard-aggregate-refresh";
 import type {
   FinanceAutomaticMetrics,
   DashboardLeaderboardEntry,
@@ -261,16 +262,23 @@ export type OrderSummaryAggregate = {
   totalOrders: number;
 };
 
+let ensureTablesPromise: Promise<void> | null = null;
+
 export class DashboardAggregateService {
   public constructor(private readonly dashboardSource: DashboardAggregateSource) {}
 
+  /** Creates the aggregate tables once per process: sync() issues several catalog queries, and it used to run on every refresh. */
   public async ensureTable(): Promise<void> {
-    await Promise.all([
+    ensureTablesPromise ??= Promise.all([
       dashboardDailyMetricModel.sync(),
       dashboardDailyProductSaleModel.sync(),
       dashboardDailyCategorySaleModel.sync(),
       financeDailyMetricModel.sync(),
-    ]);
+    ]).then(() => undefined).catch((error: unknown) => {
+      ensureTablesPromise = null;
+      throw error;
+    });
+    await ensureTablesPromise;
   }
 
   public async getFinanceMetrics(startDate: string, endDate: string): Promise<FinanceAutomaticMetrics | null> {
@@ -480,6 +488,7 @@ export class DashboardAggregateService {
     }));
   }
 
+  /** Rebuilds the aggregates for a range (or the whole order history) right away. Admin/import/script entry point. */
   public async backfill(startDate?: string, endDate?: string): Promise<void> {
     await this.ensureTable();
     const bounds = await this.getBackfillBounds(startDate, endDate);
@@ -488,11 +497,42 @@ export class DashboardAggregateService {
       return;
     }
 
+    await this.rebuildRange(bounds);
+  }
+
+  /**
+   * Refreshes the aggregates of a date range after an order/shipment mutation. Shared across every service instance
+   * in the process: single-flight per calendar month and throttled to one recompute per month per 60 s (a throttled
+   * request runs once, trailing, never dropped). Pass `{ force: true }` to recompute now.
+   */
+  public async refreshRange(startDate: string, endDate: string, options: { force?: boolean } = {}): Promise<void> {
+    const from = normalizeBoundary(startDate);
+    const to = normalizeBoundary(endDate);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {
+      return;
+    }
+
+    await refreshCoordinator.request(toDateOnly(from), toDateOnly(to), options.force === true);
+  }
+
+  /**
+   * Aggregates are computed OUTSIDE the transaction (reads can take seconds); the transaction only holds the
+   * advisory locks and the delete + upsert writes, so it stays short and never waits on JS or external calls.
+   * The advisory lock (per month, shared by all workers) makes two refreshes replace the same range one after the
+   * other, and the transaction makes readers see either the complete old or the complete new snapshot.
+   */
+  private async rebuildRange(bounds: { endDate: Date; startDate: Date }): Promise<void> {
+    await this.ensureTable();
+    const adminRows = await this.getAdminAggregateRows(bounds.startDate, bounds.endDate);
+    const vendorRows = await this.getVendorAggregateRows(bounds.startDate, bounds.endDate);
+    const productRows = await this.getProductAggregateRows(bounds.startDate, bounds.endDate);
+    const categoryRows = await this.getCategoryAggregateRows(bounds.startDate, bounds.endDate);
+    const financeRows = await this.getFinanceAggregateRows(bounds.startDate, bounds.endDate);
+    const dedupedProductRows = this.dedupeProductAggregateRows(productRows);
+    const dedupedCategoryRows = this.dedupeCategoryAggregateRows(categoryRows);
+    const aggregateRows = [...adminRows, ...vendorRows];
+
     await sequelize.transaction(async (transaction) => {
-      /* All workers share this PostgreSQL transaction lock. It prevents two
-         webhook/read-repair refreshes from deleting and replacing the same
-         aggregate range concurrently, while the transaction ensures readers
-         see either the complete old snapshot or the complete new snapshot. */
       for (const monthKey of getMonthLockKeys(bounds.startDate, bounds.endDate)) {
         await sequelize.query("SELECT pg_advisory_xact_lock(:namespace, :monthKey)", {
           replacements: { monthKey, namespace: AGGREGATE_ADVISORY_LOCK_NAMESPACE },
@@ -500,16 +540,6 @@ export class DashboardAggregateService {
           type: QueryTypes.SELECT,
         });
       }
-
-      const [adminRows, vendorRows, productRows, categoryRows, financeRows] = await Promise.all([
-        this.getAdminAggregateRows(bounds.startDate, bounds.endDate, transaction),
-        this.getVendorAggregateRows(bounds.startDate, bounds.endDate, transaction),
-        this.getProductAggregateRows(bounds.startDate, bounds.endDate, transaction),
-        this.getCategoryAggregateRows(bounds.startDate, bounds.endDate, transaction),
-        this.getFinanceAggregateRows(bounds.startDate, bounds.endDate, transaction),
-      ]);
-      const dedupedProductRows = this.dedupeProductAggregateRows(productRows);
-      const dedupedCategoryRows = this.dedupeCategoryAggregateRows(categoryRows);
 
       const destroyRange = {
         transaction,
@@ -520,14 +550,11 @@ export class DashboardAggregateService {
         },
       };
 
-      await Promise.all([
-        dashboardDailyMetricModel.destroy(destroyRange),
-        dashboardDailyProductSaleModel.destroy(destroyRange),
-        dashboardDailyCategorySaleModel.destroy(destroyRange),
-        financeDailyMetricModel.destroy(destroyRange),
-      ]);
+      await dashboardDailyMetricModel.destroy(destroyRange);
+      await dashboardDailyProductSaleModel.destroy(destroyRange);
+      await dashboardDailyCategorySaleModel.destroy(destroyRange);
+      await financeDailyMetricModel.destroy(destroyRange);
 
-      const aggregateRows = [...adminRows, ...vendorRows];
       if (aggregateRows.length === 0 && dedupedProductRows.length === 0 && dedupedCategoryRows.length === 0 && financeRows.length === 0) {
         logger.info(
           { operationName: AGGREGATE_LOG_OPERATION, startDate: bounds.startDate, endDate: bounds.endDate },
@@ -536,31 +563,30 @@ export class DashboardAggregateService {
         return;
       }
 
-      await Promise.all([
-        aggregateRows.length > 0
-          ? dashboardDailyMetricModel.bulkCreate(aggregateRows, {
-              transaction,
-              updateOnDuplicate: [...BULK_UPDATE_FIELDS],
-            })
-          : Promise.resolve(),
-        dedupedProductRows.length > 0
-          ? this.upsertProductRows(dedupedProductRows, transaction)
-          : Promise.resolve(),
-        dedupedCategoryRows.length > 0
-          ? this.upsertCategoryRows(dedupedCategoryRows, transaction)
-          : Promise.resolve(),
-        financeRows.length > 0
-          ? financeDailyMetricModel.bulkCreate(financeRows, {
-              transaction,
-              updateOnDuplicate: [...BULK_FINANCE_UPDATE_FIELDS],
-            })
-          : Promise.resolve(),
-      ]);
+      if (aggregateRows.length > 0) {
+        await dashboardDailyMetricModel.bulkCreate(aggregateRows, {
+          transaction,
+          updateOnDuplicate: [...BULK_UPDATE_FIELDS],
+        });
+      }
+      if (dedupedProductRows.length > 0) {
+        await this.upsertProductRows(dedupedProductRows, transaction);
+      }
+      if (dedupedCategoryRows.length > 0) {
+        await this.upsertCategoryRows(dedupedCategoryRows, transaction);
+      }
+      if (financeRows.length > 0) {
+        await financeDailyMetricModel.bulkCreate(financeRows, {
+          transaction,
+          updateOnDuplicate: [...BULK_FINANCE_UPDATE_FIELDS],
+        });
+      }
     });
   }
 
-  public async refreshRange(startDate: string, endDate: string): Promise<void> {
-    await this.backfill(startDate, endDate);
+  /** Used by the shared coordinator: month-sized ranges only. */
+  public async rebuildDateRange(startDate: string, endDate: string): Promise<void> {
+    await this.rebuildRange({ endDate: normalizeBoundary(endDate), startDate: normalizeBoundary(startDate) });
   }
 
   private async getBackfillBounds(
@@ -1122,3 +1148,21 @@ export class DashboardAggregateService {
     return [...adminMap.values(), ...vendorMap.values()];
   }
 }
+
+/* One coordinator per process, shared by every DashboardAggregateService instance (order, shipment, receiving and
+   dashboard services each create their own). The rebuild only touches the database, so any instance can run it. */
+const refreshCoordinator = new DashboardRefreshCoordinator({
+  onDeferredError: (error, chunk) => {
+    logger.error(
+      { err: error, month: chunk.key, operationName: AGGREGATE_LOG_OPERATION },
+      "Deferred dashboard aggregate refresh failed",
+    );
+  },
+  runner: ({ endDate, startDate }) =>
+    new DashboardAggregateService({
+      getDeliveredOrdersCountFromOrders: async () => 0,
+      getSnapshotFromOrders: async () => ({
+        activeMakers: 0, activeProducts: 0, pendingOrders: 0, totalOrders: 0, totalSales: 0,
+      }),
+    }).rebuildDateRange(startDate, endDate),
+});

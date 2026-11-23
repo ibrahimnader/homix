@@ -3,17 +3,23 @@ import type { Result } from "../../shared/result";
 import { success } from "../../shared/result";
 import type { NotificationCategory } from "./notification.category";
 import { buildCategoryWhere, NotificationRepository } from "./notification.repo";
+import { NOTIFICATION_DEFAULT_PAGE_SIZE, NOTIFICATION_MAX_PAGE_SIZE } from "./notification.schemas";
 import type {
   CreateNotificationInput,
   NotificationActionResponse,
   NotificationAttributes,
+  NotificationPageOptions,
   NotificationResponse,
 } from "./notification.types";
 
 export interface NotificationServiceContract {
   clearNotifications(userId: number): Promise<Result<NotificationActionResponse>>;
   createNotification(payload: CreateNotificationInput): Promise<Result<NotificationAttributes>>;
-  getNotifications(userId: number, category?: NotificationCategory): Promise<Result<NotificationResponse>>;
+  getNotifications(
+    userId: number,
+    category?: NotificationCategory,
+    page?: Partial<NotificationPageOptions>,
+  ): Promise<Result<NotificationResponse>>;
   markAsRead(userId: number, category?: NotificationCategory): Promise<Result<NotificationActionResponse>>;
   markOneAsRead(userId: number, notificationId: number): Promise<Result<NotificationActionResponse>>;
 }
@@ -49,17 +55,28 @@ export class NotificationService implements NotificationServiceContract {
   public async getNotifications(
     userId: number,
     category?: NotificationCategory,
+    page: Partial<NotificationPageOptions> = {},
   ): Promise<Result<NotificationResponse>> {
-    const [notifications, counts] = await Promise.all([
-      this.notificationRepository.findAll(
+    const limit = Math.min(NOTIFICATION_MAX_PAGE_SIZE, Math.max(1, page.limit ?? NOTIFICATION_DEFAULT_PAGE_SIZE));
+    const [{ hasMore, rows }, counts] = await Promise.all([
+      this.notificationRepository.findPage(
         category ? { userId, ...buildCategoryWhere(category) } : { userId },
+        { before: page.before, beforeId: page.beforeId, limit },
       ),
+      /* Badges come from the server (partial unread index), never from the loaded page, so they stay correct
+         while only 50 rows are on screen. */
       this.notificationRepository.countUnreadByCategory(userId),
     ]);
+    const last = rows[rows.length - 1];
+    const nextCursor = hasMore && last?.createdAt
+      ? { before: new Date(last.createdAt).toISOString(), beforeId: last.id }
+      : null;
 
     return success({
       counts,
-      notifications,
+      hasMore: hasMore && nextCursor !== null,
+      nextCursor,
+      notifications: rows,
       status: true,
     });
   }

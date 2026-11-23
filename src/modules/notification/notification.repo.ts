@@ -11,6 +11,7 @@ import { emptyNotificationCounts } from "./notification.category";
 import type {
   CreateNotificationInput,
   NotificationAttributes,
+  NotificationPageOptions,
 } from "./notification.types";
 
 type LegacyNotificationModel = {
@@ -20,9 +21,10 @@ type LegacyNotificationModel = {
   findAll: (options: {
     attributes?: unknown;
     group?: unknown;
+    limit?: number;
     order?: ReadonlyArray<readonly [string, string]>;
     raw?: boolean;
-    where?: Readonly<Record<string, unknown>>;
+    where?: Readonly<Record<string | symbol, unknown>>;
   }) => Promise<Array<{ toJSON: () => NotificationAttributes } | NotificationAttributes>>;
   update: (
     payload: Partial<CreateNotificationInput> & { readAt?: Date | null },
@@ -86,7 +88,36 @@ export class NotificationRepository
     return notifications.map((notification) => toNotification(notification) as TResult);
   }
 
-  /** Unread notifications of one user, bucketed per category. */
+  /**
+   * One bounded page, newest first (keyset pagination, served by the ("userId", "createdAt" DESC) index).
+   * Reads limit + 1 rows to learn whether an older page exists without a second COUNT query.
+   */
+  public async findPage<TResult = NotificationAttributes>(
+    filters: Readonly<Record<string, unknown>>,
+    { before, beforeId, limit }: NotificationPageOptions,
+  ): Promise<{ hasMore: boolean; rows: TResult[] }> {
+    const where: Record<string | symbol, unknown> = { ...filters };
+
+    if (before) {
+      where[Op.or] = beforeId === undefined
+        ? [{ createdAt: { [Op.lt]: before } }]
+        : [{ createdAt: { [Op.lt]: before } }, { createdAt: before, id: { [Op.lt]: beforeId } }];
+    }
+
+    const notifications = await getNotificationModel().findAll({
+      limit: limit + 1,
+      order: [["createdAt", "DESC"], ["id", "DESC"]],
+      where,
+    });
+    const hasMore = notifications.length > limit;
+
+    return {
+      hasMore,
+      rows: notifications.slice(0, limit).map((notification) => toNotification(notification) as TResult),
+    };
+  }
+
+  /** Unread notifications of one user, bucketed per category (counted by the partial unread index). */
   public async countUnreadByCategory(userId: number): Promise<NotificationCounts> {
     const rows = (await getNotificationModel().findAll({
       attributes: ["entityType", [fn("COUNT", col("id")), "count"]],

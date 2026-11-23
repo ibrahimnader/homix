@@ -35,9 +35,20 @@ const io = new Server(server, {
   },
 });
 
+const NAVIGATION_BROADCAST_THROTTLE_MS = 2_000;
+
 const registerSocketHandlers = (): void => {
+  /* Every connected client re-fetches the sidebar counters when this fires, so a burst of mutations (bulk edits,
+     imports) must not become a burst of broadcasts: at most one per 2 s, trailing so the last change is announced. */
+  let navigationBroadcastTimer: NodeJS.Timeout | null = null;
   navigationCountsEvents.on("changed", () => {
-    io.emit("navigationCountsChanged");
+    if (navigationBroadcastTimer) {
+      return;
+    }
+    navigationBroadcastTimer = setTimeout(() => {
+      navigationBroadcastTimer = null;
+      io.emit("navigationCountsChanged");
+    }, NAVIGATION_BROADCAST_THROTTLE_MS);
   });
 
   io.on("connection", (socket) => {

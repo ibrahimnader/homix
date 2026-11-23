@@ -1,5 +1,13 @@
 import type { NavigationCountsRepositoryContract, NavigationCounts } from "./navigation.types";
 
+/**
+ * Sidebar counters are cached per scope (global or vendor) for 60 s and computed single-flight: every request that
+ * arrives while one is running shares its promise. The query costs ~15 ms but ran ~620k times (about 2.7 h of
+ * database time) when every page navigation, window focus and socket event re-fetched it, so the cache is what
+ * keeps the load flat. Mutations on /orders, /products and /factories still call invalidate() immediately.
+ */
+export const NAVIGATION_COUNTS_TTL_MS = 60_000;
+
 export class NavigationCountsService {
   private readonly cache = new Map<string, { expiresAt: number; value: NavigationCounts }>();
   private readonly pending = new Map<string, Promise<NavigationCounts>>();
@@ -20,7 +28,7 @@ export class NavigationCountsService {
     request = this.repository.getCounts(vendorId).then((counts) => {
       const value = { ...counts, updatedAt: new Date().toISOString() };
       if (generation === this.generation) {
-        this.cache.set(key, { expiresAt: Date.now() + 5_000, value });
+        this.cache.set(key, { expiresAt: Date.now() + NAVIGATION_COUNTS_TTL_MS, value });
       }
       return value;
     }).finally(() => {

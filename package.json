@@ -19,6 +19,8 @@
     "db:backfill-financial-invoices": "tsx src/scripts/backfill-financial-invoices.ts",
     "db:refresh-old-invoices": "tsx src/scripts/refresh-old-invoices.ts",
     "db:migrate-product-system-created": "tsx migrations/add-product-system-created.js",
+    "db:performance-indexes": "tsx migrations/add-performance-indexes.js",
+    "db:prune-notifications": "tsx src/scripts/prune-notifications.ts",
     "db:migrate-factory-profile-fields": "node migrations/add-factory-profile-fields.js",
     "db:plan-constraints": "tsx src/scripts/plan-db-constraint-hardening.ts",
     "db:plan-drop-duplicates": "tsx src/scripts/plan-drop-duplicate-db-constraints.ts",

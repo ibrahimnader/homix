@@ -10,10 +10,12 @@
  * match no governorate closely enough are counted and left alone rather than
  * guessed at.
  *
- * Dry-run by default; pass `--apply` to write.
+ * Dry-run by default; pass `--apply` to write. `--months=N` limits it to orders created in the
+ * last N months (calendar months back from now); without it every order is considered.
  *
- *   npm run db:backfill-order-governorate            # عرض فقط
- *   npm run db:backfill-order-governorate -- --apply # تنفيذ
+ *   npm run db:backfill-order-governorate                            # عرض فقط
+ *   npm run db:backfill-order-governorate -- --months=3              # عرض آخر 3 شهور فقط
+ *   npm run db:backfill-order-governorate -- --months=3 --apply      # تنفيذ لآخر 3 شهور
  */
 import { QueryTypes } from "sequelize";
 
@@ -21,6 +23,18 @@ import { sequelize } from "../infrastructure/database/sequelize";
 import { matchGovernorate } from "../shared/governorate/governorate.resolver";
 
 const apply = process.argv.includes("--apply");
+
+/** `--months=N` (positive integer) → only orders created within the last N months; null = all orders. */
+const parseMonths = (argv: string[]): number | null => {
+  const raw = argv.find((value) => value.startsWith("--months="))?.split("=")[1];
+  if (raw === undefined) return null;
+  const months = Number(raw);
+  if (!Number.isInteger(months) || months < 1 || months > 120) {
+    throw new Error("--months must be a whole number between 1 and 120");
+  }
+  return months;
+};
+const months = parseMonths(process.argv);
 
 /** حجم الدفعة — يبقي الترانزاكشن قصيراً على قاعدة بيانات بعيدة. */
 const BATCH_SIZE = 500;
@@ -58,6 +72,7 @@ export const backfillOrderGovernorate = async (): Promise<GovernorateBackfillRes
           AND nullif(btrim(coalesce(o.governorate, '')), '') IS NULL
           AND nullif(btrim(coalesce(c.address, '')), '') IS NOT NULL
           AND o.id > :lastId
+          ${months === null ? "" : `AND o."createdAt" >= NOW() - make_interval(months => ${months})`}
         ORDER BY o.id
         LIMIT :batchSize
       `,
@@ -67,6 +82,8 @@ export const backfillOrderGovernorate = async (): Promise<GovernorateBackfillRes
     if (rows.length === 0) {
       break;
     }
+
+    const idsByGovernorate = new Map<string, number[]>();
 
     for (const row of rows) {
       result.scanned += 1;
@@ -81,19 +98,23 @@ export const backfillOrderGovernorate = async (): Promise<GovernorateBackfillRes
       result.matched += 1;
       result.byGovernorate[match.label] = (result.byGovernorate[match.label] ?? 0) + 1;
 
-      if (!apply) {
-        continue;
-      }
+      const key = String(match.governorateId);
+      idsByGovernorate.set(key, [...(idsByGovernorate.get(key) ?? []), row.id]);
+    }
 
-      await sequelize.query(
-        `
-          UPDATE orders
-          SET governorate = :governorate, "updatedAt" = NOW()
-          WHERE id = :id
-            AND nullif(btrim(coalesce(governorate, '')), '') IS NULL
-        `,
-        { replacements: { governorate: String(match.governorateId), id: row.id }, type: QueryTypes.UPDATE },
-      );
+    if (apply) {
+      // one UPDATE per governorate per batch instead of one per order (remote DB round trips dominate)
+      for (const [governorate, ids] of idsByGovernorate) {
+        await sequelize.query(
+          `
+            UPDATE orders
+            SET governorate = :governorate, "updatedAt" = NOW()
+            WHERE id IN (:ids)
+              AND nullif(btrim(coalesce(governorate, '')), '') IS NULL
+          `,
+          { replacements: { governorate, ids }, type: QueryTypes.UPDATE },
+        );
+      }
     }
   }
 
@@ -103,7 +124,7 @@ export const backfillOrderGovernorate = async (): Promise<GovernorateBackfillRes
 const run = async (): Promise<void> => {
   const result = await backfillOrderGovernorate();
   // eslint-disable-next-line no-console
-  console.log(JSON.stringify({ mode: apply ? "apply" : "dry-run", ...result }, null, 2));
+  console.log(JSON.stringify({ mode: apply ? "apply" : "dry-run", months, ...result }, null, 2));
 };
 
 if (require.main === module) {

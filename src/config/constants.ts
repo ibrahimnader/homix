@@ -174,6 +174,10 @@ export const GOVERNORATES = {
   25: "الأقصر",
   26: "البحيرة",
   27: "دمياط",
+  28: "الساحل الشمالي",
+  29: "العين السخنة",
+  30: "المنصورة",
+  31: "كفر الشيخ",
 } as const;
 
 export const MANUFACTURE_STATUS = {

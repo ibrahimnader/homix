@@ -49,10 +49,12 @@ describe("matchGovernorate", () => {
     expect(matchGovernorate("Sheikh Zayed, Giza")?.governorateId).toBe(2);
   });
 
-  it("recognizes a governorate that has no id of its own", () => {
+  it("resolves Kafr El Sheikh (id 31) from its name and from its towns", () => {
     const match = matchGovernorate("شارع الجيش - كفر الشيخ");
-    expect(match).not.toBeNull();
-    expect(match?.governorateId).toBeNull();
+    expect(match?.governorateId).toBe(31);
+    expect(match?.label).toBe("كفر الشيخ");
+    expect(matchGovernorate("كفرالشيخ -بلطيم -بلوش -الساحل البحرى")?.governorateId).toBe(31);
+    expect(matchGovernorate("Desouk, Kafr El Sheikh, Egypt")?.governorateId).toBe(31);
   });
 
   it("returns null for an address with nothing recognizable", () => {
@@ -68,8 +70,8 @@ describe("resolveGovernorateValue", () => {
     expect(resolveGovernorateValue("سموحة، الاسكندرية")).toBe("3");
   });
 
-  it("returns null when the governorate has no id or nothing matched", () => {
-    expect(resolveGovernorateValue("دسوق، كفر الشيخ")).toBeNull();
+  it("resolves Kafr El Sheikh and returns null when nothing matched", () => {
+    expect(resolveGovernorateValue("دسوق، كفر الشيخ")).toBe("31");
     expect(resolveGovernorateValue("عنوان غير معروف")).toBeNull();
   });
 });

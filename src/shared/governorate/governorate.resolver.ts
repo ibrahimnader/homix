@@ -87,13 +87,14 @@ const GOVERNORATE_ALIASES: Record<number, string[]> = {
   28: ["الساحل الشمالي", "ساحل شمالي", "سيدي عبد الرحمن", "مارينا", "العلمين", "north coast", "sahel", "alamein"],
   29: ["العين السخنة", "عين سخنة", "السخنة", "ain sokhna", "sokhna"],
   30: ["المنصورة", "منصورة", "طلخا", "mansoura"],
+  31: [
+    "كفر الشيخ", "كفرالشيخ", "دسوق", "بلطيم", "فوه", "مطوبس", "سيدي سالم", "بيلا", "الحامول", "الرياض", "قلين", "برج البرلس", "بلطيم",
+    "kafr el sheikh", "kafr elsheikh", "kafr alsheikh", "kafrelsheikh", "desouk", "baltim",
+  ],
 };
 
-/** كفر الشيخ ليست في `GOVERNORATES` — تُحسب «محافظات» بلا معرّف. */
-const UNLISTED_OUTSIDE_ALIASES = [
-  "كفر الشيخ", "كفرالشيخ", "دسوق", "بلطيم", "فوه", "مطوبس", "سيدي سالم",
-  "kafr el sheikh", "kafr elsheikh",
-];
+/** محافظات معروفة بلا معرّف في `GOVERNORATES` (فارغة الآن: كفر الشيخ أُضيفت برقم 31). */
+const UNLISTED_OUTSIDE_ALIASES: string[] = [];
 
 const ARABIC_DIACRITICS = /[ً-ْٰـ]/g;
 const NON_WORD = /[^\p{L}\p{N}]+/gu;

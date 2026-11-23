@@ -235,6 +235,7 @@ const GOVERNORATES = {
   28: "الساحل الشمالي",
   29: "العين السخنة",
   30: "المنصورة",
+  31: "كفر الشيخ",
 };
 const MANUFACTURE_STATUS = {
   Accepted: 1,

@@ -1,13 +1,13 @@
 import express, { type Request, type RequestHandler } from "express";
 
 import { asyncHandler, validateRequest } from "../../shared/http";
-import { ForbiddenError, ValidationError } from "../../shared/errors";
+import { ForbiddenError, NotFoundError, ValidationError } from "../../shared/errors";
 import { OrderRepository } from "../orders/order.repo";
 import { RECEIPT_FOLDER } from "./invoice.constants";
 import { InvoiceRepository } from "./invoice.repo";
 import {
-  activityQuery, addOrderBody, adjustmentBody, bulkTransitionBody, candidatesQuery, cycleQuery, generateBody, invoiceAdjustmentParams,
-  invoiceIdParams, invoiceLineParams, invoiceListQuery, invoicedLinesQuery, lineActionBody, lineOverrideBody, liveAddOrderBody, liveCandidatesQuery, liveDraftBody, liveLineActionBody,
+  activityQuery, addOrderBody, adjustmentBody, bulkTransitionBody, candidatesQuery, consolidateBody, cycleQuery, generateBody, invoiceAdjustmentParams,
+  invoiceIdParams, invoiceLineParams, invoiceReceiptParams, invoiceListQuery, invoicedLinesQuery, lineActionBody, lineOverrideBody, liveAddOrderBody, liveCandidatesQuery, liveDraftBody, liveLineActionBody,
   reconciliationBody, reconciliationQuery, reviewLiveAllBody, reviewLiveBody, transitionBody,
 } from "./invoice.schemas";
 import { InvoiceService, type Scope } from "./invoice.service";
@@ -71,6 +71,7 @@ export const invoiceRouter = express.Router();
  *       - { in: query, name: invoiceTo, schema: { type: string, format: date } }
  *       - { in: query, name: transferredFrom, schema: { type: string, format: date } }
  *       - { in: query, name: transferredTo, schema: { type: string, format: date } }
+ *       - { in: query, name: kind, schema: { type: string, enum: [standard, consolidated] }, description: "consolidated = only «فاتورة شاملة» invoices" }
  *       - { in: query, name: dueParty, description: "vendor = net > 0, homix = net < 0 (net 0 matches neither)", schema: { type: string, enum: [vendor, homix] } }
  *       - { in: query, name: receipt, schema: { type: string, enum: [uploaded, missing] } }
  *       - { in: query, name: overdue, schema: { type: boolean } }
@@ -387,6 +388,46 @@ invoiceRouter.get("/live/order-candidates", ...settle, validateRequest({ query: 
 
 /**
  * @swagger
+ * /financial-invoices/consolidate:
+ *   post:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: "Merge ≥ 2 open invoices of ONE vendor into a consolidated invoice («فاتورة شاملة») — staff with finance_settle only"
+ *     description: >
+ *       Sources must be `draft` or `reviewed`, standard (not already consolidated/merged) and without receipt/transfer data, else 409 with the Arabic reason.
+ *       Lines and adjustments MOVE to the new draft (kind `consolidated`, code `<base>-ALL`, period = the latest source cycle) keeping
+ *       `sourceInvoiceId`; the sources become `consolidated` (hidden from the archive lists and the errors check). Net = Σ vendor due − Σ Homix due − Σ fines + adjustments (signed).
+ *       Runs in one transaction under row locks on all the sources. Audit: `invoice.consolidated`.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [invoiceIds], properties: { invoiceIds: { type: array, minItems: 2, maxItems: 50, items: { type: integer } } } }
+ *     responses:
+ *       200: { description: "{ invoice, sources }" }
+ *       403: { description: Vendor users are refused }
+ *       409: { description: "Different vendors / ineligible invoice / already merged (Arabic reason)" }
+ * /financial-invoices/{id}/unconsolidate:
+ *   post:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: "Undo a consolidated invoice while it is draft/reviewed with no receipt/transfer (فك الدمج)"
+ *     description: "Lines/adjustments go back to their source invoices, sources get their previous status, the consolidated invoice is cancelled (kept for audit). Audit: `invoice.unconsolidated`."
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: integer } }
+ *     responses:
+ *       200: { description: "{ restored, cancelledId }" }
+ *       409: { description: Not a live consolidated invoice, or already frozen/transferred/with receipt }
+ */
+invoiceRouter.post("/consolidate", ...settle, validateRequest({ body: consolidateBody }), asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await invoiceService.consolidate(request.body.invoiceIds, actorOf(request)) });
+}));
+invoiceRouter.post("/:id/unconsolidate", ...settle, validateRequest({ params: invoiceIdParams }), asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await invoiceService.unconsolidate(Number(request.params.id), actorOf(request)) });
+}));
+
+/**
+ * @swagger
  * /financial-invoices/bulk-transition:
  *   post:
  *     security: [{ bearerAuth: [] }]
@@ -615,54 +656,120 @@ invoiceRouter.post("/:id/lines/:lineId/action", ...settle, validateRequest({ par
 
 /**
  * @swagger
- * /financial-invoices/{id}/receipt:
+ * /financial-invoices/{id}/receipts:
+ *   get:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: "List the transfer receipts of an invoice in upload order (vendors: own transferred invoices only)"
+ *     description: "A legacy single receipt that is not yet a row is returned first with id 0."
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: integer } }
+ *     responses:
+ *       200: { description: "{ status, data: [{ id, name, mime, size, uploadedAt, uploadedBy? }] }" }
+ *       403: { description: Vendor asking for a non-transferred invoice }
  *   post:
  *     security: [{ bearerAuth: [] }]
  *     tags: [FinancialInvoices]
- *     summary: Upload/replace the transfer receipt (multipart field `files`; jpeg/png/gif/pdf, 16MB). Transferred invoices only.
+ *     summary: "Add transfer receipts (multipart field `files`, up to 10 per request, 20 per invoice; jpeg/png/gif/pdf, 16MB each). Transferred invoices only. finance_settle staff."
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: integer } }
  *     requestBody:
  *       required: true
  *       content:
  *         multipart/form-data:
- *           schema: { type: object, properties: { files: { type: string, format: binary } } }
+ *           schema: { type: object, properties: { files: { type: array, items: { type: string, format: binary } } } }
  *     responses:
- *       200: { description: Updated }
+ *       200: { description: "{ status, data: { added, count } }" }
+ *       400: { description: "No file / too many files / wrong file type (JSON, Arabic message)" }
+ *       409: { description: "Invoice is not transferred, or the receipts limit is reached" }
+ *       413: { description: File larger than 16MB }
+ * /financial-invoices/{id}/receipts/{receiptId}:
  *   get:
  *     security: [{ bearerAuth: [] }]
  *     tags: [FinancialInvoices]
- *     summary: "Download the receipt (vendors: own transferred invoices only)"
+ *     summary: "Download one receipt (vendors: own transferred invoices only); receiptId 0 = the first receipt"
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: integer } }
+ *       - { in: path, name: receiptId, required: true, schema: { type: integer } }
  *     responses:
  *       200: { description: The file }
  *   delete:
  *     security: [{ bearerAuth: [] }]
  *     tags: [FinancialInvoices]
- *     summary: Remove the receipt (audited)
+ *     summary: Remove one receipt (soft delete + file, audited). Only while the invoice is transferred. finance_settle staff.
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: integer } }
+ *       - { in: path, name: receiptId, required: true, schema: { type: integer } }
+ *     responses:
+ *       200: { description: Removed }
+ *       409: { description: Invoice is not transferred }
+ * /financial-invoices/{id}/receipt:
+ *   post:
+ *     deprecated: true
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: "Deprecated alias of POST /{id}/receipts (adds, no longer replaces)"
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: integer } }
+ *     responses:
+ *       200: { description: Added }
+ *   get:
+ *     deprecated: true
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: "Deprecated alias: downloads the FIRST receipt (vendors: own transferred invoices only)"
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: integer } }
+ *     responses:
+ *       200: { description: The file }
+ *   delete:
+ *     deprecated: true
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: "Deprecated alias: removes the FIRST receipt"
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: integer } }
  *     responses:
  *       200: { description: Removed }
  */
-invoiceRouter.post("/:id/receipt", ...settle, validateRequest({ params: invoiceIdParams }), fileUploadMiddleware(RECEIPT_FOLDER), asyncHandler(async (request, response) => {
-  const path = request.filePaths?.[0];
-  const name = request.fileNames?.[0];
-  if (!path || !name) throw new ValidationError("الملف مطلوب");
-  await invoiceService.setReceipt(Number(request.params.id), { name, path }, actorOf(request));
-  response.json({ status: true });
-}));
-invoiceRouter.get("/:id/receipt", view, validateRequest({ params: invoiceIdParams }), asyncHandler(async (request, response) => {
-  const file = await invoiceService.receiptFor(Number(request.params.id), scopeOf(request));
+const uploadReceipts = asyncHandler(async (request, response) => {
+  const paths = request.filePaths ?? [];
+  const names = request.fileNames ?? [];
+  if (paths.length === 0) throw new ValidationError("الملف مطلوب");
+  const files = paths.map((path, index) => ({ name: names[index] ?? "receipt", path }));
+  // the middleware already stored the files: the service deletes them again if it refuses
+  const result = await invoiceService.addReceipts(Number(request.params.id), files, actorOf(request));
+  response.json({ status: true, data: result });
+});
+const sendReceipt = (receiptIdOf: (request: Request) => number | undefined): RequestHandler => asyncHandler(async (request, response) => {
+  const file = await invoiceService.receiptFor(Number(request.params.id), scopeOf(request), receiptIdOf(request));
   response.setHeader("Content-Type", file.mime);
   response.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`);
   response.setHeader("Cache-Control", "private, no-store");
   response.sendFile(file.absolutePath, (error) => {
     if (error && !response.headersSent) response.status(404).json({ status: false, message: "الملف غير موجود" });
   });
+});
+const firstReceiptId = async (request: Request): Promise<number | undefined> => {
+  const list = await invoiceService.listReceipts(Number(request.params.id), { canSettle: true });
+  return list[0]?.id;
+};
+
+invoiceRouter.get("/:id/receipts", view, validateRequest({ params: invoiceIdParams }), asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await invoiceService.listReceipts(Number(request.params.id), scopeOf(request)) });
 }));
+invoiceRouter.post("/:id/receipts", ...settle, validateRequest({ params: invoiceIdParams }), fileUploadMiddleware(RECEIPT_FOLDER), uploadReceipts);
+invoiceRouter.get("/:id/receipts/:receiptId", view, validateRequest({ params: invoiceReceiptParams }), sendReceipt((request) => Number(request.params.receiptId)));
+invoiceRouter.delete("/:id/receipts/:receiptId", ...settle, validateRequest({ params: invoiceReceiptParams }), asyncHandler(async (request, response) => {
+  await invoiceService.removeReceipt(Number(request.params.id), Number(request.params.receiptId), actorOf(request));
+  response.json({ status: true });
+}));
+// legacy single-receipt endpoints (older frontends): add / first / remove-first
+invoiceRouter.post("/:id/receipt", ...settle, validateRequest({ params: invoiceIdParams }), fileUploadMiddleware(RECEIPT_FOLDER), uploadReceipts);
+invoiceRouter.get("/:id/receipt", view, validateRequest({ params: invoiceIdParams }), sendReceipt(() => undefined));
 invoiceRouter.delete("/:id/receipt", ...settle, validateRequest({ params: invoiceIdParams }), asyncHandler(async (request, response) => {
-  await invoiceService.removeReceipt(Number(request.params.id), actorOf(request));
+  const first = await firstReceiptId(request);
+  if (first === undefined) throw new NotFoundError("لا يوجد إيصال");
+  await invoiceService.removeReceipt(Number(request.params.id), first, actorOf(request));
   response.json({ status: true });
 }));

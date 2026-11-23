@@ -2,8 +2,8 @@ import { QueryTypes, type Transaction } from "sequelize";
 
 import { sequelize } from "../../infrastructure/database";
 import { BILLABLE_ORDER_STATUSES } from "./invoice.eligibility";
-import type { InvoiceStatus, LineState } from "./invoice.constants";
-import type { AdjustmentRow, InvoiceRow, InvoiceTotals, LineRow, LineSnapshot } from "./invoice.types";
+import { HIDDEN_STATUSES, type InvoiceStatus, type LineState } from "./invoice.constants";
+import type { AdjustmentRow, InvoiceRow, InvoiceTotals, LineRow, LineSnapshot, ReceiptRow } from "./invoice.types";
 
 export type Tx = Transaction;
 
@@ -13,6 +13,7 @@ export type InvoiceListFilters = {
   invoiceCode?: string;
   invoiceFrom?: string;
   invoiceTo?: string;
+  kind?: "standard" | "consolidated";
   overdueOnly?: boolean;
   overdueDays: number;
   receipt?: "uploaded" | "missing";
@@ -43,7 +44,14 @@ export type InvoiceEventInput = {
   vendorId?: number | null;
 };
 
-const INVOICE_COLUMNS = `i.*, v.name AS "vendorName"`;
+/** receiptsCount = live receipt rows + a legacy single receipt that is not (yet) a row of financial_invoice_receipts. */
+const RECEIPTS_COUNT_SQL = `(
+  (SELECT COUNT(*) FROM financial_invoice_receipts r WHERE r."invoiceId" = i.id AND r."deletedAt" IS NULL)
+  + CASE WHEN i."receiptPath" IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM financial_invoice_receipts r WHERE r."invoiceId" = i.id AND r.path = i."receiptPath") THEN 1 ELSE 0 END
+)::int`;
+const HAS_RECEIPT_SQL = `(${RECEIPTS_COUNT_SQL} > 0)`;
+const INVOICE_COLUMNS = `i.*, v.name AS "vendorName", ${RECEIPTS_COUNT_SQL} AS "receiptsCount"`;
 const LOCKING_LINE_STATES = ["included", "frozen", "removed"];
 
 /** Columns that updateInvoiceFields may set — never interpolate anything else. */
@@ -51,6 +59,7 @@ const UPDATABLE_INVOICE_COLUMNS = new Set([
   "status", "code", "reviewedAt", "reviewedBy", "frozenAt", "frozenBy", "frozenDurationMs",
   "transferredAt", "transferredBy", "transferAmount",
   "receiptPath", "receiptName", "receiptMime", "receiptUploadedAt", "receiptUploadedBy",
+  "mergedIntoId", "mergedCode", "preMergeStatus",
 ]);
 
 const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
@@ -77,13 +86,13 @@ export class InvoiceRepository {
     const inserted = await sequelize.query<{ id: number }>(
       `INSERT INTO financial_invoices ("vendorId", "billingDay", "periodStart", "periodEnd", status, "createdBy")
        VALUES (:vendorId, :billingDay, :periodStart, :periodEnd, 'draft', :createdBy)
-       ON CONFLICT ("vendorId", "periodEnd") DO NOTHING RETURNING id`,
+       ON CONFLICT ("vendorId", "periodEnd") WHERE kind = 'standard' DO NOTHING RETURNING id`,
       { replacements: input, transaction, type: QueryTypes.SELECT },
     );
     const id = inserted[0]?.id;
     if (id !== undefined) return { created: true, invoice: (await this.findInvoice(id, transaction, true))! };
     const existing = await sequelize.query<{ id: number }>(
-      'SELECT id FROM financial_invoices WHERE "vendorId" = :vendorId AND "periodEnd" = :periodEnd',
+      `SELECT id FROM financial_invoices WHERE "vendorId" = :vendorId AND "periodEnd" = :periodEnd AND kind = 'standard'`,
       { replacements: input, transaction, type: QueryTypes.SELECT },
     );
     return { created: false, invoice: (await this.findInvoice(existing[0]!.id, transaction, true))! };
@@ -276,6 +285,8 @@ export class InvoiceRepository {
     const conditions: string[] = ["1 = 1"];
     const replacements: Record<string, unknown> = { overdueDays: filters.overdueDays };
     if (filters.statuses?.length) { conditions.push("i.status IN (:statuses)"); replacements.statuses = filters.statuses; }
+    else { conditions.push("i.status NOT IN (:hiddenStatuses)"); replacements.hiddenStatuses = HIDDEN_STATUSES; }
+    if (filters.kind) { conditions.push("i.kind = :kind"); replacements.kind = filters.kind; }
     if (filters.vendorId) { conditions.push('i."vendorId" = :vendorId'); replacements.vendorId = filters.vendorId; }
     if (filters.billingDay) { conditions.push('i."billingDay" = :billingDay'); replacements.billingDay = filters.billingDay; }
     if (filters.invoiceFrom) { conditions.push('i."periodEnd" >= CAST(:invoiceFrom AS timestamptz)'); replacements.invoiceFrom = filters.invoiceFrom; }
@@ -284,8 +295,8 @@ export class InvoiceRepository {
     if (filters.transferredTo) { conditions.push('i."transferredAt" <= CAST(:transferredTo AS timestamptz)'); replacements.transferredTo = filters.transferredTo; }
     if (filters.dueParty === "vendor") conditions.push('i."netAmount" > 0');
     if (filters.dueParty === "homix") conditions.push('i."netAmount" < 0');
-    if (filters.receipt === "uploaded") conditions.push('i."receiptPath" IS NOT NULL');
-    if (filters.receipt === "missing") conditions.push('i."receiptPath" IS NULL');
+    if (filters.receipt === "uploaded") conditions.push(HAS_RECEIPT_SQL);
+    if (filters.receipt === "missing") conditions.push(`NOT ${HAS_RECEIPT_SQL}`);
     if (filters.invoiceCode) { conditions.push("i.code ILIKE :invoiceCode"); replacements.invoiceCode = `%${escapeLike(filters.invoiceCode)}%`; }
     if (filters.search) {
       conditions.push("(v.name ILIKE :search OR i.code ILIKE :search)");
@@ -314,7 +325,8 @@ export class InvoiceRepository {
 
   /** Invoices whose cycle ends inside [periodEndFrom, periodEndTo] (one cycle), optionally one vendor / some statuses. */
   public listCycleInvoices(filters: { periodEndFrom: string; periodEndTo: string; statuses?: InvoiceStatus[]; vendorId?: number }): Promise<InvoiceRow[]> {
-    const conditions = ['i."periodEnd" >= CAST(:periodEndFrom AS timestamptz)', 'i."periodEnd" <= CAST(:periodEndTo AS timestamptz)'];
+    // a consolidated invoice shares its latest source's cycle: the live view shows the (merged) source instead, never both
+    const conditions = ['i."periodEnd" >= CAST(:periodEndFrom AS timestamptz)', 'i."periodEnd" <= CAST(:periodEndTo AS timestamptz)', "i.kind = 'standard'"];
     const replacements: Record<string, unknown> = { periodEndFrom: filters.periodEndFrom, periodEndTo: filters.periodEndTo };
     if (filters.vendorId) { conditions.push('i."vendorId" = :vendorId'); replacements.vendorId = filters.vendorId; }
     if (filters.statuses?.length) { conditions.push("i.status IN (:statuses)"); replacements.statuses = filters.statuses; }
@@ -330,15 +342,16 @@ export class InvoiceRepository {
    * (frozen/deferred/removed) and lines whose order falls outside the invoice's own cycle window
    * (deferred pick-ups, manually added orders).
    */
-  public listCycleOverlayLines(invoiceIds: number[]): Promise<Array<LineRow & { outsideCycle: boolean; vendorId: number }>> {
+  public listCycleOverlayLines(invoiceIds: number[]): Promise<Array<LineRow & { effectiveInvoiceId: number | string; outsideCycle: boolean; vendorId: number }>> {
     if (invoiceIds.length === 0) return Promise.resolve([]);
-    return sequelize.query<LineRow & { outsideCycle: boolean; vendorId: number }>(
-      `SELECT l.*, i."vendorId",
+    // lines moved onto a consolidated invoice are attributed to the source invoice (cycle) they came from
+    return sequelize.query<LineRow & { effectiveInvoiceId: number | string; outsideCycle: boolean; vendorId: number }>(
+      `SELECT l.*, i.id AS "effectiveInvoiceId", i."vendorId",
               (o.id IS NULL OR COALESCE(o."deliveryDate", o."updatedAt") < i."periodStart" OR COALESCE(o."deliveryDate", o."updatedAt") > i."periodEnd") AS "outsideCycle"
        FROM financial_invoice_lines l
-       JOIN financial_invoices i ON i.id = l."invoiceId"
+       JOIN financial_invoices i ON i.id = COALESCE(l."sourceInvoiceId", l."invoiceId")
        LEFT JOIN orders o ON o.id = l."orderId"
-       WHERE l."invoiceId" IN (:invoiceIds)
+       WHERE ((l."invoiceId" IN (:invoiceIds) AND l."sourceInvoiceId" IS NULL) OR l."sourceInvoiceId" IN (:invoiceIds))
          AND (l."finesOverride" IS NOT NULL OR l."vendorDueOverride" IS NOT NULL OR l."companyDueOverride" IS NOT NULL
               OR l."warehouseCostOverride" IS NOT NULL OR l."collectionOverride" IS NOT NULL OR l."vendorShippingCostOverride" IS NOT NULL
               OR l.state <> 'included'
@@ -348,11 +361,12 @@ export class InvoiceRepository {
     );
   }
 
-  /** Order ids that are counted (state = included) on each of the given invoices. */
+  /** Order ids that are counted (state = included) on each of the given invoices (merged lines count for their source invoice). */
   public listIncludedOrderIds(invoiceIds: number[]): Promise<Array<{ invoiceId: number | string; orderId: number }>> {
     if (invoiceIds.length === 0) return Promise.resolve([]);
     return sequelize.query<{ invoiceId: number | string; orderId: number }>(
-      `SELECT "invoiceId", "orderId" FROM financial_invoice_lines WHERE "invoiceId" IN (:invoiceIds) AND state = 'included' ORDER BY id`,
+      `SELECT COALESCE("sourceInvoiceId", "invoiceId") AS "invoiceId", "orderId" FROM financial_invoice_lines
+       WHERE (("invoiceId" IN (:invoiceIds) AND "sourceInvoiceId" IS NULL) OR "sourceInvoiceId" IN (:invoiceIds)) AND state = 'included' ORDER BY id`,
       { replacements: { invoiceIds }, type: QueryTypes.SELECT },
     );
   }
@@ -400,7 +414,7 @@ export class InvoiceRepository {
   public async listInvoicedLines(filters: {
     invoiceCode?: string; operationNumber?: string; orderNumber?: string; page: number; productCode?: string; q?: string; size: number;
     statuses: InvoiceStatus[]; vendorIds?: number[];
-  }): Promise<{ rows: Array<LineRow & { code: string | null; invoiceNetAmount?: string | number; invoiceStatus: InvoiceStatus; periodEnd: string; vendorId: number; vendorName: string; transferredAt: string | null; receiptPath: string | null }>; total: number }> {
+  }): Promise<{ rows: Array<LineRow & { code: string | null; invoiceNetAmount?: string | number; invoiceStatus: InvoiceStatus; periodEnd: string; vendorId: number; vendorName: string; transferredAt: string | null; hasReceipt: boolean }>; total: number }> {
     const replacements: Record<string, unknown> = { statuses: filters.statuses };
     const conditions = ["l.state = 'included'", "i.status IN (:statuses)"];
     if (filters.vendorIds?.length) { conditions.push('i."vendorId" IN (:vendorIds)'); replacements.vendorIds = filters.vendorIds; }
@@ -420,7 +434,7 @@ export class InvoiceRepository {
     const where = conditions.join(" AND ");
     const rows = await sequelize.query<any>(
       `SELECT l.*, i.code, i.status AS "invoiceStatus", i."periodEnd", i."vendorId", v.name AS "vendorName",
-              i."transferredAt", i."receiptPath", i."netAmount" AS "invoiceNetAmount"
+              i."transferredAt", ${HAS_RECEIPT_SQL} AS "hasReceipt", i."netAmount" AS "invoiceNetAmount"
        FROM financial_invoice_lines l JOIN financial_invoices i ON i.id = l."invoiceId" JOIN vendors v ON v.id = i."vendorId"
        WHERE ${where} ORDER BY i."periodEnd" DESC, l.id DESC LIMIT :limit OFFSET :offset`,
       { replacements: { ...replacements, limit: filters.size, offset: (filters.page - 1) * filters.size }, type: QueryTypes.SELECT },
@@ -488,6 +502,141 @@ export class InvoiceRepository {
         replacements: { billable: BILLABLE_ORDER_STATUSES, q: `%${escapeLike(q)}%`, states: LOCKING_LINE_STATES, vendorId },
         type: QueryTypes.SELECT,
       },
+    );
+  }
+
+  /* ---------- consolidated invoices ---------- */
+
+  /** Locks the given invoices (FOR UPDATE, ascending id so concurrent merges cannot deadlock) and returns them. */
+  public lockInvoices(ids: Array<number | string>, transaction: Tx): Promise<InvoiceRow[]> {
+    if (ids.length === 0) return Promise.resolve([]);
+    return sequelize.query<InvoiceRow>(
+      `SELECT ${INVOICE_COLUMNS} FROM financial_invoices i JOIN vendors v ON v.id = i."vendorId"
+       WHERE i.id IN (:ids) ORDER BY i.id FOR UPDATE OF i`,
+      { replacements: { ids }, transaction, type: QueryTypes.SELECT },
+    );
+  }
+
+  /** Locks and returns the source invoices merged into a consolidated invoice. */
+  public lockMergedSources(consolidatedId: number | string, transaction: Tx): Promise<InvoiceRow[]> {
+    return sequelize.query<InvoiceRow>(
+      `SELECT ${INVOICE_COLUMNS} FROM financial_invoices i JOIN vendors v ON v.id = i."vendorId"
+       WHERE i."mergedIntoId" = :consolidatedId ORDER BY i.id FOR UPDATE OF i`,
+      { replacements: { consolidatedId }, transaction, type: QueryTypes.SELECT },
+    );
+  }
+
+  /** Read-only: the sources of a consolidated invoice (for the «الفواتير المجمّعة» note). */
+  public listMergedSources(consolidatedId: number | string, transaction?: Tx): Promise<InvoiceRow[]> {
+    return sequelize.query<InvoiceRow>(
+      `SELECT ${INVOICE_COLUMNS} FROM financial_invoices i JOIN vendors v ON v.id = i."vendorId"
+       WHERE i."mergedIntoId" = :consolidatedId ORDER BY i."periodEnd", i.id`,
+      { replacements: { consolidatedId }, transaction, type: QueryTypes.SELECT },
+    );
+  }
+
+  /** Codes already used with the given prefix (`INV-2026-0005-ALL`, `…-ALL2`, …), to pick the next free suffix. */
+  public async listCodesWithPrefix(prefix: string, transaction: Tx): Promise<string[]> {
+    const rows = await sequelize.query<{ code: string }>(
+      'SELECT code FROM financial_invoices WHERE code LIKE :pattern',
+      { replacements: { pattern: `${escapeLike(prefix)}%` }, transaction, type: QueryTypes.SELECT },
+    );
+    return rows.map((row) => row.code);
+  }
+
+  public async insertConsolidated(input: {
+    billingDay: number; code: string; createdBy: number; periodEnd: Date | string; periodStart: Date | string; vendorId: number;
+  }, transaction: Tx): Promise<InvoiceRow> {
+    const rows = await sequelize.query<{ id: number }>(
+      `INSERT INTO financial_invoices ("vendorId", "billingDay", "periodStart", "periodEnd", status, kind, code, "createdBy")
+       VALUES (:vendorId, :billingDay, :periodStart, :periodEnd, 'draft', 'consolidated', :code, :createdBy) RETURNING id`,
+      { replacements: input, transaction, type: QueryTypes.SELECT },
+    );
+    return (await this.findInvoice(rows[0]!.id, transaction, true))!;
+  }
+
+  /** Moves every line and adjustment of the sources onto the consolidated invoice, remembering where each came from. */
+  public async moveToConsolidated(sourceIds: Array<number | string>, targetId: number | string, transaction: Tx): Promise<{ adjustments: number; lines: number }> {
+    const lines = await sequelize.query<{ id: number }>(
+      `UPDATE financial_invoice_lines SET "sourceInvoiceId" = "invoiceId", "invoiceId" = :targetId WHERE "invoiceId" IN (:sourceIds) RETURNING id`,
+      { replacements: { sourceIds, targetId }, transaction, type: QueryTypes.SELECT },
+    );
+    const adjustments = await sequelize.query<{ id: number }>(
+      `UPDATE financial_invoice_adjustments SET "sourceInvoiceId" = "invoiceId", "invoiceId" = :targetId WHERE "invoiceId" IN (:sourceIds) RETURNING id`,
+      { replacements: { sourceIds, targetId }, transaction, type: QueryTypes.SELECT },
+    );
+    return { adjustments: adjustments.length, lines: lines.length };
+  }
+
+  /**
+   * Undo: lines/adjustments go back to the invoice they came from; ones without a source (added to the consolidated invoice
+   * itself) go to `fallbackId` (the latest source, whose cycle the consolidated invoice shares).
+   */
+  public async moveBackFromConsolidated(consolidatedId: number | string, fallbackId: number | string, transaction: Tx): Promise<void> {
+    for (const table of ["financial_invoice_lines", "financial_invoice_adjustments"]) {
+      await sequelize.query(
+        `UPDATE ${table} SET "invoiceId" = COALESCE("sourceInvoiceId", :fallbackId), "sourceInvoiceId" = NULL WHERE "invoiceId" = :consolidatedId`,
+        { replacements: { consolidatedId, fallbackId }, transaction, type: QueryTypes.UPDATE },
+      );
+    }
+  }
+
+  public async markMerged(sourceIds: Array<number | string>, input: { mergedCode: string; mergedIntoId: number | string }, transaction: Tx): Promise<void> {
+    await sequelize.query(
+      `UPDATE financial_invoices SET "preMergeStatus" = status, status = 'consolidated', "mergedIntoId" = :mergedIntoId, "mergedCode" = :mergedCode, "updatedAt" = NOW()
+       WHERE id IN (:sourceIds)`,
+      { replacements: { ...input, sourceIds }, transaction, type: QueryTypes.UPDATE },
+    );
+  }
+
+  public async restoreMerged(sourceId: number | string, status: InvoiceStatus, transaction: Tx): Promise<void> {
+    await sequelize.query(
+      `UPDATE financial_invoices SET status = :status, "preMergeStatus" = NULL, "mergedIntoId" = NULL, "mergedCode" = NULL, "updatedAt" = NOW() WHERE id = :sourceId`,
+      { replacements: { sourceId, status }, transaction, type: QueryTypes.UPDATE },
+    );
+  }
+
+  /** Cancels an undone consolidated invoice: keeps the row for the audit trail, frees its code. */
+  public async cancelConsolidated(invoiceId: number | string, transaction: Tx): Promise<void> {
+    await sequelize.query(
+      `UPDATE financial_invoices SET status = 'cancelled', code = NULL, "reviewedAt" = NULL, "reviewedBy" = NULL, "updatedAt" = NOW() WHERE id = :invoiceId`,
+      { replacements: { invoiceId }, transaction, type: QueryTypes.UPDATE },
+    );
+  }
+
+  /* ---------- transfer receipts ---------- */
+
+  public listReceipts(invoiceId: number | string, transaction?: Tx): Promise<ReceiptRow[]> {
+    return sequelize.query<ReceiptRow>(
+      'SELECT * FROM financial_invoice_receipts WHERE "invoiceId" = :invoiceId AND "deletedAt" IS NULL ORDER BY "uploadedAt", id',
+      { replacements: { invoiceId }, transaction, type: QueryTypes.SELECT },
+    );
+  }
+
+  public findReceipt(invoiceId: number | string, receiptId: number | string, transaction?: Tx): Promise<ReceiptRow | undefined> {
+    return sequelize.query<ReceiptRow>(
+      'SELECT * FROM financial_invoice_receipts WHERE "invoiceId" = :invoiceId AND id = :receiptId AND "deletedAt" IS NULL',
+      { replacements: { invoiceId, receiptId }, transaction, type: QueryTypes.SELECT },
+    ).then((rows) => rows[0]);
+  }
+
+  public async insertReceipt(
+    invoiceId: number | string,
+    input: { mime: string; name: string; path: string; size: number | null; uploadedAt: Date; uploadedBy: number | null },
+    transaction: Tx,
+  ): Promise<ReceiptRow> {
+    const rows = await sequelize.query<ReceiptRow>(
+      `INSERT INTO financial_invoice_receipts ("invoiceId", path, name, mime, size, "uploadedBy", "uploadedAt")
+       VALUES (:invoiceId, :path, :name, :mime, :size, :uploadedBy, :uploadedAt) RETURNING *`,
+      { replacements: { ...input, invoiceId }, transaction, type: QueryTypes.SELECT },
+    );
+    return rows[0]!;
+  }
+
+  public async softDeleteReceipt(receiptId: number | string, actorId: number, transaction: Tx): Promise<void> {
+    await sequelize.query(
+      'UPDATE financial_invoice_receipts SET "deletedAt" = NOW(), "deletedBy" = :actorId WHERE id = :receiptId',
+      { replacements: { actorId, receiptId }, transaction, type: QueryTypes.UPDATE },
     );
   }
 }

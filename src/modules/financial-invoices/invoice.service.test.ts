@@ -43,6 +43,7 @@ const makeRepo = (current: InvoiceRow = invoice()) => {
     listLines: jest.fn(async () => state.lines),
     listVendorBanks: jest.fn(async (ids: number[]) => new Map([...state.banks].filter(([id]) => ids.map(Number).includes(id)))),
     listPickableDeferred: jest.fn(async () => [] as LineRow[]),
+    listReceipts: jest.fn(async () => [] as never[]),
     nextInvoiceSequence: jest.fn(async () => 7),
     refreshLineSnapshot: jest.fn(async () => undefined),
     removeAdjustment: jest.fn(),
@@ -256,17 +257,6 @@ describe("read scoping", () => {
 });
 
 describe("receipt and reconciliation", () => {
-  test("receipt upload only on transferred invoices; replaced file is removed", async () => {
-    const draft = makeRepo(invoice({ status: "reviewed" }));
-    await expect(service(draft.repo).setReceipt(1, { name: "a.pdf", path: "uploads/financial-receipts/a.pdf" }, actor)).rejects.toThrow(/تم التحويل/);
-    const transferred = makeRepo(invoice({ receiptPath: "uploads/financial-receipts/old.pdf", status: "transferred" }));
-    const remove = jest.fn(async () => undefined);
-    const svc = new InvoiceService({ getReport: jest.fn(), now: () => NOW, removeStoredFile: remove, repo: transferred.repo as never });
-    await svc.setReceipt(1, { name: "a.pdf", path: "uploads/financial-receipts/a.pdf" }, actor);
-    expect(remove).toHaveBeenCalledWith("uploads/financial-receipts/old.pdf");
-    expect(transferred.repo.insertEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "receipt.uploaded", actorId: 9 }), expect.anything());
-  });
-
   test("reconciliation computes the difference and logs it", async () => {
     const { repo } = makeRepo();
     const svc = service({ ...repo, transferredTotal: jest.fn(async () => ({ count: 2, totalCents: 310000 })) });

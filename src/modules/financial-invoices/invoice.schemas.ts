@@ -29,6 +29,7 @@ export const invoiceListQuery = z.object({
   invoiceCode: text.optional(),
   invoiceFrom: day.optional(),
   invoiceTo: day.optional(),
+  kind: z.enum(["standard", "consolidated"]).optional(),
   overdue: flag.optional(),
   receipt: z.enum(["uploaded", "missing"]).optional(),
   search: z.string().trim().min(1).max(100).optional(),
@@ -117,3 +118,11 @@ export const lineActionBody = z.object({
 
 export const addOrderBody = z.object({ orderId: id });
 export const candidatesQuery = z.object({ q: z.string().trim().min(1).max(100) });
+
+export const invoiceReceiptParams = z.object({ id, receiptId: z.coerce.number().int().min(0) });
+
+/** «فاتورة شاملة»: ≥ 2 distinct invoices of one vendor. */
+export const consolidateBody = z.object({
+  invoiceIds: z.array(id).min(2, "اختر فاتورتين على الأقل").max(50)
+    .refine((ids) => new Set(ids).size === ids.length, "الفواتير المختارة مكررة"),
+});

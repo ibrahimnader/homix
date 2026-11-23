@@ -4,8 +4,9 @@ import request from "supertest";
 jest.mock("../../infrastructure/database", () => ({ sequelize: { query: jest.fn(), transaction: jest.fn() } }));
 jest.mock("../orders/order.repo", () => ({ OrderRepository: class { public getFinancialReport = jest.fn(); } }));
 jest.mock("../../../config/fileUploadMiddleware", () => () => (req: any, _res: any, next: any) => {
-  req.filePaths = req.headers["x-test-file"] ? ["uploads/financial-receipts/r-1.pdf"] : [];
-  req.fileNames = req.headers["x-test-file"] ? ["r.pdf"] : [];
+  const two = req.headers["x-test-file"] === "2";
+  req.filePaths = req.headers["x-test-file"] ? ["uploads/financial-receipts/r-1.pdf", ...(two ? ["uploads/financial-receipts/r-2.png"] : [])] : [];
+  req.fileNames = req.headers["x-test-file"] ? ["r.pdf", ...(two ? ["r2.png"] : [])] : [];
   next();
 });
 // eslint-disable-next-line import/first
@@ -29,7 +30,11 @@ const spies = {
   list: jest.spyOn(invoiceService, "list").mockResolvedValue({ items: [] } as never),
   refreshDraft: jest.spyOn(invoiceService, "refreshDraft").mockResolvedValue({ refreshed: 0 } as never),
   setOverrides: jest.spyOn(invoiceService, "setOverrides").mockResolvedValue({} as never),
-  setReceipt: jest.spyOn(invoiceService, "setReceipt").mockResolvedValue(undefined as never),
+  addReceipts: jest.spyOn(invoiceService, "addReceipts").mockResolvedValue({ added: [], count: 1 } as never),
+  consolidate: jest.spyOn(invoiceService, "consolidate").mockResolvedValue({ invoice: { id: 9 }, sources: [] } as never),
+  listReceipts: jest.spyOn(invoiceService, "listReceipts").mockResolvedValue([{ id: 1 }] as never),
+  removeReceipt: jest.spyOn(invoiceService, "removeReceipt").mockResolvedValue(undefined as never),
+  unconsolidate: jest.spyOn(invoiceService, "unconsolidate").mockResolvedValue({ cancelledId: 9, restored: [] } as never),
   transition: jest.spyOn(invoiceService, "transition").mockResolvedValue({ id: 1 } as never),
 };
 
@@ -73,6 +78,10 @@ test("vendors cannot mutate or read staff-only resources even with the permissio
     () => request(vendor).post("/financial-invoices/1/adjustments").send({ amount: 5, kind: "addition", label: "x" }),
     () => request(vendor).post("/financial-invoices/bulk-transition").send({ ids: [1], to: "reviewed" }),
     () => request(vendor).post("/financial-invoices/1/receipt"),
+    () => request(vendor).post("/financial-invoices/1/receipts"),
+    () => request(vendor).delete("/financial-invoices/1/receipts/3"),
+    () => request(vendor).post("/financial-invoices/consolidate").send({ invoiceIds: [1, 2] }),
+    () => request(vendor).post("/financial-invoices/1/unconsolidate"),
     () => request(vendor).get("/financial-invoices/activity"),
   ]) {
     expect((await call()).status).toBe(403);
@@ -106,10 +115,38 @@ test("status filter is parsed from a comma list and the actor is the authenticat
   expect(spies.generate).toHaveBeenCalledWith({ billingDay: 28, referenceDate: "2026-10-20" }, { id: 7 });
 });
 
-test("receipt upload requires a file and records it for the actor", async () => {
-  expect((await request(finance).post("/financial-invoices/1/receipt")).status).toBe(400);
+test("receipt upload requires a file and records every file for the actor (new and legacy endpoint)", async () => {
+  expect((await request(finance).post("/financial-invoices/1/receipts")).status).toBe(400);
+  expect((await request(finance).post("/financial-invoices/1/receipts").set("x-test-file", "2")).status).toBe(200);
+  expect(spies.addReceipts).toHaveBeenCalledWith(1, [
+    { name: "r.pdf", path: "uploads/financial-receipts/r-1.pdf" },
+    { name: "r2.png", path: "uploads/financial-receipts/r-2.png" },
+  ], { id: 7 });
   expect((await request(finance).post("/financial-invoices/1/receipt").set("x-test-file", "1")).status).toBe(200);
-  expect(spies.setReceipt).toHaveBeenCalledWith(1, { name: "r.pdf", path: "uploads/financial-receipts/r-1.pdf" }, { id: 7 });
+  expect(spies.addReceipts).toHaveBeenLastCalledWith(1, [{ name: "r.pdf", path: "uploads/financial-receipts/r-1.pdf" }], { id: 7 });
+});
+
+test("receipts: staff without finance_settle cannot add/remove, anyone with finance_view can list; vendor listing is token-scoped", async () => {
+  expect((await request(viewer).post("/financial-invoices/1/receipts").set("x-test-file", "1")).status).toBe(403);
+  expect((await request(viewer).delete("/financial-invoices/1/receipts/3")).status).toBe(403);
+  expect((await request(viewer).get("/financial-invoices/1/receipts")).status).toBe(200);
+  expect(spies.listReceipts).toHaveBeenLastCalledWith(1, { canSettle: false });
+  await request(vendor).get("/financial-invoices/1/receipts");
+  expect(spies.listReceipts).toHaveBeenLastCalledWith(1, { vendorId: 5 });
+  expect((await request(finance).delete("/financial-invoices/1/receipts/3")).status).toBe(200);
+  expect(spies.removeReceipt).toHaveBeenCalledWith(1, 3, { id: 7 });
+});
+
+test("consolidate: needs finance_settle, validates >= 2 distinct ids, vendors get 403", async () => {
+  expect((await request(finance).post("/financial-invoices/consolidate").send({ invoiceIds: [1] })).status).toBe(400);
+  expect((await request(finance).post("/financial-invoices/consolidate").send({ invoiceIds: [1, 1] })).status).toBe(400);
+  expect((await request(viewer).post("/financial-invoices/consolidate").send({ invoiceIds: [1, 2] })).status).toBe(403);
+  expect((await request(vendor).post("/financial-invoices/consolidate").send({ invoiceIds: [1, 2] })).status).toBe(403);
+  expect(spies.consolidate).not.toHaveBeenCalled();
+  expect((await request(finance).post("/financial-invoices/consolidate").send({ invoiceIds: [3, 4] })).status).toBe(200);
+  expect(spies.consolidate).toHaveBeenCalledWith([3, 4], { id: 7 });
+  expect((await request(finance).post("/financial-invoices/9/unconsolidate")).status).toBe(200);
+  expect(spies.unconsolidate).toHaveBeenCalledWith(9, { id: 7 });
 });
 
 test("cycle overview: needs finance_view, validates periodEnd and scopes vendors by the token", async () => {

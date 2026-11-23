@@ -7,8 +7,8 @@ jest.mock("../../../config/fileUploadMiddleware", () => () => (req: any, _res: a
 // eslint-disable-next-line import/first
 import { invoiceRouter, invoiceService } from "./invoice.routes";
 
-/** Every financial-invoice route except the five vendor reads is staff-only (finance_settle / staff finance_view), set and reset alike. */
-const VENDOR_READS = new Set(["get /", "get /cycle", "get /lines", "get /:id", "get /:id/receipt"]);
+/** Every financial-invoice route except the vendor reads is staff-only (finance_settle / staff finance_view), set and reset alike. */
+const VENDOR_READS = new Set(["get /", "get /cycle", "get /lines", "get /:id", "get /:id/receipt", "get /:id/receipts", "get /:id/receipts/:receiptId"]);
 const everyPermission = new Proxy({}, { get: () => true });
 
 const serviceMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(invoiceService)).filter((name) => name !== "constructor");

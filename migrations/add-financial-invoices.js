@@ -155,10 +155,55 @@ module.exports = {
     `);
     await run('CREATE INDEX IF NOT EXISTS financial_invoice_events_created_idx ON financial_invoice_events ("createdAt" DESC)');
     await run('CREATE INDEX IF NOT EXISTS financial_invoice_events_invoice_idx ON financial_invoice_events ("invoiceId", "createdAt" DESC)');
+
+    // consolidated invoices («فاتورة شاملة»): kind, merge bookkeeping, per-line / per-adjustment source invoice
+    await run(`ALTER TABLE financial_invoices ADD COLUMN IF NOT EXISTS kind VARCHAR(16) NOT NULL DEFAULT 'standard'`);
+    await run(`ALTER TABLE financial_invoices ADD COLUMN IF NOT EXISTS "mergedIntoId" BIGINT REFERENCES financial_invoices(id)`);
+    await run(`ALTER TABLE financial_invoices ADD COLUMN IF NOT EXISTS "mergedCode" VARCHAR(32)`);
+    await run(`ALTER TABLE financial_invoices ADD COLUMN IF NOT EXISTS "preMergeStatus" VARCHAR(16)`);
+    await run(`DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'financial_invoices_kind_chk') THEN
+    ALTER TABLE financial_invoices ADD CONSTRAINT financial_invoices_kind_chk CHECK (kind IN ('standard', 'consolidated'));
+  END IF;
+END $$`);
+    await run(`DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'financial_invoices_status_chk' AND pg_get_constraintdef(oid) NOT LIKE '%consolidated%') THEN
+    ALTER TABLE financial_invoices DROP CONSTRAINT financial_invoices_status_chk;
+    ALTER TABLE financial_invoices ADD CONSTRAINT financial_invoices_status_chk
+      CHECK (status IN ('draft', 'reviewed', 'frozen', 'transferred', 'consolidated', 'cancelled'));
+  END IF;
+END $$`);
+    // one STANDARD invoice per vendor per cycle; a consolidated invoice shares the cycle of its latest source
+    await run(`DROP INDEX IF EXISTS financial_invoices_vendor_period_uq`);
+    await run(`CREATE UNIQUE INDEX IF NOT EXISTS financial_invoices_vendor_period_std_uq ON financial_invoices ("vendorId", "periodEnd") WHERE kind = 'standard'`);
+    await run(`CREATE INDEX IF NOT EXISTS financial_invoices_merged_into_idx ON financial_invoices ("mergedIntoId") WHERE "mergedIntoId" IS NOT NULL`);
+    await run(`ALTER TABLE financial_invoice_lines ADD COLUMN IF NOT EXISTS "sourceInvoiceId" BIGINT REFERENCES financial_invoices(id)`);
+    await run(`CREATE INDEX IF NOT EXISTS financial_invoice_lines_source_idx ON financial_invoice_lines ("sourceInvoiceId") WHERE "sourceInvoiceId" IS NOT NULL`);
+    await run(`ALTER TABLE financial_invoice_adjustments ADD COLUMN IF NOT EXISTS "sourceInvoiceId" BIGINT REFERENCES financial_invoices(id)`);
+    // several transfer receipts per invoice (the legacy single receipt columns stay and are backfilled as the first item)
+    await run(`CREATE TABLE IF NOT EXISTS financial_invoice_receipts (
+  id BIGSERIAL PRIMARY KEY,
+  "invoiceId" BIGINT NOT NULL REFERENCES financial_invoices(id),
+  path VARCHAR(512) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  mime VARCHAR(100) NOT NULL,
+  size BIGINT,
+  "uploadedBy" INTEGER REFERENCES users(id),
+  "uploadedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "deletedAt" TIMESTAMPTZ,
+  "deletedBy" INTEGER REFERENCES users(id)
+)`);
+    await run(`CREATE INDEX IF NOT EXISTS financial_invoice_receipts_invoice_idx ON financial_invoice_receipts ("invoiceId", "uploadedAt") WHERE "deletedAt" IS NULL`);
+    await run(`INSERT INTO financial_invoice_receipts ("invoiceId", path, name, mime, "uploadedBy", "uploadedAt")
+SELECT i.id, i."receiptPath", COALESCE(i."receiptName", 'receipt'), COALESCE(i."receiptMime", 'application/octet-stream'), i."receiptUploadedBy", COALESCE(i."receiptUploadedAt", i."updatedAt")
+FROM financial_invoices i
+WHERE i."receiptPath" IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM financial_invoice_receipts r WHERE r."invoiceId" = i.id AND r.path = i."receiptPath")`);
   },
 
   async down(queryInterface) {
     const run = (sql) => queryInterface.sequelize.query(sql);
+    await run("DROP TABLE IF EXISTS financial_invoice_receipts");
     await run("DROP TABLE IF EXISTS financial_invoice_events");
     await run("DROP TABLE IF EXISTS financial_invoice_adjustments");
     await run("DROP TABLE IF EXISTS financial_invoice_lines");

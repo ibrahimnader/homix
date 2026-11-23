@@ -28,7 +28,8 @@ const chunks = <T>(items: T[]): T[][] => {
 /** Read-only, indexed loads (invoice period/vendor indexes, line invoiceId/orderId indexes). */
 export class InvoiceIssuesRepository {
   public async load(filters: { billingDay?: number; month?: string; vendorId?: number }): Promise<IssuesLoad> {
-    const conditions = ["1 = 1"];
+    // merged sources / cancelled consolidated invoices hold no lines of their own: they are not part of the errors check
+    const conditions = ["i.status NOT IN ('consolidated', 'cancelled')"];
     const replacements: Record<string, unknown> = { cap: ISSUES_MAX_INVOICES + 1 };
     if (filters.vendorId) { conditions.push('i."vendorId" = :vendorId'); replacements.vendorId = filters.vendorId; }
     if (filters.billingDay) { conditions.push('i."billingDay" = :billingDay'); replacements.billingDay = filters.billingDay; }

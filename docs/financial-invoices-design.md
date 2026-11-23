@@ -168,7 +168,10 @@ POST   /:id/adjustments          DELETE /:id/adjustments/:adjustmentId
 POST   /:id/lines                add order        GET /:id/order-candidates?q=
 PATCH  /:id/lines/:lineId        overrides
 POST   /:id/lines/:lineId/action
-POST   /:id/receipt              GET /:id/receipt        DELETE /:id/receipt
+POST   /consolidate              merge >= 2 open invoices of one vendor (finance_settle, staff only)
+POST   /:id/unconsolidate        undo a live consolidated invoice
+GET    /:id/receipts             POST /:id/receipts (multi-file)   GET|DELETE /:id/receipts/:receiptId
+POST   /:id/receipt              GET /:id/receipt        DELETE /:id/receipt   (deprecated aliases: add / first / remove first)
 ```
 
 ## Amounts: formulas (reference model, owner decision Nov 2026)
@@ -232,3 +235,20 @@ The vendor's bank data (`users.bankName / bankAccountHolderName / bankAccountNum
 - Effective values: per line `fines`, `vendorDue`, `companyDue` always follow the invoice (override-aware, `effectiveLineCents`); `collection`, `warehouseCost` and vendor shipping follow it only when overridden (the screen rule). Deferred / frozen / removed lines and orders missing from the invoice are not counted; counted lines outside the cycle window are added to the matching tab. Row, section and top totals move by the same delta as the screen KPIs (`vendorDue`, `companyDue`, `fines`, `netAmount`, collection, cost, shipping, counts). The header stays «المستحق لهوميكس».
 - Sheets: `summary`, `full-invoice` (columns: مستحق البائع / المستحق لهوميكس / الغرامات / manual adjustments / «الصافي» signed + «اتجاه الصافي» label, vendor shipping, invoice code and status; every section sheet has «الصافي» + «اتجاه الصافي»; the `lines` sheet has a per-line «الصافي»), `vendor-deliveries`, `warehouse-deliveries`, `lines` (order level, effective values, line state, and a notes column «تعديل يدوي: <fields> — <reason>»; edited cells are also filled yellow) and `adjustments` (live adjustments, additions positive / deductions negative).
 - Vendors: forced to their own reviewed / transferred invoices (drafts and frozen invoices are not visible, so the export is live for those), counted lines only, effective values only. No override flags, notes, reasons, original values or uncounted lines are written to their workbook.
+
+
+## Consolidated invoice («فاتورة شاملة»)
+
+A vendor often owes Homix in one cycle and is owed in another. `POST /financial-invoices/consolidate {invoiceIds}` merges >= 2 invoices of ONE vendor, each `draft` or `reviewed`, standard (not consolidated / not already merged) and without receipt or transfer data (otherwise 409 with an Arabic reason), into one invoice so the amounts offset in a single signed net (same formula as always: Σ vendor due − Σ Homix due − Σ fines + adjustments).
+
+- New invoice: `kind = 'consolidated'`, status `draft`, code `<base>-ALL` (`-ALL2` … when taken; base = the latest source's code, or a fresh sequence number when it has none), period = the latest source cycle. Review follows the existing rule (only after that cycle ended).
+- Lines and adjustments MOVE (orders stay unique, no copies); each keeps its state/overrides and `sourceInvoiceId` (columns on `financial_invoice_lines` and `financial_invoice_adjustments`).
+- Sources become status `consolidated` with `mergedIntoId`, `mergedCode` and `preMergeStatus` (their stored totals stay as the merge-time snapshot). They are hidden from the archive lists (list excludes `consolidated`/`cancelled` unless asked), from the errors check, and shown in the consolidated invoice's detail as `sources` («الفواتير المجمّعة (n)»). The live cycle view still shows them (status `consolidated`, their moved lines attributed to their source cycle); the consolidated invoice itself is excluded from the cycle overlay so a vendor+cycle never has two entries.
+- One STANDARD invoice per (vendor, cycle): the unique index is now partial (`WHERE kind = 'standard'`) because a consolidated invoice shares the latest source's cycle.
+- Concurrency: one transaction, `SELECT … FOR UPDATE` on all the sources (ascending id) before anything is written; a second merge/review/transfer of the same invoices re-reads the locked rows and gets 409.
+- Undo `POST /:id/unconsolidate` (draft/reviewed, no receipt/transfer): lines/adjustments go back to their source (rows added to the consolidated invoice itself go to the latest source), sources get `preMergeStatus` back and their totals recomputed, the consolidated invoice becomes `cancelled` (kept for the audit trail, code freed). Audit: `invoice.consolidated` / `invoice.unconsolidated` on the consolidated invoice and on every source.
+- Vendors cannot merge or undo (403). They see a consolidated invoice only once it is reviewed/transferred, like any invoice.
+
+## Several transfer receipts per invoice
+
+Table `financial_invoice_receipts (id, invoiceId, path, name, mime, size, uploadedBy, uploadedAt, deletedAt, deletedBy)`. The legacy single receipt (`receiptPath` & friends) is backfilled as the first item by the migration and, until then, is still read as the first item (id 0). Add (up to 10 per request, 20 per invoice) and remove require staff with `finance_settle` and a `transferred` invoice (same rule the single receipt had); a refused upload deletes the files the middleware already stored. `reviewed -> draft` is refused while ANY receipt exists. Vendors list/download receipts only of their own transferred invoices. The frontend «تنزيل الفاتورة + الإيصالات (PDF واحد)» appends all receipts sequentially (images as A4 pages, PDFs copied), skipping and naming a broken one, with the invoice-only fallback.

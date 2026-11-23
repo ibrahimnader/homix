@@ -1,4 +1,4 @@
-import type { InvoiceStatus, LineState } from "./invoice.constants";
+import type { InvoiceKind, InvoiceStatus, LineState } from "./invoice.constants";
 
 /** Raw DB rows (NUMERIC columns arrive from pg as strings). */
 export type InvoiceRow = {
@@ -30,6 +30,25 @@ export type InvoiceRow = {
   receiptUploadedAt: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
+  /** consolidated-invoice columns (migration add-consolidated-invoices) */
+  kind?: InvoiceKind;
+  mergedIntoId?: number | string | null;
+  mergedCode?: string | null;
+  preMergeStatus?: InvoiceStatus | null;
+  /** live (non-deleted) transfer receipts incl. a not-yet-backfilled legacy single receipt; computed in SQL */
+  receiptsCount?: number | string;
+};
+
+export type ReceiptRow = {
+  id: number | string;
+  invoiceId: number | string;
+  path: string;
+  name: string;
+  mime: string;
+  size: number | string | null;
+  uploadedAt: Date | string;
+  uploadedBy: number | null;
+  deletedAt?: Date | string | null;
 };
 
 export type LineRow = {
@@ -59,6 +78,8 @@ export type LineRow = {
   state: LineState;
   stateReason: string | null;
   stateChangedAt: Date | string | null;
+  /** set while the line sits on a consolidated invoice: the invoice it came from */
+  sourceInvoiceId?: number | string | null;
 };
 
 export type AdjustmentRow = {
@@ -69,6 +90,7 @@ export type AdjustmentRow = {
   amount: string | number;
   createdAt: Date | string;
   removedAt: Date | string | null;
+  sourceInvoiceId?: number | string | null;
 };
 
 /** Snapshot of one order as computed by the live financial report. */

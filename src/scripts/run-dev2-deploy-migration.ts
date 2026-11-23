@@ -21,7 +21,8 @@
  *                                                         add-warehouse-receipt-movements]
  *   3. shipment_reassignments                            [add-shipment-reassignments]
  *   4. fine_rules / fine_records (+ soft delete)         [add-fine-rules, add-fine-rules-deleted-at]
- *   5. Vendor settlement invoices (4 tables + sequence)  [add-financial-invoices]
+ *   5. Vendor settlement invoices (5 tables + sequence; consolidated
+ *      invoices + several receipts per invoice)           [add-financial-invoices]
  *   6. Permission merge for existing users: new keys
  *      (ship_receipts_view, customers_create,
  *      orders_edit_financials) get their role defaults;
@@ -335,6 +336,49 @@ const STEPS: Step[] = [
       )`,
       `CREATE INDEX IF NOT EXISTS financial_invoice_events_created_idx ON financial_invoice_events ("createdAt" DESC)`,
       `CREATE INDEX IF NOT EXISTS financial_invoice_events_invoice_idx ON financial_invoice_events ("invoiceId", "createdAt" DESC)`,
+      // consolidated invoices («فاتورة شاملة»): kind, merge bookkeeping, per-line / per-adjustment source invoice
+      `ALTER TABLE financial_invoices ADD COLUMN IF NOT EXISTS kind VARCHAR(16) NOT NULL DEFAULT 'standard'`,
+      `ALTER TABLE financial_invoices ADD COLUMN IF NOT EXISTS "mergedIntoId" BIGINT REFERENCES financial_invoices(id)`,
+      `ALTER TABLE financial_invoices ADD COLUMN IF NOT EXISTS "mergedCode" VARCHAR(32)`,
+      `ALTER TABLE financial_invoices ADD COLUMN IF NOT EXISTS "preMergeStatus" VARCHAR(16)`,
+      `DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'financial_invoices_kind_chk') THEN
+    ALTER TABLE financial_invoices ADD CONSTRAINT financial_invoices_kind_chk CHECK (kind IN ('standard', 'consolidated'));
+  END IF;
+END $$`,
+      `DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'financial_invoices_status_chk' AND pg_get_constraintdef(oid) NOT LIKE '%consolidated%') THEN
+    ALTER TABLE financial_invoices DROP CONSTRAINT financial_invoices_status_chk;
+    ALTER TABLE financial_invoices ADD CONSTRAINT financial_invoices_status_chk
+      CHECK (status IN ('draft', 'reviewed', 'frozen', 'transferred', 'consolidated', 'cancelled'));
+  END IF;
+END $$`,
+      // one STANDARD invoice per vendor per cycle; a consolidated invoice shares the cycle of its latest source
+      `DROP INDEX IF EXISTS financial_invoices_vendor_period_uq`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS financial_invoices_vendor_period_std_uq ON financial_invoices ("vendorId", "periodEnd") WHERE kind = 'standard'`,
+      `CREATE INDEX IF NOT EXISTS financial_invoices_merged_into_idx ON financial_invoices ("mergedIntoId") WHERE "mergedIntoId" IS NOT NULL`,
+      `ALTER TABLE financial_invoice_lines ADD COLUMN IF NOT EXISTS "sourceInvoiceId" BIGINT REFERENCES financial_invoices(id)`,
+      `CREATE INDEX IF NOT EXISTS financial_invoice_lines_source_idx ON financial_invoice_lines ("sourceInvoiceId") WHERE "sourceInvoiceId" IS NOT NULL`,
+      `ALTER TABLE financial_invoice_adjustments ADD COLUMN IF NOT EXISTS "sourceInvoiceId" BIGINT REFERENCES financial_invoices(id)`,
+      // several transfer receipts per invoice (the legacy single receipt columns stay and are backfilled as the first item)
+      `CREATE TABLE IF NOT EXISTS financial_invoice_receipts (
+  id BIGSERIAL PRIMARY KEY,
+  "invoiceId" BIGINT NOT NULL REFERENCES financial_invoices(id),
+  path VARCHAR(512) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  mime VARCHAR(100) NOT NULL,
+  size BIGINT,
+  "uploadedBy" INTEGER REFERENCES users(id),
+  "uploadedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "deletedAt" TIMESTAMPTZ,
+  "deletedBy" INTEGER REFERENCES users(id)
+)`,
+      `CREATE INDEX IF NOT EXISTS financial_invoice_receipts_invoice_idx ON financial_invoice_receipts ("invoiceId", "uploadedAt") WHERE "deletedAt" IS NULL`,
+      `INSERT INTO financial_invoice_receipts ("invoiceId", path, name, mime, "uploadedBy", "uploadedAt")
+SELECT i.id, i."receiptPath", COALESCE(i."receiptName", 'receipt'), COALESCE(i."receiptMime", 'application/octet-stream'), i."receiptUploadedBy", COALESCE(i."receiptUploadedAt", i."updatedAt")
+FROM financial_invoices i
+WHERE i."receiptPath" IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM financial_invoice_receipts r WHERE r."invoiceId" = i.id AND r.path = i."receiptPath")`,
     ],
   },
 ];

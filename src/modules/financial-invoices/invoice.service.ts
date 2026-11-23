@@ -6,7 +6,8 @@ import { env } from "../../config/env";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../../shared/errors";
 import type { OrderFinancialReportQuery, OrderFinancialReportResponse } from "../orders/order.types";
 import {
-  INVOICE_STATUS, INVOICE_STATUS_LABELS, invoiceStatusLabel, LINE_ACTION_RULES, LINE_STATE, OVERDUE_DAYS, RECEIPT_FOLDER, VENDOR_VISIBLE_STATUSES,
+  CONSOLIDATED_CODE_SUFFIX, INVOICE_KIND, INVOICE_STATUS, INVOICE_STATUS_LABELS, invoiceStatusLabel, LINE_ACTION_RULES, LINE_STATE, MAX_RECEIPTS_PER_INVOICE,
+  MAX_RECEIPTS_PER_UPLOAD, MERGEABLE_STATUSES, OVERDUE_DAYS, RECEIPT_FOLDER, VENDOR_VISIBLE_STATUSES,
   type InvoiceStatus, type LineAction,
 } from "./invoice.constants";
 import { isBillableOrderStatus } from "./invoice.eligibility";
@@ -14,7 +15,7 @@ import { canTransition, computeTotals, dueParty, daysCounter, effectiveLineCents
 import { overlayReport, type ExportReport, type OverlayInvoice, type OverlayLine } from "./invoice.export-overlay";
 import { fromCents, toCents } from "./invoice.money";
 import type { InvoiceListFilters, InvoiceRepository, Tx, VendorBankRow } from "./invoice.repo";
-import type { Actor, AdjustmentRow, InvoiceRow, LineRow, LineSnapshot } from "./invoice.types";
+import type { Actor, AdjustmentRow, InvoiceRow, LineRow, LineSnapshot, ReceiptRow } from "./invoice.types";
 
 const CAIRO = "Africa/Cairo";
 
@@ -50,6 +51,8 @@ type Deps = {
   now?: () => Date;
   removeStoredFile?: (storedPath: string) => Promise<void>;
   repo: InvoiceRepository;
+  /** size in bytes of a stored receipt file (null when unknown); injectable for tests */
+  statStoredFile?: (storedPath: string) => Promise<number | null>;
 };
 
 const num = (value: unknown): number => fromCents(toCents(value));
@@ -77,7 +80,18 @@ const defaultRemoveStoredFile = async (storedPath: string): Promise<void> => {
   }
 };
 
+const defaultStatStoredFile = async (storedPath: string): Promise<number | null> => {
+  try {
+    return (await fs.promises.stat(resolveReceiptFile(storedPath))).size;
+  } catch {
+    return null;
+  }
+};
+
+export type ReceiptFile = { name: string; path: string };
+
 export class InvoiceService {
+  private readonly statStoredFile: (storedPath: string) => Promise<number | null>;
   private readonly repo: InvoiceRepository;
   private readonly getReport: ReportProvider;
   private readonly now: () => Date;
@@ -88,6 +102,7 @@ export class InvoiceService {
     this.getReport = deps.getReport;
     this.now = deps.now ?? (() => new Date());
     this.removeStoredFile = deps.removeStoredFile ?? defaultRemoveStoredFile;
+    this.statStoredFile = deps.statStoredFile ?? defaultStatStoredFile;
   }
 
   /* ---------- presentation ---------- */
@@ -108,9 +123,14 @@ export class InvoiceService {
       dueParty: dueParty(net),
       finesTotal: num(row.finesTotal),
       frozenAt: iso(row.frozenAt),
-      hasReceipt: Boolean(row.receiptPath),
+      hasReceipt: this.receiptsCountOf(row) > 0,
       id: Number(row.id),
       isOverdue: isOverdue(row, nowMs),
+      kind: row.kind ?? INVOICE_KIND.STANDARD,
+      /** can be merged into a consolidated invoice right now (the server re-checks under a row lock) */
+      mergeable: this.mergeBlockReason(row) === null,
+      mergedCode: row.mergedCode ?? null,
+      mergedIntoId: row.mergedIntoId === null || row.mergedIntoId === undefined ? null : Number(row.mergedIntoId),
       netAmount: net,
       ordersCount: Number(row.ordersCount),
       overdueDays: OVERDUE_DAYS,
@@ -118,6 +138,7 @@ export class InvoiceService {
       periodStart: iso(row.periodStart),
       receiptName: row.receiptName,
       receiptUploadedAt: iso(row.receiptUploadedAt),
+      receiptsCount: this.receiptsCountOf(row),
       reviewedAt: iso(row.reviewedAt),
       status: row.status,
       statusLabel: invoiceStatusLabel(row.status, net),
@@ -129,6 +150,12 @@ export class InvoiceService {
       vendorShippingCost: num(row.vendorShippingCost),
       warehouseCost: num(row.warehouseCost),
     };
+  }
+
+  /** Live receipts; rows built without the SQL count (tests, legacy callers) fall back to the single legacy receipt column. */
+  private receiptsCountOf(row: InvoiceRow): number {
+    if (row.receiptsCount !== undefined && row.receiptsCount !== null) return Number(row.receiptsCount);
+    return row.receiptPath ? 1 : 0;
   }
 
   public toLineDto(line: LineRow) {
@@ -158,6 +185,7 @@ export class InvoiceService {
       paymentStatus: line.paymentStatus,
       paymentStatusLabel: line.paymentStatusLabel,
       productCode: line.productCode,
+      sourceInvoiceId: line.sourceInvoiceId === null || line.sourceInvoiceId === undefined ? null : Number(line.sourceInvoiceId),
       state: line.state,
       stateChangedAt: iso(line.stateChangedAt),
       stateReason: line.stateReason,
@@ -171,7 +199,10 @@ export class InvoiceService {
   }
 
   public toAdjustmentDto(row: AdjustmentRow) {
-    return { amount: num(row.amount), createdAt: iso(row.createdAt), id: Number(row.id), kind: row.kind, label: row.label, removedAt: iso(row.removedAt) };
+    return {
+      amount: num(row.amount), createdAt: iso(row.createdAt), id: Number(row.id), kind: row.kind, label: row.label, removedAt: iso(row.removedAt),
+      sourceInvoiceId: row.sourceInvoiceId === null || row.sourceInvoiceId === undefined ? null : Number(row.sourceInvoiceId),
+    };
   }
 
   /* ---------- scoping ---------- */
@@ -192,6 +223,9 @@ export class InvoiceService {
   }
 
   private assertDraft(invoice: InvoiceRow): void {
+    if (invoice.status === INVOICE_STATUS.CONSOLIDATED) {
+      throw new ConflictError(`الفاتورة مدمجة في الفاتورة الشاملة ${invoice.mergedCode ?? ""} — فُك الدمج أولاً لتعديلها`.replace("  ", " "));
+    }
     if (invoice.status !== INVOICE_STATUS.DRAFT) {
       throw new ConflictError("الفاتورة مقفلة — أرجعها إلى «معلّقة» أولاً لتعديلها");
     }
@@ -200,7 +234,7 @@ export class InvoiceService {
   /* ---------- reads ---------- */
 
   public async list(query: {
-    billingDay?: number; dueParty?: "vendor" | "homix"; invoiceCode?: string; invoiceFrom?: string; invoiceTo?: string; overdue?: boolean;
+    billingDay?: number; dueParty?: "vendor" | "homix"; invoiceCode?: string; invoiceFrom?: string; invoiceTo?: string; kind?: "standard" | "consolidated"; overdue?: boolean;
     page: number; receipt?: "uploaded" | "missing"; search?: string; size: number; statuses?: InvoiceStatus[];
     transferredFrom?: string; transferredTo?: string; vendorId?: number;
   }, scope: Scope) {
@@ -217,6 +251,7 @@ export class InvoiceService {
       invoiceCode: query.invoiceCode,
       invoiceFrom: query.invoiceFrom ? dayStart(query.invoiceFrom) : undefined,
       invoiceTo: query.invoiceTo ? dayEnd(query.invoiceTo) : undefined,
+      kind: query.kind,
       overdueDays: OVERDUE_DAYS,
       overdueOnly: query.overdue,
       page: query.page,
@@ -284,10 +319,13 @@ export class InvoiceService {
     const [lines, adjustments] = await Promise.all([this.repo.listLines(id), this.repo.listAdjustments(id)]);
     const isStaff = !scope.vendorId;
     const vendorBank = await this.vendorBankFor(Number(invoice.vendorId), scope);
+    const sources = invoice.kind === INVOICE_KIND.CONSOLIDATED ? await this.repo.listMergedSources(id) : [];
     return {
       adjustments: adjustments.filter((row) => isStaff || !row.removedAt).map((row) => this.toAdjustmentDto(row)),
       // Vendors only see counted lines; deferred/frozen/removed are internal handling.
       invoice: this.toInvoiceDto(invoice),
+      // «الفواتير المجمّعة (n)»: the invoices merged into a consolidated invoice, with cycle / month / net of each
+      ...(invoice.kind === INVOICE_KIND.CONSOLIDATED ? { sources: sources.map((row) => this.toSourceDto(row)) } : {}),
       // payout details: finance_settle staff, or the vendor himself on his own invoice (assertReadable above); omitted otherwise
       ...(vendorBank === undefined ? {} : { vendorBank }),
       lines: lines
@@ -323,6 +361,8 @@ export class InvoiceService {
         adjustmentsTotal: num(row.adjustmentsTotal),
         code: row.code,
         id: Number(row.id),
+        mergedCode: row.mergedCode ?? null,
+        mergedIntoId: row.mergedIntoId === null || row.mergedIntoId === undefined ? null : Number(row.mergedIntoId),
         netAmount: num(row.netAmount),
         status: row.status,
         statusLabel: invoiceStatusLabel(row.status, num(row.netAmount)),
@@ -332,7 +372,7 @@ export class InvoiceService {
         .filter((row) => isStaff || row.state === LINE_STATE.INCLUDED)
         .map((row) => {
           const dto = this.toLineDto(row);
-          return { ...(isStaff ? dto : this.toVendorLineDto(dto)), invoiceId: Number(row.invoiceId), outsideCycle: Boolean(row.outsideCycle), vendorId: Number(row.vendorId) };
+          return { ...(isStaff ? dto : this.toVendorLineDto(dto)), invoiceId: Number(row.effectiveInvoiceId ?? row.invoiceId), outsideCycle: Boolean(row.outsideCycle), vendorId: Number(row.vendorId) };
         }),
     };
   }
@@ -365,7 +405,7 @@ export class InvoiceService {
       id: Number(row.id),
       includedOrderIds: included.filter((item) => Number(item.invoiceId) === Number(row.id)).map((item) => Number(item.orderId)),
       lines: overlayRows
-        .filter((line) => Number(line.invoiceId) === Number(row.id) && (!isVendor || line.state === LINE_STATE.INCLUDED))
+        .filter((line) => Number(line.effectiveInvoiceId ?? line.invoiceId) === Number(row.id) && (!isVendor || line.state === LINE_STATE.INCLUDED))
         .map((line): OverlayLine => {
           const dto = this.toLineDto(line);
           // real flags drive which value is used (same for staff and vendor); the export hides them from vendors (overrideInfo)
@@ -407,7 +447,7 @@ export class InvoiceService {
     return {
       items: rows.map((row) => ({
         ...(scope.vendorId ? this.toVendorLineDto(this.toLineDto(row)) : this.toLineDto(row)),
-        hasReceipt: Boolean(row.receiptPath),
+        hasReceipt: Boolean(row.hasReceipt),
         invoiceCode: row.code,
         invoiceId: Number(row.invoiceId),
         invoiceStatus: row.invoiceStatus,
@@ -687,7 +727,7 @@ export class InvoiceService {
         Object.assign(fields, { frozenAt: null, frozenDurationMs: 0, reviewedAt: at, reviewedBy: actor.id });
         Object.assign(detail, { netAmount: totals.netAmount, ordersCount: totals.ordersCount });
       } else if (from === "reviewed" && to === "draft") {
-        if (invoice.receiptPath || invoice.transferredAt) {
+        if (this.receiptsCountOf(invoice) > 0 || invoice.transferredAt) {
           throw new ConflictError("لا يمكن إرجاع فاتورة عليها إيصال أو بيانات تحويل إلى «معلّقة»");
         }
         Object.assign(fields, { frozenAt: null, frozenDurationMs: 0, reviewedAt: null, reviewedBy: null });
@@ -924,47 +964,256 @@ export class InvoiceService {
     });
   }
 
-  /* ---------- receipt ---------- */
+  /* ---------- consolidated invoices («فاتورة شاملة») ---------- */
 
-  public async setReceipt(id: number, file: { name: string; path: string }, actor: Actor) {
-    const previous = await this.repo.transaction(async (transaction) => {
-      const invoice = await this.mustFind(id, transaction);
-      if (invoice.status !== INVOICE_STATUS.TRANSFERRED) throw new ConflictError("لا يمكن رفع إيصال إلا لفاتورة «تم التحويل»");
-      await this.repo.updateInvoiceFields(invoice.id, {
-        receiptMime: receiptMimeFor(file.name), receiptName: file.name, receiptPath: file.path,
-        receiptUploadedAt: this.now(), receiptUploadedBy: actor.id,
-      }, transaction);
-      await this.repo.insertEvent({
-        action: "receipt.uploaded", actorId: actor.id, detail: { fileName: file.name, replaced: Boolean(invoice.receiptPath) },
-        invoiceId: invoice.id, vendorId: invoice.vendorId,
-      }, transaction);
-      return invoice.receiptPath;
-    });
-    if (previous) await this.removeStoredFile(previous);
+  /** Arabic reason why an invoice cannot be merged right now, or null when it can. */
+  private mergeBlockReason(row: InvoiceRow): string | null {
+    const label = row.code ?? `#${row.id}`;
+    if ((row.kind ?? INVOICE_KIND.STANDARD) === INVOICE_KIND.CONSOLIDATED) return `الفاتورة ${label} فاتورة شاملة بالفعل ولا يمكن دمجها`;
+    if (row.status === INVOICE_STATUS.CONSOLIDATED || (row.mergedIntoId !== null && row.mergedIntoId !== undefined)) {
+      return `الفاتورة ${label} مدمجة بالفعل في فاتورة شاملة`;
+    }
+    if (!MERGEABLE_STATUSES.includes(row.status)) {
+      return `الفاتورة ${label} حالتها «${INVOICE_STATUS_LABELS[row.status] ?? row.status}» — يُدمج فقط «معلّقة» أو «تمت المراجعة»`;
+    }
+    if (this.receiptsCountOf(row) > 0) return `الفاتورة ${label} عليها إيصال تحويل`;
+    if (row.transferredAt || (row.transferAmount !== null && row.transferAmount !== undefined)) return `الفاتورة ${label} عليها بيانات تحويل`;
+    return null;
   }
 
-  public async removeReceipt(id: number, actor: Actor) {
-    const previous = await this.repo.transaction(async (transaction) => {
+  private toSourceDto(row: InvoiceRow) {
+    const net = num(row.netAmount);
+    return {
+      billingDay: row.billingDay,
+      code: row.code,
+      dueParty: dueParty(net),
+      id: Number(row.id),
+      month: moment.tz(row.periodEnd, CAIRO).format("YYYY-MM"),
+      netAmount: net,
+      ordersCount: Number(row.ordersCount),
+      periodEnd: iso(row.periodEnd),
+      periodStart: iso(row.periodStart),
+      status: row.preMergeStatus ?? row.status,
+    };
+  }
+
+  /** `<base>-ALL`, then `-ALL2`, `-ALL3` … the first free one. */
+  private pickConsolidatedCode(base: string, taken: string[]): string {
+    const used = new Set(taken);
+    const first = `${base}${CONSOLIDATED_CODE_SUFFIX}`;
+    if (!used.has(first)) return first;
+    for (let n = 2; ; n += 1) {
+      const candidate = `${first}${n}`;
+      if (!used.has(candidate)) return candidate;
+    }
+  }
+
+  /**
+   * Merges ≥ 2 open invoices (draft/reviewed) of one vendor into ONE consolidated invoice so opposite balances offset in a single signed net.
+   * Lines and adjustments MOVE (orders stay unique), each keeping its `sourceInvoiceId`; the sources become `consolidated`.
+   * Everything runs in one transaction under row locks on all the sources (ascending id), so two concurrent merges / a review / a transfer
+   * of one of them cannot interleave: the loser re-reads the locked row and gets a 409.
+   */
+  public async consolidate(invoiceIds: number[], actor: Actor) {
+    const ids = [...new Set(invoiceIds.map(Number))].sort((a, b) => a - b);
+    if (ids.length < 2) throw new ValidationError("اختر فاتورتين على الأقل");
+    return this.repo.transaction(async (transaction) => {
+      const locked = await this.repo.lockInvoices(ids, transaction);
+      if (locked.length !== ids.length) throw new NotFoundError("إحدى الفواتير المختارة غير موجودة");
+      const vendorIds = new Set(locked.map((row) => Number(row.vendorId)));
+      if (vendorIds.size > 1) throw new ConflictError("لا يمكن دمج فواتير بائعين مختلفين — اختر فواتير بائع واحد");
+      const reasons = locked.map((row) => this.mergeBlockReason(row)).filter((reason): reason is string => reason !== null);
+      if (reasons.length > 0) throw new ConflictError(reasons.join("؛ "));
+
+      const latest = [...locked].sort((a, b) => new Date(b.periodEnd).getTime() - new Date(a.periodEnd).getTime() || Number(b.id) - Number(a.id))[0]!;
+      const vendorId = Number(latest.vendorId);
+      let base = latest.code;
+      if (!base) {
+        const sequence = await this.repo.nextInvoiceSequence(transaction);
+        base = `INV-${moment.tz(this.now(), CAIRO).format("YYYY")}-${String(sequence).padStart(4, "0")}`;
+      }
+      const code = this.pickConsolidatedCode(base, await this.repo.listCodesWithPrefix(`${base}${CONSOLIDATED_CODE_SUFFIX}`, transaction));
+      const target = await this.repo.insertConsolidated({
+        billingDay: latest.billingDay, code, createdBy: actor.id, periodEnd: latest.periodEnd, periodStart: latest.periodStart, vendorId,
+      }, transaction);
+      const moved = await this.repo.moveToConsolidated(ids, target.id, transaction);
+      await this.repo.markMerged(ids, { mergedCode: code, mergedIntoId: target.id }, transaction);
+      const totals = await this.recomputeTotals(target.id, transaction);
+      const sources = locked.map((row) => this.toSourceDto(row));
+      await this.repo.insertEvent({
+        action: "invoice.consolidated", actorId: actor.id,
+        detail: { adjustments: moved.adjustments, code, lines: moved.lines, netAmount: totals.netAmount, sources },
+        invoiceId: target.id, toStatus: INVOICE_STATUS.DRAFT, vendorId,
+      }, transaction);
+      for (const row of locked) {
+        await this.repo.insertEvent({
+          action: "invoice.consolidated", actorId: actor.id, detail: { consolidatedCode: code, consolidatedId: Number(target.id), netAmount: num(row.netAmount) },
+          fromStatus: row.status, invoiceId: row.id, toStatus: INVOICE_STATUS.CONSOLIDATED, vendorId,
+        }, transaction);
+      }
+      const invoice = (await this.repo.findInvoice(target.id, transaction))!;
+      return { invoice: this.toInvoiceDto(invoice), sources: locked.map((row) => ({ ...this.toSourceDto(row), mergedCode: code })) };
+    });
+  }
+
+  /**
+   * Undo a merge while the consolidated invoice is still draft/reviewed with no receipt/transfer: lines and adjustments go back to their
+   * source invoices, the sources get their previous status back and the consolidated invoice is cancelled (kept for the audit trail).
+   */
+  public async unconsolidate(id: number, actor: Actor) {
+    return this.repo.transaction(async (transaction) => {
+      const target = await this.mustFind(id, transaction);
+      if (target.kind !== INVOICE_KIND.CONSOLIDATED || target.status === INVOICE_STATUS.CANCELLED) throw new ConflictError("هذه ليست فاتورة شاملة قائمة");
+      if (!MERGEABLE_STATUSES.includes(target.status)) {
+        throw new ConflictError(`لا يمكن فك الدمج: الفاتورة الشاملة حالتها «${INVOICE_STATUS_LABELS[target.status] ?? target.status}»`);
+      }
+      if (this.receiptsCountOf(target) > 0 || target.transferredAt || (target.transferAmount !== null && target.transferAmount !== undefined)) {
+        throw new ConflictError("لا يمكن فك الدمج: عليها إيصال أو بيانات تحويل");
+      }
+      const sources = await this.repo.lockMergedSources(target.id, transaction);
+      if (sources.length === 0) throw new ConflictError("لا توجد فواتير مجمّعة لفكّها");
+      const fallback = [...sources].sort((a, b) => new Date(b.periodEnd).getTime() - new Date(a.periodEnd).getTime() || Number(b.id) - Number(a.id))[0]!;
+      const before = num(target.netAmount);
+      const fromStatus = target.status;
+      const consolidatedCode = target.code;
+      await this.repo.moveBackFromConsolidated(target.id, fallback.id, transaction);
+      const restored: Array<{ code: string | null; id: number; netAfter: number; netBefore: number; status: InvoiceStatus }> = [];
+      for (const source of sources) {
+        const status = (source.preMergeStatus ?? INVOICE_STATUS.DRAFT) as InvoiceStatus;
+        await this.repo.restoreMerged(source.id, status, transaction);
+        const totals = await this.recomputeTotals(source.id, transaction);
+        restored.push({ code: source.code, id: Number(source.id), netAfter: totals.netAmount, netBefore: num(source.netAmount), status });
+        await this.repo.insertEvent({
+          action: "invoice.unconsolidated", actorId: actor.id, detail: { consolidatedCode, consolidatedId: Number(target.id), netAfter: totals.netAmount, netBefore: num(source.netAmount) },
+          fromStatus: INVOICE_STATUS.CONSOLIDATED, invoiceId: source.id, toStatus: status, vendorId: source.vendorId,
+        }, transaction);
+      }
+      await this.repo.cancelConsolidated(target.id, transaction);
+      await this.recomputeTotals(target.id, transaction);
+      await this.repo.insertEvent({
+        action: "invoice.unconsolidated", actorId: actor.id, detail: { code: consolidatedCode, netBeforeUndo: before, restored },
+        fromStatus, invoiceId: target.id, toStatus: INVOICE_STATUS.CANCELLED, vendorId: target.vendorId,
+      }, transaction);
+      return { restored, cancelledId: Number(target.id) };
+    });
+  }
+
+  /* ---------- receipts (several per invoice) ---------- */
+
+  private toReceiptDto(row: ReceiptRow, scope: Scope) {
+    return {
+      id: Number(row.id), mime: row.mime, name: row.name, size: row.size === null || row.size === undefined ? null : Number(row.size),
+      uploadedAt: iso(row.uploadedAt),
+      // who uploaded is internal
+      ...(scope.vendorId ? {} : { uploadedBy: row.uploadedBy }),
+    };
+  }
+
+  /**
+   * Receipts of an invoice in upload order. A legacy single receipt (receiptPath & friends) that is not a row of the receipts table yet
+   * (the migration backfills it; this covers a deploy window) is returned first with id 0.
+   */
+  private async collectReceipts(invoice: InvoiceRow, transaction?: Tx): Promise<ReceiptRow[]> {
+    const rows = await this.repo.listReceipts(invoice.id, transaction);
+    if (invoice.receiptPath && !rows.some((row) => row.path === invoice.receiptPath)) {
+      return [{
+        id: 0, invoiceId: invoice.id, mime: invoice.receiptMime ?? receiptMimeFor(invoice.receiptName ?? ""), name: invoice.receiptName ?? "receipt", path: invoice.receiptPath,
+        size: null, uploadedAt: invoice.receiptUploadedAt ?? invoice.createdAt, uploadedBy: null,
+      }, ...rows];
+    }
+    return rows;
+  }
+
+  /** Turns the legacy single receipt into a real row (under the invoice lock) so it can be removed like any other. */
+  private async materializeLegacyReceipt(invoice: InvoiceRow, transaction: Tx): Promise<void> {
+    if (!invoice.receiptPath) return;
+    const rows = await this.repo.listReceipts(invoice.id, transaction);
+    if (!rows.some((row) => row.path === invoice.receiptPath)) {
+      await this.repo.insertReceipt(invoice.id, {
+        mime: invoice.receiptMime ?? receiptMimeFor(invoice.receiptName ?? ""), name: invoice.receiptName ?? "receipt", path: invoice.receiptPath,
+        size: null, uploadedAt: invoice.receiptUploadedAt ? new Date(invoice.receiptUploadedAt) : this.now(), uploadedBy: null,
+      }, transaction);
+    }
+  }
+
+  /** Vendors: own TRANSFERRED invoices only (same rule as the single receipt had). */
+  private assertReceiptReadable(invoice: InvoiceRow | null, scope: Scope): InvoiceRow {
+    const readable = this.assertReadable(invoice, scope);
+    if (scope.vendorId && readable.status !== INVOICE_STATUS.TRANSFERRED) throw new ForbiddenError("Forbidden");
+    return readable;
+  }
+
+  public async listReceipts(id: number, scope: Scope) {
+    const invoice = this.assertReceiptReadable(await this.repo.findInvoice(id), scope);
+    return (await this.collectReceipts(invoice)).map((row) => this.toReceiptDto(row, scope));
+  }
+
+  /**
+   * Adds one or more receipts (files already stored by the upload middleware). Only on a transferred invoice.
+   * On ANY failure the freshly stored files are deleted so nothing is orphaned.
+   */
+  public async addReceipts(id: number, files: ReceiptFile[], actor: Actor) {
+    try {
+      if (files.length === 0) throw new ValidationError("الملف مطلوب");
+      if (files.length > MAX_RECEIPTS_PER_UPLOAD) throw new ValidationError(`الحد الأقصى ${MAX_RECEIPTS_PER_UPLOAD} ملفات في المرة الواحدة`);
+      const sizes = await Promise.all(files.map((file) => this.statStoredFile(file.path)));
+      return await this.repo.transaction(async (transaction) => {
+        const invoice = await this.mustFind(id, transaction);
+        if (invoice.status !== INVOICE_STATUS.TRANSFERRED) throw new ConflictError("لا يمكن رفع إيصال إلا لفاتورة «تم التحويل»");
+        const existing = await this.collectReceipts(invoice, transaction);
+        if (existing.length + files.length > MAX_RECEIPTS_PER_INVOICE) {
+          throw new ConflictError(`الحد الأقصى ${MAX_RECEIPTS_PER_INVOICE} إيصال للفاتورة الواحدة`);
+        }
+        await this.materializeLegacyReceipt(invoice, transaction);
+        const uploadedAt = this.now();
+        const added: ReceiptRow[] = [];
+        for (const [index, file] of files.entries()) {
+          added.push(await this.repo.insertReceipt(invoice.id, {
+            mime: receiptMimeFor(file.name), name: file.name, path: file.path, size: sizes[index] ?? null, uploadedAt, uploadedBy: actor.id,
+          }, transaction));
+        }
+        await this.repo.insertEvent({
+          action: "receipt.uploaded", actorId: actor.id,
+          detail: { count: files.length, fileNames: files.map((file) => file.name), receiptIds: added.map((row) => Number(row.id)), total: existing.length + files.length },
+          invoiceId: invoice.id, vendorId: invoice.vendorId,
+        }, transaction);
+        return { added: added.map((row) => this.toReceiptDto(row, {})), count: existing.length + files.length };
+      });
+    } catch (error) {
+      await Promise.all(files.map((file) => this.removeStoredFile(file.path)));
+      throw error;
+    }
+  }
+
+  /** Removes one receipt (soft delete + file). Mirrors the single-receipt rule: only while the invoice is «تم التحويل». receiptId 0 = the legacy single receipt. */
+  public async removeReceipt(id: number, receiptId: number, actor: Actor) {
+    const removedPath = await this.repo.transaction(async (transaction) => {
       const invoice = await this.mustFind(id, transaction);
-      if (!invoice.receiptPath) throw new NotFoundError("لا يوجد إيصال");
       if (invoice.status !== INVOICE_STATUS.TRANSFERRED) throw new ConflictError("لا يمكن حذف الإيصال إلا من فاتورة «تم التحويل»");
-      await this.repo.updateInvoiceFields(invoice.id, {
-        receiptMime: null, receiptName: null, receiptPath: null, receiptUploadedAt: null, receiptUploadedBy: null,
-      }, transaction);
+      if (receiptId === 0) await this.materializeLegacyReceipt(invoice, transaction);
+      const receipt = receiptId === 0
+        ? (await this.repo.listReceipts(invoice.id, transaction)).find((row) => row.path === invoice.receiptPath)
+        : await this.repo.findReceipt(invoice.id, receiptId, transaction);
+      if (!receipt) throw new NotFoundError("لا يوجد إيصال");
+      await this.repo.softDeleteReceipt(receipt.id, actor.id, transaction);
+      if (invoice.receiptPath && invoice.receiptPath === receipt.path) {
+        await this.repo.updateInvoiceFields(invoice.id, { receiptMime: null, receiptName: null, receiptPath: null, receiptUploadedAt: null, receiptUploadedBy: null }, transaction);
+      }
       await this.repo.insertEvent({
-        action: "receipt.removed", actorId: actor.id, detail: { fileName: invoice.receiptName },
+        action: "receipt.removed", actorId: actor.id, detail: { fileName: receipt.name, receiptId: Number(receipt.id) },
         invoiceId: invoice.id, vendorId: invoice.vendorId,
       }, transaction);
-      return invoice.receiptPath;
+      return receipt.path;
     });
-    if (previous) await this.removeStoredFile(previous);
+    await this.removeStoredFile(removedPath);
   }
 
-  /** Authorises a receipt read (vendors: own transferred invoice only) and returns the file info. */
-  public async receiptFor(id: number, scope: Scope): Promise<{ absolutePath: string; mime: string; name: string }> {
-    const invoice = this.assertReadable(await this.repo.findInvoice(id), scope);
-    if (!invoice.receiptPath) throw new NotFoundError("لا يوجد إيصال");
-    if (scope.vendorId && invoice.status !== INVOICE_STATUS.TRANSFERRED) throw new ForbiddenError("Forbidden");
-    return { absolutePath: resolveReceiptFile(invoice.receiptPath), mime: invoice.receiptMime ?? "application/octet-stream", name: invoice.receiptName ?? "receipt" };
+  /** Authorises a receipt read (vendors: own transferred invoice only) and returns the file info. receiptId omitted/0 = the first receipt. */
+  public async receiptFor(id: number, scope: Scope, receiptId?: number): Promise<{ absolutePath: string; mime: string; name: string }> {
+    const invoice = this.assertReceiptReadable(await this.repo.findInvoice(id), scope);
+    const receipts = await this.collectReceipts(invoice);
+    const receipt = receiptId ? receipts.find((row) => Number(row.id) === receiptId) : receipts[0];
+    if (!receipt) throw new NotFoundError("لا يوجد إيصال");
+    return { absolutePath: resolveReceiptFile(receipt.path), mime: receipt.mime || "application/octet-stream", name: receipt.name || "receipt" };
   }
 }

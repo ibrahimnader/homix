@@ -3,6 +3,10 @@ export const INVOICE_STATUS = {
   FROZEN: "frozen",
   REVIEWED: "reviewed",
   TRANSFERRED: "transferred",
+  /** a source invoice merged into a consolidated invoice (its lines/adjustments live on the consolidated one) */
+  CONSOLIDATED: "consolidated",
+  /** a consolidated invoice that was undone (kept for the audit trail only) */
+  CANCELLED: "cancelled",
 } as const;
 export type InvoiceStatus = (typeof INVOICE_STATUS)[keyof typeof INVOICE_STATUS];
 export const INVOICE_STATUSES = Object.values(INVOICE_STATUS) as [InvoiceStatus, ...InvoiceStatus[]];
@@ -12,7 +16,18 @@ export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   frozen: "مجمدة",
   reviewed: "تمت المراجعة",
   transferred: "تم التحويل",
+  consolidated: "مدمجة في فاتورة شاملة",
+  cancelled: "ملغاة",
 };
+
+export const INVOICE_KIND = { STANDARD: "standard", CONSOLIDATED: "consolidated" } as const;
+export type InvoiceKind = (typeof INVOICE_KIND)[keyof typeof INVOICE_KIND];
+
+/** Statuses that never show up in the normal archive lists / errors check (they only live inside a consolidated invoice or the audit log). */
+export const HIDDEN_STATUSES: InvoiceStatus[] = ["consolidated", "cancelled"];
+/** Only these invoices can be merged into a consolidated invoice. */
+export const MERGEABLE_STATUSES: InvoiceStatus[] = ["draft", "reviewed"];
+export const CONSOLIDATED_CODE_SUFFIX = "-ALL";
 
 /**
  * Status label that follows the direction of the net: a transferred invoice with net > 0 was paid to the vendor,
@@ -38,6 +53,8 @@ export const ALLOWED_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
   frozen: ["reviewed"],
   reviewed: ["draft", "frozen", "transferred"],
   transferred: ["reviewed"],
+  consolidated: [],
+  cancelled: [],
 };
 
 export const LINE_STATE = {
@@ -64,4 +81,7 @@ export const LINE_ACTION_RULES: Record<LineAction, { from: LineState[]; to: Line
 export const OVERDUE_DAYS = 3;
 
 export const RECEIPT_FOLDER = "financial-receipts";
+/** Transfer receipts per invoice, and files accepted by one upload request. */
+export const MAX_RECEIPTS_PER_INVOICE = 20;
+export const MAX_RECEIPTS_PER_UPLOAD = 10;
 export const BILLING_DAYS = [13, 28] as const;

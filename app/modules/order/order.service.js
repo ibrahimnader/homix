@@ -41,6 +41,9 @@ const {
   splitImportedOrderByUnit,
 } = require("../../../src/modules/orders/order-discounts");
 const {
+  resolveExportGovernorateLabel,
+} = require("../../../src/modules/orders/order-export-governorate");
+const {
   buildAddressText,
   resolveDeliveryBy,
   resolveOrderGovernorate,
@@ -1245,6 +1248,7 @@ class OrderService {
       /* أُضيف بعد الأعمدة الثابتة عمداً — ترتيب ما قبله محسوم بمواصفة العمل. */
       { header: "حالة التصنيع", key: "manufactureStatus" },
       { header: "حالة التأكيد", key: "confirmationStatus" },
+      { header: "المحافظة", key: "governorate" },
     ].map((column) => ({
       ...column,
       style: { alignment: { horizontal: "right" } },
@@ -1294,7 +1298,7 @@ class OrderService {
             model: Customer,
             as: "customer",
             required: false,
-            attributes: ["id", "firstName", "lastName"],
+            attributes: ["id", "firstName", "lastName", "address"],
           },
           {
             model: User,
@@ -1351,6 +1355,7 @@ class OrderService {
             daysCounter: daysCounter ?? "",
             deliveryBy: DELIVERY_BY_ARABIC[order.deliveryBy] || "",
             discount,
+            governorate: resolveExportGovernorateLabel(order.governorate, order.customer?.address),
             itemType: line.product.type?.name || "",
             lateStatus: DELIVERY_STATUS_ARABIC[lateStatus] || "",
             manufactureStatus: MANUFACTURE_STATUS_ARABIC[order.manufactureStatus] || "",

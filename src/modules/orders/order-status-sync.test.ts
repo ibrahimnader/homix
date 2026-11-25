@@ -421,6 +421,14 @@ describe("shouldStampPoDate", () => {
     expect(stamp({ status: 1, manufactureStatus: 1, PoDate: null }, { status: 2 })).toBe(true);
     expect(stamp({ status: 3, manufactureStatus: null, PoDate: "2026-01-01" }, { status: 2 })).toBe(true);
   });
+  it("keeps the manufacture date when the order only returns to manufacturing because its shipment went back to pending", () => {
+    expect(stamp({ status: 8, manufactureStatus: 7, shipmentStatus: 2, PoDate: "2026-01-01" }, { shipmentStatus: 1 })).toBe(false);
+    expect(stamp({ status: 5, manufactureStatus: 6, shipmentStatus: 4, PoDate: "2026-01-01" }, { shipmentStatus: 1 })).toBe(false);
+  });
+  it("still fills an EMPTY manufacture date on that return, and an explicit move into manufacturing still stamps", () => {
+    expect(stamp({ status: 8, manufactureStatus: 7, shipmentStatus: 2, PoDate: null }, { shipmentStatus: 1 })).toBe(true);
+    expect(stamp({ status: 8, manufactureStatus: 7, shipmentStatus: 2, PoDate: "2026-01-01" }, { shipmentStatus: 1, status: 2 })).toBe(true);
+  });
   it("stamps when the manufacture stage moves into 2", () => {
     expect(stamp({ status: 3, manufactureStatus: 1, PoDate: null }, { manufactureStatus: 2 })).toBe(true);
   });

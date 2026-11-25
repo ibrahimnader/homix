@@ -409,7 +409,8 @@ export const buildAutoSyncLogRows = (
  *  - the stored row was NOT already in manufacturing through either field (so a vendor setting stage 2 on an order that is
  *    already status 2, an unrelated edit, or the derived second field of the same transition never re-stamps), OR the stored
  *    PoDate is empty (backfills the gap when an order enters through a field after being in manufacturing without a date).
- * Re-entering after leaving the state stamps again (same as the existing order-status rule). Manual PoDate writes stay rejected.
+ * Re-entering after leaving the state stamps again (same as the existing order-status rule), EXCEPT when the order only came
+ * back because its shipment was returned to «معلقة» (the existing date is kept). Manual PoDate writes stay rejected.
  */
 export const isInManufacturing = (row: Record<string, unknown> | null | undefined): boolean =>
   toStatusNumber(row?.status) === O.IN_PROGRESS || toStatusNumber(row?.manufactureStatus) === M.IN_PRODUCTION;
@@ -428,5 +429,10 @@ export const shouldStampPoDate = (
   const movedIn = toStatusNumber(after.status) === O.IN_PROGRESS && toStatusNumber(before?.status) !== O.IN_PROGRESS
     || toStatusNumber(after.manufactureStatus) === M.IN_PRODUCTION && toStatusNumber(before?.manufactureStatus) !== M.IN_PRODUCTION;
   if (!movedIn) return false;
+  /* An order sent BACK to manufacturing only because its shipment was returned to «معلقة» keeps its original manufacture
+     date: nothing was explicitly moved into manufacturing by the user, the sync derived it (owner decision). */
+  const explicitlyEnteredManufacturing = toStatusNumber(payload?.status) === O.IN_PROGRESS
+    || toStatusNumber(payload?.manufactureStatus) === M.IN_PRODUCTION;
+  if (toStatusNumber(payload?.shipmentStatus) === S.PENDING && !explicitlyEnteredManufacturing && before?.PoDate) return false;
   return !isInManufacturing(before) || !before?.PoDate;
 };

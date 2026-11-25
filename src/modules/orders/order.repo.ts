@@ -1119,9 +1119,11 @@ export class OrderRepository {
       const paymentStatus = toNumber(plainOrder.paymentStatus) || null;
       const orderId = toNumber(plainOrder.id);
       const productId = toNumber(toPlain(firstLine.product).id) || null;
-      const isWarehouseDelivery =
-        toNumber(plainOrder.deliveryBy) === DELIVERY_BY.HOMIX
-        && toNumber(plainOrder.shipmentStatus) === SHIPMENTS_STATUS.DELIVERED;
+      /* Every order in this report is already delivered (order status), so the two delivery tabs partition it by
+         who delivered: Homix (warehouse) or not (vendor). The shipment status is NOT part of the rule — 137 of the
+         414 orders delivered in November still had a stale shipment status (pending/blank), which dropped them
+         from the warehouse tab while the comprehensive tab counted them (29 vs 30 for the same vendor). */
+      const isWarehouseDelivery = toNumber(plainOrder.deliveryBy) === DELIVERY_BY.HOMIX;
       const isVendorDelivery = toNumber(plainOrder.deliveryBy) !== DELIVERY_BY.HOMIX;
       const vendorSettlement = isVendorDelivery
         ? calculateVendorDeliverySettlement({

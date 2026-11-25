@@ -498,7 +498,7 @@ describe("orderRouter", () => {
     }));
   });
 
-  it("settles every Homix-delivered order on cost: delivered shipment, not-yet-delivered shipment and zero cost", async () => {
+  it("settles every Homix-delivered order on cost and lists all of them in the warehouse tab (shipment status is irrelevant)", async () => {
     const lines = (cost: string) => [{
       cost, quantity: 1, sku: "RKA-001",
       product: { id: 812, vendor: { id: 3, name: "ركنة للأثاث", shippingCost: 200 } },
@@ -514,16 +514,18 @@ describe("orderRouter", () => {
     expect(response.status).toBe(200);
     const byId = Object.fromEntries(response.body.data.fullInvoice.items[0].orders.map((order: { id: number }) => [order.id, order]));
     expect(byId[21]).toMatchObject({ companyDue: 0, vendorDue: 1200, fines: 100, warehouseCost: 1200 });
-    expect(byId[22]).toMatchObject({ companyDue: 0, vendorDue: 1000, shipmentId: null });
+    expect(byId[22]).toMatchObject({ companyDue: 0, vendorDue: 1000, shipmentId: 22 });
     expect(byId[23]).toMatchObject({ companyDue: 0, vendorDue: 0, warehouseCost: 0 });
-    // the warehouse tab section uses the very same numbers, so its "net required" equals the invoice vendor due
+    // warehouse + vendor tabs partition the comprehensive one by who delivered: a Homix delivery whose shipment status
+    // is stale (order 22: shipment not delivered) still belongs to the warehouse tab, so both tabs always add up
     const warehouseOrders = response.body.data.warehouseDeliveries.items[0].orders;
-    expect(warehouseOrders.map((order: { id: number }) => order.id)).toEqual([21, 23]);
+    expect(warehouseOrders.map((order: { id: number }) => order.id)).toEqual([21, 22, 23]);
+    expect(response.body.data.warehouseDeliveries.summary.ordersCount).toBe(response.body.data.fullInvoice.summary.ordersCount);
     expect(warehouseOrders[0]).toMatchObject({ companyDue: 0, vendorDue: 1200 });
     expect(response.body.data.summary.vendorDue).toBe(2200);
     // all-Homix-delivery vendor: net = sum of cost - fines (no per-line floor)
     expect(response.body.data.summary.netAmount).toBe(2050);
-    expect(response.body.data.warehouseDeliveries.summary.netAmount).toBe(1200 - 100 - 50);
+    expect(response.body.data.warehouseDeliveries.summary.netAmount).toBe(1200 - 100 + 1000 - 50);
     // company due of Homix-delivered orders is the margin; nothing is a vendor debt here
     expect(Object.values(byId).map((order) => (order as { companyDueKind: string }).companyDueKind)).toEqual(["margin", "margin", "margin"]);
     expect(response.body.data.summary).toMatchObject({ companyDue: 0, homixMargin: 2799, vendorOwes: 0 });

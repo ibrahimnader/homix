@@ -1,4 +1,4 @@
-import { isExcludedFromGroupedShipment, summarizeGroupedShipment, toDateRangeBoundary } from "./shipment.helpers";
+import { getShipmentStatusLabel, isExcludedFromGroupedShipment, normalizeShipmentStatus, shipmentStatusFilterMatchesNull, summarizeGroupedShipment, toDateRangeBoundary } from "./shipment.helpers";
 
 describe("shipment date filter boundaries", () => {
   it.each(["2026-09-17", "2026-09-16T21:00:00.000Z", "2026-09-17T12:30:00+03:00"])(
@@ -61,5 +61,30 @@ describe("grouped shipment completeness", () => {
 
   it.each([1, 2, 3, 4, 7, 8, 9, 10, 11, 12])("keeps shipment status %i", (shipmentStatus) => {
     expect(isExcludedFromGroupedShipment({ status: 1, shipmentStatus })).toBe(false);
+  });
+});
+
+describe("shipment status NULL handling", () => {
+  it.each([null, undefined, 0, "", 99, "abc"])("treats %s as PENDING", (value) => {
+    expect(normalizeShipmentStatus(value)).toBe(1);
+    expect(getShipmentStatusLabel(value)).toBe("معلقة");
+  });
+
+  it.each([[2, "في المخزن"], ["4", "تم التسليم"], [21, "مرفوض بعد التصنيع (غير مناسب للعميل)"]])("keeps real status %s", (value, label) => {
+    expect(normalizeShipmentStatus(value)).toBe(Number(value));
+    expect(getShipmentStatusLabel(value)).toBe(label);
+  });
+
+  it("filter by PENDING also matches NULL rows, other filters do not", () => {
+    expect(shipmentStatusFilterMatchesNull([1])).toBe(true);
+    expect(shipmentStatusFilterMatchesNull([2, 1, 4])).toBe(true);
+    expect(shipmentStatusFilterMatchesNull([2, 4])).toBe(false);
+  });
+
+  it("KPI grouping folds NULL rows into PENDING", () => {
+    const rows = [{ shipmentStatus: null, rowCount: 5 }, { shipmentStatus: 1, rowCount: 2 }, { shipmentStatus: 4, rowCount: 1 }];
+    const byStatus: Record<number, number> = {};
+    for (const r of rows) byStatus[normalizeShipmentStatus(r.shipmentStatus)] = (byStatus[normalizeShipmentStatus(r.shipmentStatus)] ?? 0) + r.rowCount;
+    expect(byStatus).toEqual({ 1: 7, 4: 1 });
   });
 });

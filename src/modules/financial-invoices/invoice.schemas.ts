@@ -25,11 +25,14 @@ export const invoiceAdjustmentParams = z.object({ adjustmentId: id, id });
 export const invoiceListQuery = z.object({
   ...paging,
   billingDay: z.coerce.number().int().refine((value) => (BILLING_DAYS as readonly number[]).includes(value), "billingDay must be 13 or 28").optional(),
-  dueParty: z.enum(["vendor", "homix"]).optional(),
+  /** both = no direction filter (the default) */
+  dueParty: z.enum(["vendor", "homix", "both"]).transform((value) => (value === "both" ? undefined : value)).optional(),
   invoiceCode: text.optional(),
   invoiceFrom: day.optional(),
   invoiceTo: day.optional(),
   kind: z.enum(["standard", "consolidated"]).optional(),
+  /** Cairo calendar month of the invoice's cycle end (periodEnd), YYYY-MM */
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "الشهر يجب أن يكون بصيغة YYYY-MM").optional(),
   overdue: flag.optional(),
   receipt: z.enum(["uploaded", "missing"]).optional(),
   search: z.string().trim().min(1).max(100).optional(),

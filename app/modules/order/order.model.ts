@@ -324,6 +324,13 @@ const Order = sequelize.define(
             options.fields.push("shippedFromInventory");
           }
         }
+        // أي طلب جديد (تسليم هوميكس أو بائع) يبدأ بحالة شحنة "معلقة" بدل ما تفضل فاضية.
+        if (order.isNewRecord && order.getDataValue("shipmentStatus") == null) {
+          order.setDataValue("shipmentStatus", SHIPMENTS_STATUS.PENDING);
+          if (Array.isArray(options?.fields) && !options.fields.includes("shipmentStatus")) {
+            options.fields.push("shipmentStatus");
+          }
+        }
         // توصيل بواسطة هوميكس بدون حالة شحنة سابقة => تبدأ الحالة "معلقة" بدل ما تفضل فاضية.
         if (deliveryBy === DELIVERY_BY.HOMIX && order.getDataValue("shipmentStatus") == null) {
           order.setDataValue("shipmentStatus", SHIPMENTS_STATUS.PENDING);

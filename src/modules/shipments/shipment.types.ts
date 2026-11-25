@@ -179,7 +179,7 @@ export type ShipmentListItem = {
   shippingCompany: number | null;
   shippingCompanyName: string;
   shipmentNumber: string;
-  shipmentStatus: number | null;
+  shipmentStatus: number;
   shipmentStatusLabel: string;
   shipmentType: string;
   shipmentTypeLabel: string;

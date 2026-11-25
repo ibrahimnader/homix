@@ -27,6 +27,7 @@ const spies = {
   reviewLive: jest.spyOn(invoiceService, "reviewLive").mockResolvedValue({ alreadyReviewed: false } as never),
   reviewLiveAll: jest.spyOn(invoiceService, "reviewLiveAll").mockResolvedValue({ results: [], succeeded: 0 } as never),
   vendorOptions: jest.spyOn(invoiceService, "vendorOptions").mockResolvedValue([{ id: 1, name: "ركة" }] as never),
+  months: jest.spyOn(invoiceService, "months").mockResolvedValue([{ count: 2, month: "2026-10" }] as never),
   list: jest.spyOn(invoiceService, "list").mockResolvedValue({ items: [] } as never),
   refreshDraft: jest.spyOn(invoiceService, "refreshDraft").mockResolvedValue({ refreshed: 0 } as never),
   setOverrides: jest.spyOn(invoiceService, "setOverrides").mockResolvedValue({} as never),
@@ -256,4 +257,26 @@ test("vendor bank scope: only finance_settle staff get canSettle; viewers do not
   expect(spies.detail).toHaveBeenLastCalledWith(12, { canSettle: false });
   await request(vendor).get("/financial-invoices/12");
   expect(spies.detail).toHaveBeenLastCalledWith(12, { vendorId: 5 });
+});
+
+describe("archive filters (query validation)", () => {
+  test("month, search and the direction reach the service; dueParty=both means no filter", async () => {
+    await request(finance).get("/financial-invoices?month=2026-10&search=ركة%20A&dueParty=homix&billingDay=13&status=reviewed,frozen");
+    expect(spies.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ billingDay: 13, dueParty: "homix", month: "2026-10", search: "ركة A", statuses: ["reviewed", "frozen"] }), { canSettle: true });
+    await request(finance).get("/financial-invoices?dueParty=both");
+    expect((spies.list.mock.calls.at(-1)![0] as { dueParty?: string }).dueParty).toBeUndefined();
+  });
+
+  test.each(["month=2026-13", "month=2026-1", "month=abc", "dueParty=nobody", "billingDay=14", "search=%20"])("rejects %s", async (qs) => {
+    expect((await request(finance).get(`/financial-invoices?${qs}`)).status).toBe(400);
+  });
+
+  test("months endpoint is scoped by the token and is not swallowed by /:id", async () => {
+    expect((await request(finance).get("/financial-invoices/months")).body.data).toEqual([{ count: 2, month: "2026-10" }]);
+    expect(spies.months).toHaveBeenLastCalledWith({ canSettle: true });
+    await request(vendor).get("/financial-invoices/months");
+    expect(spies.months).toHaveBeenLastCalledWith({ vendorId: 5 });
+    expect((await request(appFor({ id: 1, permissions: {}, userType: "3" })).get("/financial-invoices/months")).status).toBe(403);
+  });
 });

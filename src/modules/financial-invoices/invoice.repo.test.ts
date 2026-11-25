@@ -30,6 +30,62 @@ describe("InvoiceRepository filters", () => {
     expect(replacements.invoiceCode).toBe("%A\\%%");
   });
 
+  test("archive list: every filter becomes a bound condition and combines with AND", async () => {
+    query.mockResolvedValue([]);
+    await new InvoiceRepository().listInvoices({
+      billingDay: 13, dueParty: "homix", kind: "standard", monthFrom: "2026-09-30T21:00:00.000Z", monthTo: "2026-10-31T21:59:59.999Z",
+      overdueDays: 3, page: 2, search: "Ahmed_%", size: 10, statuses: ["reviewed", "frozen"], vendorId: 4,
+    });
+    const [sql, { replacements }] = lastCall();
+    expect(sql).toContain("i.status IN (:statuses)");
+    expect(sql).toContain('i."billingDay" = :billingDay');
+    expect(sql).toContain('i."periodEnd" >= CAST(:monthFrom AS timestamptz)');
+    expect(sql).toContain('i."periodEnd" <= CAST(:monthTo AS timestamptz)');
+    expect(sql).toContain('i."netAmount" < 0');
+    expect(sql).toContain("(v.name ILIKE :search OR i.code ILIKE :search)");
+    expect(sql).toContain('i."vendorId" = :vendorId');
+    expect(replacements).toMatchObject({ billingDay: 13, monthFrom: "2026-09-30T21:00:00.000Z", search: "%Ahmed\\_\\%%", statuses: ["reviewed", "frozen"], vendorId: 4 });
+  });
+
+  test("direction: vendor = net > 0, both/undefined adds no net condition", async () => {
+    query.mockResolvedValue([]);
+    await new InvoiceRepository().listInvoices({ dueParty: "vendor", overdueDays: 3, page: 1, size: 10 });
+    expect(lastCall()[0]).toContain('i."netAmount" > 0');
+    query.mockClear();
+    await new InvoiceRepository().listInvoices({ overdueDays: 3, page: 1, size: 10 });
+    expect(lastCall()[0]).not.toContain("netAmount");
+  });
+
+  test("without statuses the merged/cancelled sources stay hidden", async () => {
+    query.mockResolvedValue([]);
+    await new InvoiceRepository().listInvoices({ overdueDays: 3, page: 1, size: 10 });
+    const [sql, { replacements }] = lastCall();
+    expect(sql).toContain("i.status NOT IN (:hiddenStatuses)");
+    expect(replacements.hiddenStatuses).toEqual(["consolidated", "cancelled"]);
+  });
+
+  test("filtered counts ignore the kind selection but keep every other filter", async () => {
+    query.mockClear();
+    query.mockResolvedValue([{ status: "reviewed", total: "3" }]);
+    const counts = await new InvoiceRepository().countFilteredByStatus({ kind: "consolidated", overdueDays: 3, page: 1, search: "x", size: 10, statuses: ["reviewed"] });
+    const [sql, { replacements }] = lastCall();
+    expect(sql).not.toContain("i.kind");
+    expect(sql).toContain("ILIKE :search");
+    expect(replacements.kind).toBeUndefined();
+    expect(counts).toEqual({ reviewed: 3 });
+  });
+
+  test("months are Cairo months of periodEnd, scoped by status and vendor", async () => {
+    query.mockClear();
+    query.mockResolvedValue([{ month: "2026-10", total: "4" }]);
+    const months = await new InvoiceRepository().listInvoiceMonths(5, ["reviewed", "transferred"]);
+    const [sql, { replacements }] = lastCall();
+    expect(sql).toContain("AT TIME ZONE 'Africa/Cairo'");
+    expect(sql).toContain("i.status IN (:statuses)");
+    expect(replacements).toEqual({ statuses: ["reviewed", "transferred"], vendorId: 5 });
+    expect(months).toEqual([{ count: 4, month: "2026-10" }]);
+  });
+
   test("vendor options exclude deleted/unnamed vendors and sort by name", async () => {
     query.mockResolvedValue([]);
     await new InvoiceRepository().listVendorOptions();

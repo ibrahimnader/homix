@@ -5,10 +5,13 @@ import {
   SHIPMENT_FINAL_STATUSES,
   SHIPMENT_PRIORITY,
   SHIPMENT_PRIORITY_LABELS,
+  SHIPMENT_STATUS,
   SHIPMENT_STATUS_LABELS,
   SHIPMENT_TYPE_LABELS,
 } from "./shipment.constants";
 import { CANCELED_LIKE_ORDER_STATUSES, CLOSED_SHIPMENT_STATUSES, SHIPMENTS_STATUS } from "../../../config/constants";
+
+const SHIPMENT_STATUS_PENDING: number = SHIPMENT_STATUS.PENDING;
 
 type PlainRecord = Record<string, unknown>;
 type Plainable = PlainRecord | { toJSON: () => PlainRecord };
@@ -96,9 +99,22 @@ export const toDateRangeBoundary = (value: unknown, boundary: "start" | "end"): 
   return (boundary === "start" ? date.startOf("day") : date.endOf("day")).toDate();
 };
 
-export const getShipmentStatusLabel = (value: unknown): string => {
-  return SHIPMENT_STATUS_LABELS[toNumber(value)] ?? "";
+/**
+ * Orders created before the shipment flow (and every vendor-delivered one) carry a NULL
+ * `shipmentStatus`; the receiving flow already reads it as PENDING (COALESCE(shipmentStatus, 1)).
+ * NULL / 0 / an id with no label all resolve to PENDING so the list, filters and KPIs agree.
+ */
+export const normalizeShipmentStatus = (value: unknown): number => {
+  const id = toNumber(value);
+  return SHIPMENT_STATUS_LABELS[id] !== undefined ? id : SHIPMENT_STATUS_PENDING;
 };
+
+export const getShipmentStatusLabel = (value: unknown): string => {
+  return SHIPMENT_STATUS_LABELS[normalizeShipmentStatus(value)] ?? "";
+};
+
+/** Does a CSV status filter (already split into numbers) include PENDING, hence NULL/0/unknown rows? */
+export const shipmentStatusFilterMatchesNull = (ids: number[]): boolean => ids.includes(SHIPMENT_STATUS_PENDING);
 
 export const getShipmentTypeLabel = (value: unknown): string => {
   const normalizedValue = toText(value).trim();

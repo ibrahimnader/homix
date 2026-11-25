@@ -534,7 +534,8 @@ class OrderService {
           shippingCompany: order.shippingCompany || null,
           deliveryDate: order.deliveryDate || null,
           governorate,
-          shipmentStatus: order.shipmentStatus || null,
+          // a new order/shipment always starts «معلقة»; later changes go through the status sync
+          shipmentStatus: order.shipmentStatus || SHIPMENTS_STATUS.PENDING,
           scheduleStatus: order.scheduleStatus || null,
           shipmentType: order.shipmentType || "separate",
           deliveryBy,

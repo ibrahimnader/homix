@@ -14,6 +14,9 @@ export type InvoiceListFilters = {
   invoiceFrom?: string;
   invoiceTo?: string;
   kind?: "standard" | "consolidated";
+  /** inclusive periodEnd bounds of one Cairo month (ISO instants) */
+  monthFrom?: string;
+  monthTo?: string;
   overdueOnly?: boolean;
   overdueDays: number;
   receipt?: "uploaded" | "missing";
@@ -291,6 +294,8 @@ export class InvoiceRepository {
     if (filters.billingDay) { conditions.push('i."billingDay" = :billingDay'); replacements.billingDay = filters.billingDay; }
     if (filters.invoiceFrom) { conditions.push('i."periodEnd" >= CAST(:invoiceFrom AS timestamptz)'); replacements.invoiceFrom = filters.invoiceFrom; }
     if (filters.invoiceTo) { conditions.push('i."periodEnd" <= CAST(:invoiceTo AS timestamptz)'); replacements.invoiceTo = filters.invoiceTo; }
+    if (filters.monthFrom) { conditions.push('i."periodEnd" >= CAST(:monthFrom AS timestamptz)'); replacements.monthFrom = filters.monthFrom; }
+    if (filters.monthTo) { conditions.push('i."periodEnd" <= CAST(:monthTo AS timestamptz)'); replacements.monthTo = filters.monthTo; }
     if (filters.transferredFrom) { conditions.push('i."transferredAt" >= CAST(:transferredFrom AS timestamptz)'); replacements.transferredFrom = filters.transferredFrom; }
     if (filters.transferredTo) { conditions.push('i."transferredAt" <= CAST(:transferredTo AS timestamptz)'); replacements.transferredTo = filters.transferredTo; }
     if (filters.dueParty === "vendor") conditions.push('i."netAmount" > 0');
@@ -321,6 +326,29 @@ export class InvoiceRepository {
       { replacements, type: QueryTypes.SELECT },
     );
     return { rows, total: Number(counts[0]?.total ?? 0) };
+  }
+
+  /** Per-status counts of the filtered set, ignoring the status/kind selection (the chips' own counts). */
+  public async countFilteredByStatus(filters: InvoiceListFilters): Promise<Record<string, number>> {
+    const { replacements, where } = this.buildInvoiceWhere({ ...filters, kind: undefined });
+    const rows = await sequelize.query<{ status: string; total: string }>(
+      `SELECT i.status, COUNT(*) AS total FROM financial_invoices i JOIN vendors v ON v.id = i."vendorId"
+       WHERE ${where} GROUP BY i.status`,
+      { replacements, type: QueryTypes.SELECT },
+    );
+    return Object.fromEntries(rows.map((row) => [row.status, Number(row.total)]));
+  }
+
+  /** Cairo months (YYYY-MM of periodEnd) that have invoices in the given statuses, newest first. */
+  public async listInvoiceMonths(vendorId: number | undefined, statuses: InvoiceStatus[]): Promise<Array<{ count: number; month: string }>> {
+    const rows = await sequelize.query<{ month: string; total: string }>(
+      `SELECT to_char(i."periodEnd" AT TIME ZONE 'Africa/Cairo', 'YYYY-MM') AS month, COUNT(*) AS total
+       FROM financial_invoices i
+       WHERE i.status IN (:statuses) AND (CAST(:vendorId AS integer) IS NULL OR i."vendorId" = :vendorId)
+       GROUP BY 1 ORDER BY 1 DESC`,
+      { replacements: { statuses, vendorId: vendorId ?? null }, type: QueryTypes.SELECT },
+    );
+    return rows.map((row) => ({ count: Number(row.total), month: row.month }));
   }
 
   /** Invoices whose cycle ends inside [periodEndFrom, periodEndTo] (one cycle), optionally one vendor / some statuses. */

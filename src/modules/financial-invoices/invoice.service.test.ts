@@ -241,9 +241,32 @@ describe("read scoping", () => {
   test("list forces the vendor's own id and visible statuses whatever the query says", async () => {
     const { repo } = makeRepo();
     const listInvoices = jest.fn(async () => ({ rows: [], total: 0 }));
-    const svc = service({ ...repo, countByStatus: jest.fn(async () => ({})), listInvoices });
+    const svc = service({ ...repo, countByStatus: jest.fn(async () => ({})), countFilteredByStatus: jest.fn(async () => ({})), listInvoices });
     await svc.list({ page: 1, size: 10, statuses: ["draft", "frozen"], vendorId: 99 }, { vendorId: 5 });
     expect(listInvoices).toHaveBeenCalledWith(expect.objectContaining({ statuses: ["reviewed", "transferred"], vendorId: 5 }));
+  });
+
+  test("list: month becomes Cairo-month bounds; chip counts use the archive statuses and never widen a vendor", async () => {
+    const { repo } = makeRepo();
+    const listInvoices = jest.fn(async () => ({ rows: [], total: 0 }));
+    const countFilteredByStatus = jest.fn(async () => ({ reviewed: 2 }));
+    const svc = service({ ...repo, countByStatus: jest.fn(async () => ({})), countFilteredByStatus, listInvoices });
+    const staff = await svc.list({ month: "2026-10", page: 1, search: "x", size: 10 }, { canSettle: true });
+    expect(listInvoices).toHaveBeenLastCalledWith(expect.objectContaining({ monthFrom: "2026-09-30T21:00:00.000Z", monthTo: "2026-10-31T21:59:59.999Z", search: "x" }));
+    expect(countFilteredByStatus).toHaveBeenLastCalledWith(expect.objectContaining({ statuses: ["reviewed", "frozen", "transferred"] }));
+    expect(staff.filteredCounts).toEqual({ reviewed: 2 });
+    await svc.list({ page: 1, size: 10, vendorId: 99 }, { vendorId: 5 });
+    expect(countFilteredByStatus).toHaveBeenLastCalledWith(expect.objectContaining({ statuses: ["reviewed", "transferred"], vendorId: 5 }));
+  });
+
+  test("months: staff see the archive statuses, a vendor only his own reviewed/transferred", async () => {
+    const { repo } = makeRepo();
+    const listInvoiceMonths = jest.fn(async () => [{ count: 1, month: "2026-10" }]);
+    const svc = service({ ...repo, listInvoiceMonths });
+    await svc.months({ canSettle: true });
+    expect(listInvoiceMonths).toHaveBeenLastCalledWith(undefined, ["reviewed", "frozen", "transferred"]);
+    await svc.months({ vendorId: 5 });
+    expect(listInvoiceMonths).toHaveBeenLastCalledWith(5, ["reviewed", "transferred"]);
   });
 
   test("receipts: vendors only get their own transferred invoice's file", async () => {

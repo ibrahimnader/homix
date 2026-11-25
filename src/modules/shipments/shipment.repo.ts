@@ -53,6 +53,8 @@ import {
   resolveShipmentDeliveryStatus,
   resolveShipmentPriority,
   getShipmentStatusLabel,
+  normalizeShipmentStatus,
+  shipmentStatusFilterMatchesNull,
   getShipmentTypeLabel,
   getVariantBySku,
   isExcludedFromGroupedShipment,
@@ -273,9 +275,12 @@ const buildShipmentWhereClause = (
   }
 
   if (filters.shipmentStatus) {
-    andConditions.push(where(col("Order.shipmentStatus"), {
-      [Op.in]: filters.shipmentStatus.split(",").map(Number),
-    }));
+    const statusIds = filters.shipmentStatus.split(",").map(Number);
+    const statusCondition = where(col("Order.shipmentStatus"), { [Op.in]: statusIds });
+    /* NULL (and 0) display as PENDING, so filtering by PENDING must match them too. */
+    andConditions.push(shipmentStatusFilterMatchesNull(statusIds)
+      ? { [Op.or]: [statusCondition, where(col("Order.shipmentStatus"), { [Op.is]: null }), where(col("Order.shipmentStatus"), { [Op.eq]: 0 })] }
+      : statusCondition);
   }
 
   if (filters.scheduleStatus) {
@@ -573,7 +578,7 @@ const mapShipmentListItem = (orderValue: unknown): ShipmentListItem => {
     shippingCompany: toNullableNumber(shippingCompanyRecord.id),
     shippingCompanyName,
     shipmentNumber: buildShipmentNumber(order),
-    shipmentStatus: toNullableNumber(order.shipmentStatus),
+    shipmentStatus: normalizeShipmentStatus(order.shipmentStatus),
     shipmentStatusLabel: getShipmentStatusLabel(order.shipmentStatus),
     shipmentType: toText(order.shipmentType),
     shipmentTypeLabel: getShipmentTypeLabel(order.shipmentType),
@@ -851,7 +856,7 @@ export class ShipmentRepository {
 
     for (const row of statusCountRows as Array<Record<string, unknown>>) {
       const rowCount = toNumber(row.rowCount);
-      const shipmentStatus = toNumber(row.shipmentStatus);
+      const shipmentStatus = normalizeShipmentStatus(row.shipmentStatus);
       shipmentsCount += rowCount;
 
       if (shipmentStatus === SHIPMENT_STATUS.RETURNED_TO_VENDOR) returnsToVendorCount += rowCount;
@@ -972,7 +977,7 @@ export class ShipmentRepository {
 
       for (const row of rows as Array<Record<string, unknown>>) {
         const rowCount = toNumber(row.rowCount);
-        const shipmentStatus = toNumber(row.shipmentStatus);
+        const shipmentStatus = normalizeShipmentStatus(row.shipmentStatus);
         total += rowCount;
 
         if (shipmentStatus === SHIPMENT_STATUS.DELIVERED) {
@@ -1049,7 +1054,7 @@ export class ShipmentRepository {
       productName: toText(row.title),
       productSku: toText(row.sku),
       sellerName: toText(row.sellerName),
-      shipmentStatusLabel: SHIPMENT_STATUS_LABELS[toNumber(row.shipmentStatus)] ?? "",
+      shipmentStatusLabel: getShipmentStatusLabel(row.shipmentStatus),
       inWarehouse: hasReachedWarehouse(row),
       excluded: isExcludedFromGroupedShipment(row),
       current: toNumber(row.id) === orderId,

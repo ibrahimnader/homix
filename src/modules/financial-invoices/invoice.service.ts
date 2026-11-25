@@ -6,7 +6,7 @@ import { env } from "../../config/env";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../../shared/errors";
 import type { OrderFinancialReportQuery, OrderFinancialReportResponse } from "../orders/order.types";
 import {
-  CONSOLIDATED_CODE_SUFFIX, INVOICE_KIND, INVOICE_STATUS, INVOICE_STATUS_LABELS, invoiceStatusLabel, LINE_ACTION_RULES, LINE_STATE, MAX_RECEIPTS_PER_INVOICE,
+  ARCHIVE_STATUSES, CONSOLIDATED_CODE_SUFFIX, INVOICE_KIND, INVOICE_STATUS, INVOICE_STATUS_LABELS, invoiceStatusLabel, LINE_ACTION_RULES, LINE_STATE, MAX_RECEIPTS_PER_INVOICE,
   MAX_RECEIPTS_PER_UPLOAD, MERGEABLE_STATUSES, OVERDUE_DAYS, RECEIPT_FOLDER, VENDOR_VISIBLE_STATUSES,
   type InvoiceStatus, type LineAction,
 } from "./invoice.constants";
@@ -234,7 +234,7 @@ export class InvoiceService {
   /* ---------- reads ---------- */
 
   public async list(query: {
-    billingDay?: number; dueParty?: "vendor" | "homix"; invoiceCode?: string; invoiceFrom?: string; invoiceTo?: string; kind?: "standard" | "consolidated"; overdue?: boolean;
+    billingDay?: number; dueParty?: "vendor" | "homix"; invoiceCode?: string; invoiceFrom?: string; invoiceTo?: string; kind?: "standard" | "consolidated"; month?: string; overdue?: boolean;
     page: number; receipt?: "uploaded" | "missing"; search?: string; size: number; statuses?: InvoiceStatus[];
     transferredFrom?: string; transferredTo?: string; vendorId?: number;
   }, scope: Scope) {
@@ -252,6 +252,8 @@ export class InvoiceService {
       invoiceFrom: query.invoiceFrom ? dayStart(query.invoiceFrom) : undefined,
       invoiceTo: query.invoiceTo ? dayEnd(query.invoiceTo) : undefined,
       kind: query.kind,
+      monthFrom: query.month ? moment.tz(`${query.month}-01`, CAIRO).startOf("month").toISOString() : undefined,
+      monthTo: query.month ? moment.tz(`${query.month}-01`, CAIRO).endOf("month").toISOString() : undefined,
       overdueDays: OVERDUE_DAYS,
       overdueOnly: query.overdue,
       page: query.page,
@@ -263,11 +265,20 @@ export class InvoiceService {
       transferredTo: query.transferredTo ? dayEnd(query.transferredTo) : undefined,
       vendorId,
     };
-    const [{ rows, total }, counts] = await Promise.all([
+    // chip counts follow every filter except the status/kind selection; a vendor's scope is enforced here too
+    const countFilters: InvoiceListFilters = { ...filters, statuses: scope.vendorId ? [...VENDOR_VISIBLE_STATUSES] : ARCHIVE_STATUSES };
+    const [{ rows, total }, counts, filteredCounts] = await Promise.all([
       this.repo.listInvoices(filters),
       this.repo.countByStatus(vendorId, scope.vendorId ? VENDOR_VISIBLE_STATUSES : undefined),
+      this.repo.countFilteredByStatus(countFilters),
     ]);
-    return { counts, items: rows.map((row) => this.toInvoiceDto(row)), page: query.page, size: query.size, total };
+    return { counts, filteredCounts, items: rows.map((row) => this.toInvoiceDto(row)), page: query.page, size: query.size, total };
+  }
+
+  /** Months (Cairo) that have archive invoices, for the month filter; vendors only see their own reviewed/transferred ones. */
+  public async months(scope: Scope): Promise<Array<{ count: number; month: string }>> {
+    const statuses: InvoiceStatus[] = scope.vendorId ? [...VENDOR_VISIBLE_STATUSES] : ARCHIVE_STATUSES;
+    return this.repo.listInvoiceMonths(scope.vendorId ? Number(scope.vendorId) : undefined, statuses);
   }
 
   private canReadVendorBank(scope: Scope): boolean {

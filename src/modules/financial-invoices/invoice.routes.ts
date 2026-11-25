@@ -72,15 +72,16 @@ export const invoiceRouter = express.Router();
  *       - { in: query, name: transferredFrom, schema: { type: string, format: date } }
  *       - { in: query, name: transferredTo, schema: { type: string, format: date } }
  *       - { in: query, name: kind, schema: { type: string, enum: [standard, consolidated] }, description: "consolidated = only «فاتورة شاملة» invoices" }
- *       - { in: query, name: dueParty, description: "vendor = net > 0, homix = net < 0 (net 0 matches neither)", schema: { type: string, enum: [vendor, homix] } }
+ *       - { in: query, name: dueParty, description: "vendor = net > 0, homix = net < 0 (net 0 matches neither), both = no direction filter (default)", schema: { type: string, enum: [vendor, homix, both] } }
+ *       - { in: query, name: month, schema: { type: string, example: "2026-10" }, description: "YYYY-MM, Cairo month of the cycle end (periodEnd)" }
  *       - { in: query, name: receipt, schema: { type: string, enum: [uploaded, missing] } }
  *       - { in: query, name: overdue, schema: { type: boolean } }
- *       - { in: query, name: search, schema: { type: string } }
+ *       - { in: query, name: search, schema: { type: string }, description: "partial, case-insensitive vendor name OR invoice code (LIKE wildcards escaped)" }
  *       - { in: query, name: invoiceCode, schema: { type: string }, description: "partial, case-insensitive invoice code" }
  *       - { in: query, name: page, schema: { type: integer } }
  *       - { in: query, name: size, schema: { type: integer } }
  *     responses:
- *       200: { description: "{ status, data: { items, counts, page, size, total } }" }
+ *       200: { description: "{ status, data: { items, counts, filteredCounts, page, size, total } } - counts = all invoices per status, filteredCounts = per status under every filter except status/kind (archive statuses only), total = filtered set size" }
  */
 invoiceRouter.get("/", view, validateRequest({ query: invoiceListQuery }), asyncHandler(async (request, response) => {
   const query = request.query as unknown as ReturnType<typeof invoiceListQuery.parse>;
@@ -100,6 +101,21 @@ invoiceRouter.get("/", view, validateRequest({ query: invoiceListQuery }), async
  */
 invoiceRouter.get("/vendors", staffOnly, view, asyncHandler(async (_request, response) => {
   response.json({ status: true, data: await invoiceService.vendorOptions() });
+}));
+
+/**
+ * @swagger
+ * /financial-invoices/months:
+ *   get:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: Cairo months (YYYY-MM of the cycle end) that have archive invoices, newest first
+ *     description: Vendors only count their own reviewed/transferred invoices.
+ *     responses:
+ *       200: { description: "{ status, data: [{ month, count }] }" }
+ */
+invoiceRouter.get("/months", view, asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await invoiceService.months(scopeOf(request)) });
 }));
 
 /**

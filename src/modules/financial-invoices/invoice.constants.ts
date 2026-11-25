@@ -46,6 +46,8 @@ export const netDirectionLabel = (netAmount: number): string =>
   netAmount > 0 ? "صافي المستحق للبائع" : netAmount < 0 ? "صافي المستحق لهوميكس" : "لا يوجد مستحق";
 
 /** Statuses a vendor user may ever see (never drafts or frozen invoices). */
+/** What the archive tab lists (drafts live in the current-invoices view). */
+export const ARCHIVE_STATUSES: InvoiceStatus[] = [INVOICE_STATUS.REVIEWED, INVOICE_STATUS.FROZEN, INVOICE_STATUS.TRANSFERRED];
 export const VENDOR_VISIBLE_STATUSES: InvoiceStatus[] = [INVOICE_STATUS.REVIEWED, INVOICE_STATUS.TRANSFERRED];
 
 export const ALLOWED_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {

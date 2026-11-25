@@ -65,8 +65,29 @@ describe("deriveStatusPatch: shipment status as source", () => {
     expect(patch.shipmentStatus).toBeUndefined();
   });
 
-  it.each([1, 3, 6, 8, 10, 11, 12])("shipment %i changes nothing (in the order/confirmation columns)", (shipmentStatus) => {
+  it.each([3, 6, 8, 10, 11, 12])("shipment %i changes nothing (in the order/confirmation columns)", (shipmentStatus) => {
     expect(derive({ status: 2, shipmentStatus: 99, confirmationStatus: 2 }, { shipmentStatus })).toEqual({});
+  });
+
+  describe("shipment 1 (pending) sends the order back to manufacturing", () => {
+    it("an order in the warehouse (8) becomes «قيد التصنيع» (2) with manufacture stage 2", () => {
+      const patch = deriveAll({ status: 8, shipmentStatus: 2, confirmationStatus: 2 }, { shipmentStatus: 1 });
+      expect(patch.status).toBe(2);
+      expect(patch.manufactureStatus).toBe(2);
+    });
+
+    it("a delivered order (5) also goes back to 2 (the regression confirmation protects this path)", () => {
+      expect(deriveAll({ status: 5, shipmentStatus: 4, confirmationStatus: 2 }, { shipmentStatus: 1 }).status).toBe(2);
+    });
+
+    it.each([1, 2, 3, 4, 6, 7, 9])("order %i is left alone", (orderStatus) => {
+      const patch = deriveAll({ status: orderStatus, shipmentStatus: 3, confirmationStatus: 2 }, { shipmentStatus: 1 });
+      expect(patch.status).toBeUndefined();
+    });
+
+    it("an explicit order status in the same request wins", () => {
+      expect(deriveAll({ status: 8, shipmentStatus: 2, confirmationStatus: 2 }, { shipmentStatus: 1, status: 3 }).status).toBeUndefined();
+    });
   });
 });
 
@@ -242,7 +263,8 @@ describe("deriveStatusPatch: explicit values, priority, reopening", () => {
 describe("matrix data", () => {
   it("shipment rules mirror the order rules (13..21 <-> 9..17 and the 4/5/2/7/9 pairs)", () => {
     expect(Object.fromEntries(Object.entries(SHIPMENT_STATUS_RULES).map(([k, v]) => [k, v.status?.value]))).toEqual({
-      2: 8, 4: 5, 5: 4, 7: 6, 9: 7, 13: 9, 14: 10, 15: 11, 16: 12, 17: 13, 18: 14, 19: 15, 20: 16, 21: 17,
+      // 1 (pending) is the one-way rule that sends an order back to manufacturing (2); the rest mirror the order rules
+      1: 2, 2: 8, 4: 5, 5: 4, 7: 6, 9: 7, 13: 9, 14: 10, 15: 11, 16: 12, 17: 13, 18: 14, 19: 15, 20: 16, 21: 17,
     });
     expect(Object.keys(ORDER_STATUS_RULES).map(Number).sort((a, b) => a - b)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
   });

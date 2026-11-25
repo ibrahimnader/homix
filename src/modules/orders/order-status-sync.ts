@@ -138,7 +138,8 @@ export const ORDER_STATUS_RULES: Readonly<Record<number, StatusRule>> = (() => {
 })();
 
 /** Matrix 2: shipment status -> order status (+ confirmation / manufacture / schedule counterparts).
- *  Shipment 3, 10, 12 -> manufacture only, 11 -> schedule 1 only; 1, 6, 8 derive nothing. */
+ *  Shipment 3, 10, 12 -> manufacture only, 11 -> schedule 1 only; 6, 8 derive nothing; 1 (pending) puts an order that
+ *  was in the warehouse (8) or delivered (5) back to «قيد التصنيع» (2). */
 export const SHIPMENT_STATUS_RULES: Readonly<Record<number, StatusRule>> = (() => {
   const rules: Record<number, StatusRule> = {};
   for (const [orderStatus, shipmentStatus] of Object.entries(SHIPMENT_STATUS_BY_ORDER_STATUS)) {
@@ -156,6 +157,13 @@ export const SHIPMENT_STATUS_RULES: Readonly<Record<number, StatusRule>> = (() =
   rules[S.OUT_FOR_DELIVERY] = { manufactureStatus: manufactureTarget(M.DELIVERED) };
   rules[S.FAILED_DELIVERY] = { manufactureStatus: manufactureTarget(M.FAILED_TO_DELIVER) };
   rules[S.SCHEDULED] = { scheduleStatus: { value: SC.SCHEDULED } };
+  /* Sending a shipment back to «معلقة» puts the order back in manufacturing: an order that sat in the warehouse (8) — or was
+     marked delivered (5, the regression confirmation guards that one) — becomes «قيد التصنيع» again, with the matching
+     manufacture stage. Orders that never started manufacturing (1, 3) and cancelled/returned ones are left alone. */
+  rules[S.PENDING] = {
+    status: { value: O.IN_PROGRESS, onlyIfCurrentIn: [O.IN_INVENTORY, O.DELIVERED] },
+    manufactureStatus: { value: M.IN_PRODUCTION, onlyIfOtherCurrentIn: { field: "status", values: [O.IN_INVENTORY, O.DELIVERED] } },
+  };
   return rules;
 })();
 

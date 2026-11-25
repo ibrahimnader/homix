@@ -686,6 +686,33 @@ describe("live-row actions (ensure the draft, then act in one transaction)", () 
     await expect(service(clash.repo, getReport).liveAddOrder({ ...live, orderId: 300 }, actor)).rejects.toThrow(/فاتورة أخرى/);
   });
 
+  test("addOrder / liveAddOrder refuse a Homix-delivered order whose shipment is not delivered, with the shipment status in the message", async () => {
+    const { repo } = makeRepo();
+    repo.findOrderForInvoicing.mockResolvedValue({ deliveryBy: 1, effectiveDeliveryDate: "2026-10-01T09:00:00Z", id: 300, shipmentStatus: 1, status: 5 });
+    const getReport = jest.fn(async () => report("2026-11-28T21:59:59.999Z", [reportOrder(300)]));
+    await expect(service(repo, getReport).liveAddOrder({ ...live, orderId: 300 }, actor)).rejects.toThrow(/الطلب لسه ما اتسلّمش — حالة الشحنة «معلقة»/);
+    repo.findOrderForInvoicing.mockResolvedValue({ deliveryBy: 1, effectiveDeliveryDate: "2026-10-01T09:00:00Z", id: 300, shipmentStatus: null, status: 5 });
+    await expect(service(repo, getReport).addOrder(1, 300, actor)).rejects.toThrow(/حالة الشحنة «غير محددة»/);
+    expect(repo.insertLines).not.toHaveBeenCalled();
+  });
+
+  test("a vendor-delivered order with no shipment status is still addable", async () => {
+    const { repo } = makeRepo();
+    repo.findOrderForInvoicing.mockResolvedValue({ deliveryBy: 2, effectiveDeliveryDate: "2026-10-01T09:00:00Z", id: 300, shipmentStatus: null, status: 5 });
+    const getReport = jest.fn(async () => report("2026-11-28T21:59:59.999Z", [reportOrder(300)]));
+    await expect(service(repo, getReport).liveAddOrder({ ...live, orderId: 300 }, actor)).resolves.toMatchObject({ alreadyIncluded: false });
+  });
+
+  test("the draft top-up skips a deferred Homix order whose shipment is not delivered", async () => {
+    const { repo } = makeRepo();
+    repo.listPickableDeferred.mockResolvedValue([lineRow({ id: 40, orderId: 200 })]);
+    repo.findOrderForInvoicing.mockResolvedValue({ deliveryBy: 1, effectiveDeliveryDate: "2026-10-01T09:00:00Z", id: 200, shipmentStatus: 2, status: 5 });
+    const getReport = jest.fn(async (query: { startDate?: string }) =>
+      query.startDate ? report("2026-10-28T21:59:59.999Z", [reportOrder(200, 777)]) : report("2026-10-28T21:59:59.999Z", [reportOrder(100)]));
+    const result = await service(repo, getReport).generate({ billingDay: 28 }, actor);
+    expect(result.invoices[0]!.skippedDeferred).toEqual([200]);
+  });
+
   test("liveAddOrder is idempotent when the draft top-up already counted the order", async () => {
     const { repo, state } = makeRepo();
     state.lines = [lineRow({ orderId: 300 })];

@@ -12,7 +12,7 @@ import {
 } from "./invoice.schemas";
 import { InvoiceService, type Scope } from "./invoice.service";
 import { canSettle } from "./invoice.access";
-import { issuesQuery } from "./invoice.issues.schemas";
+import { issuesQuery, pendingShipmentsQuery } from "./invoice.issues.schemas";
 import { InvoiceIssuesService } from "./invoice.issues.service";
 
 const requirePermission = require("../../../app/middlewares/requirePermission");
@@ -176,6 +176,26 @@ invoiceRouter.get("/lines", view, validateRequest({ query: invoicedLinesQuery })
 const issuesService = new InvoiceIssuesService();
 invoiceRouter.get("/issues", ...settle, validateRequest({ query: issuesQuery }), asyncHandler(async (request, response) => {
   response.json({ status: true, data: await issuesService.find(request.query as never) });
+}));
+
+/**
+ * @swagger
+ * /financial-invoices/issues/pending-shipments:
+ *   get:
+ *     security: [{ bearerAuth: [] }]
+ *     tags: [FinancialInvoices]
+ *     summary: "Informational: Homix-delivered orders (order status delivered) whose shipment status is not delivered - not billed until the shipment status is fixed"
+ *     description: Staff only (finance_settle); vendors get 403. Read-only, capped at 500 rows.
+ *     parameters:
+ *       - { in: query, name: startDate, required: true, schema: { type: string }, description: "ISO date-time (cycle.startDate of the live report) or YYYY-MM-DD (Cairo day)" }
+ *       - { in: query, name: endDate, required: true, schema: { type: string }, description: "ISO date-time or YYYY-MM-DD (Cairo day)" }
+ *       - { in: query, name: vendorId, schema: { type: integer } }
+ *     responses:
+ *       200: { description: "{ status, data: { count, orders: [{ id, code, orderNumber, deliveryDate, shipmentStatus, shipmentStatusLabel, totalPrice, vendorId, vendorName }], truncated } }" }
+ *       403: { description: Vendor users or missing finance_settle }
+ */
+invoiceRouter.get("/issues/pending-shipments", ...settle, validateRequest({ query: pendingShipmentsQuery }), asyncHandler(async (request, response) => {
+  response.json({ status: true, data: await issuesService.pendingShipments(request.query as never) });
 }));
 
 /**

@@ -3,13 +3,11 @@
  * No IO here: the repo loads the rows, this file only decides what is wrong.
  */
 import { LINE_STATE, type InvoiceStatus } from "./invoice.constants";
-import { isBillableOrderStatus } from "./invoice.eligibility";
+import { isHomixDelivery, notBillableReason } from "./invoice.eligibility";
 import { computeTotals, countsTowardCompanyDue, effectiveLineCents } from "./invoice.logic";
 import { toCents } from "./invoice.money";
 import type { AdjustmentRow, InvoiceRow, LineRow } from "./invoice.types";
 
-const DELIVERY_BY_HOMIX = 1;
-const SHIPMENT_DELIVERED = 4;
 
 export type IssueSeverity = "error" | "warning";
 export const ISSUE_TYPES = [
@@ -76,8 +74,8 @@ const isoDay = (value: Date | string | null | undefined): string | null => {
 const operationKey = (line: IssueLine): string => String(line.operationNumber ?? "").trim();
 const isCounted = (line: IssueLine): boolean => line.state === LINE_STATE.INCLUDED || line.state === LINE_STATE.FROZEN;
 
-export const isLiveDeliveryWarehouse = (order: LiveOrder): boolean =>
-  Number(order.deliveryBy) === DELIVERY_BY_HOMIX && Number(order.shipmentStatus) === SHIPMENT_DELIVERED;
+/** Warehouse delivery = delivered by Homix (a billable Homix delivery also has its shipment delivered). */
+export const isLiveDeliveryWarehouse = (order: LiveOrder): boolean => isHomixDelivery(order.deliveryBy);
 
 export const detectInvoiceIssues = (input: DetectInput): InvoiceIssue[] => {
   const invoiceById = new Map(input.invoices.map((invoice) => [Number(invoice.id), invoice]));
@@ -195,8 +193,12 @@ export const detectInvoiceIssues = (input: DetectInput): InvoiceIssue[] => {
     const live = input.orders.get(Number(line.orderId));
     let reason: string | null = null;
     if (!live || live.deletedAt) reason = "الطلب اتحذف";
-    else if (!isBillableOrderStatus(live.status)) reason = "الطلب لم يعد مسلّمًا (اتلغى أو اتغيّرت حالته)";
-    else if (Boolean(line.isWarehouseDelivery) !== isLiveDeliveryWarehouse(live)) reason = "نوع التسليم اتغيّر (مخزن/بائع) بعد الفوترة";
+    else {
+      const notBillable = notBillableReason(live);
+      if (notBillable === "order_not_delivered") reason = "الطلب لم يعد مسلّمًا (اتلغى أو اتغيّرت حالته)";
+      else if (notBillable === "shipment_not_delivered") reason = "حالة شحنة الطلب لم تعد «تم التسليم» (توصيل هوميكس) — الطلب لم يعد قابلاً للفوترة";
+    }
+    if (!reason && live && Boolean(line.isWarehouseDelivery) !== isLiveDeliveryWarehouse(live)) reason = "نوع التسليم اتغيّر (مخزن/بائع) بعد الفوترة";
     if (reason) push("order_changed", `${line.id}`, { details: reason, line, occurrences: here, vendor: invoice });
   }
 

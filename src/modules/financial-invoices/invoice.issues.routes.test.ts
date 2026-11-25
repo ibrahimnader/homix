@@ -32,3 +32,29 @@ test("vendors and staff without finance_settle get 403", async () => {
   expect((await request(appFor({ id: 8, permissions: { finance_view: true }, userType: "4" })).get("/financial-invoices/issues")).status).toBe(403);
   expect(find).not.toHaveBeenCalled();
 });
+
+describe("pending-shipments list", () => {
+  const range = "startDate=2026-10-14T00:00:00.000Z&endDate=2026-10-28T21:59:59.999Z";
+  const pending = jest.spyOn(InvoiceIssuesService.prototype, "pendingShipments").mockResolvedValue({ count: 0, orders: [], truncated: false });
+  beforeEach(() => pending.mockClear());
+
+  test("staff with finance_settle read it; dates are required", async () => {
+    const staff = appFor({ id: 7, permissions: { finance_settle: true, finance_view: true }, userType: "4" });
+    expect((await request(staff).get(`/financial-invoices/issues/pending-shipments?${range}&vendorId=3`)).status).toBe(200);
+    expect(pending).toHaveBeenCalledWith({ endDate: "2026-10-28T21:59:59.999Z", startDate: "2026-10-14T00:00:00.000Z", vendorId: 3 });
+    expect((await request(staff).get("/financial-invoices/issues/pending-shipments")).status).toBe(400);
+  });
+
+  test("plain YYYY-MM-DD dates are read as Cairo days", async () => {
+    const staff = appFor({ id: 7, permissions: { finance_settle: true, finance_view: true }, userType: "4" });
+    expect((await request(staff).get("/financial-invoices/issues/pending-shipments?startDate=2026-11-14&endDate=2026-11-28")).status).toBe(200);
+    expect(pending).toHaveBeenCalledWith({ endDate: "2026-11-28T21:59:59.999Z", startDate: "2026-11-13T22:00:00.000Z" });
+    expect((await request(staff).get("/financial-invoices/issues/pending-shipments?startDate=nope&endDate=2026-11-28")).status).toBe(400);
+  });
+
+  test("vendors and staff without finance_settle get 403", async () => {
+    expect((await request(appFor({ id: 9, permissions: { finance_settle: true, finance_view: true }, userType: "2", vendorId: 5 })).get(`/financial-invoices/issues/pending-shipments?${range}`)).status).toBe(403);
+    expect((await request(appFor({ id: 8, permissions: { finance_view: true }, userType: "4" })).get(`/financial-invoices/issues/pending-shipments?${range}`)).status).toBe(403);
+    expect(pending).not.toHaveBeenCalled();
+  });
+});

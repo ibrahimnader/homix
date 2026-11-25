@@ -10,7 +10,8 @@ import {
   MAX_RECEIPTS_PER_UPLOAD, MERGEABLE_STATUSES, OVERDUE_DAYS, RECEIPT_FOLDER, VENDOR_VISIBLE_STATUSES,
   type InvoiceStatus, type LineAction,
 } from "./invoice.constants";
-import { isBillableOrderStatus } from "./invoice.eligibility";
+import { SHIPMENT_STATUS_LABELS } from "../shipments/shipment.constants";
+import { isBillableOrder, notBillableReason } from "./invoice.eligibility";
 import { canTransition, computeTotals, dueParty, daysCounter, effectiveLineCents, isOverdue, lineNetCents, snapshotFromReportOrder } from "./invoice.logic";
 import { overlayReport, type ExportReport, type OverlayInvoice, type OverlayLine } from "./invoice.export-overlay";
 import { fromCents, toCents } from "./invoice.money";
@@ -498,12 +499,24 @@ export class InvoiceService {
 
   private async lookupSnapshot(orderId: number, vendorId: number, transaction: Tx): Promise<LineSnapshot | null> {
     const order = await this.repo.findOrderForInvoicing(orderId, transaction);
-    if (!order || !order.effectiveDeliveryDate || !isBillableOrderStatus(order.status)) return null;
+    if (!order || !order.effectiveDeliveryDate || !isBillableOrder(order)) return null;
     const day = cairoDay(order.effectiveDeliveryDate);
     const report = await this.getReport({ endDate: day, startDate: day, vendorId }, vendorId);
     const item = report.fullInvoice.items.find((row) => Number(row.vendorId) === vendorId);
     const reported = item?.orders.find((row) => Number(row.orderId) === orderId);
     return reported ? snapshotFromReportOrder(reported) : null;
+  }
+
+  /** Refuses (409, Arabic) an order that is not billable yet; the shipment case says which shipment status blocks it. */
+  private async assertOrderBillable(orderId: number, transaction: Tx): Promise<void> {
+    const order = await this.repo.findOrderForInvoicing(orderId, transaction);
+    if (!order) throw new ConflictError("الطلب غير مسلّم أو لا يخص هذا البائع");
+    const reason = notBillableReason(order);
+    if (reason === "shipment_not_delivered") {
+      const label = SHIPMENT_STATUS_LABELS[Number(order.shipmentStatus)] ?? "غير محددة";
+      throw new ConflictError(`الطلب لسه ما اتسلّمش — حالة الشحنة «${label}»`);
+    }
+    if (reason === "order_not_delivered") throw new ConflictError("الطلب غير مسلّم أو لا يخص هذا البائع");
   }
 
   /** Adds new report orders and pickable deferred orders to a draft. Never touches existing lines. */
@@ -940,7 +953,10 @@ export class InvoiceService {
     const probe = await this.repo.findInvoice(id);
     if (!probe) throw new NotFoundError("الفاتورة غير موجودة");
     // Pricing runs through the same report code as everything else (outside the invoice lock).
-    const snapshot = await this.repo.transaction((transaction) => this.lookupSnapshot(orderId, Number(probe.vendorId), transaction));
+    const snapshot = await this.repo.transaction(async (transaction) => {
+      await this.assertOrderBillable(orderId, transaction);
+      return this.lookupSnapshot(orderId, Number(probe.vendorId), transaction);
+    });
     if (!snapshot) throw new ConflictError("الطلب غير مسلّم أو لا يخص هذا البائع");
     return this.repo.transaction(async (transaction) => {
       const invoice = await this.mustFind(id, transaction);
@@ -956,7 +972,10 @@ export class InvoiceService {
 
   /** «إضافة طلب» from the live vendor section: create the draft if missing, then add the order in the same transaction. Idempotent. */
   public async liveAddOrder(input: LiveDraftInput & { orderId: number }, actor: Actor) {
-    const snapshot = await this.repo.transaction((transaction) => this.lookupSnapshot(input.orderId, input.vendorId, transaction));
+    const snapshot = await this.repo.transaction(async (transaction) => {
+      await this.assertOrderBillable(input.orderId, transaction);
+      return this.lookupSnapshot(input.orderId, input.vendorId, transaction);
+    });
     if (!snapshot) throw new ConflictError("الطلب غير مسلّم أو لا يخص هذا البائع");
     const report = await this.getReport({ billingDay: input.billingDay, referenceDate: input.referenceDate, vendorId: input.vendorId }, input.vendorId);
     const snapshots = this.snapshotsByVendor(report).get(input.vendorId) ?? [];

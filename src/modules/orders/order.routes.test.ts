@@ -498,14 +498,26 @@ describe("orderRouter", () => {
     }));
   });
 
-  it("settles every Homix-delivered order on cost and lists all of them in the warehouse tab (shipment status is irrelevant)", async () => {
+  it("only bills delivered items: the report query requires order delivered AND (not Homix delivery OR shipment delivered)", async () => {
+    orderModel.findAll.mockResolvedValue([]);
+    await request(app).get("/orders/financialReport").query({ billingDay: 13, referenceDate: "2026-07-16" });
+    const where = orderModel.findAll.mock.calls[0]?.[0]?.where as Record<PropertyKey, unknown>;
+    const conditions = where[Object.getOwnPropertySymbols(where)[0]!] as Array<Record<PropertyKey, unknown>>;
+    expect(conditions).toContainEqual(expect.objectContaining({ [Op.eq]: 5 }));
+    const orGroup = conditions.find((condition) => Array.isArray(condition[Op.or]));
+    expect(orGroup).toBeDefined();
+    // the mocked sequelize.where() returns its comparison: deliveryBy IS NULL, deliveryBy <> HOMIX, shipmentStatus = DELIVERED
+    expect(orGroup![Op.or]).toEqual([{ [Op.is]: null }, { [Op.ne]: 1 }, { [Op.eq]: 4 }]);
+  });
+
+  it("settles every Homix-delivered order on cost and lists all of them in the warehouse tab (the query only returns shipment-delivered ones)", async () => {
     const lines = (cost: string) => [{
       cost, quantity: 1, sku: "RKA-001",
       product: { id: 812, vendor: { id: 3, name: "ركنة للأثاث", shippingCost: 200 } },
     }];
     orderModel.findAll.mockResolvedValue([
       makeOrder({ commission: "0", deliveryBy: 1, deliveryDate: "2026-07-10T00:00:00.000Z", fine: "100", id: 21, orderLines: lines("1200"), shipmentStatus: 4, status: 5, totalCost: "1200", totalPrice: "2299" }),
-      makeOrder({ commission: "0", deliveryBy: 1, deliveryDate: "2026-07-10T00:00:00.000Z", fine: "0", id: 22, orderLines: lines("1000"), shipmentStatus: 2, status: 5, totalCost: "1000", totalPrice: "1800" }),
+      makeOrder({ commission: "0", deliveryBy: 1, deliveryDate: "2026-07-10T00:00:00.000Z", fine: "0", id: 22, orderLines: lines("1000"), shipmentStatus: 4, status: 5, totalCost: "1000", totalPrice: "1800" }),
       makeOrder({ commission: "0", deliveryBy: 1, deliveryDate: "2026-07-10T00:00:00.000Z", fine: "50", id: 23, orderLines: lines("0"), shipmentStatus: 4, status: 5, totalCost: "0", totalPrice: "900" }),
     ]);
 
@@ -516,8 +528,7 @@ describe("orderRouter", () => {
     expect(byId[21]).toMatchObject({ companyDue: 0, vendorDue: 1200, fines: 100, warehouseCost: 1200 });
     expect(byId[22]).toMatchObject({ companyDue: 0, vendorDue: 1000, shipmentId: 22 });
     expect(byId[23]).toMatchObject({ companyDue: 0, vendorDue: 0, warehouseCost: 0 });
-    // warehouse + vendor tabs partition the comprehensive one by who delivered: a Homix delivery whose shipment status
-    // is stale (order 22: shipment not delivered) still belongs to the warehouse tab, so both tabs always add up
+    // warehouse + vendor tabs partition the comprehensive one by who delivered, so both tabs always add up
     const warehouseOrders = response.body.data.warehouseDeliveries.items[0].orders;
     expect(warehouseOrders.map((order: { id: number }) => order.id)).toEqual([21, 22, 23]);
     expect(response.body.data.warehouseDeliveries.summary.ordersCount).toBe(response.body.data.fullInvoice.summary.ordersCount);

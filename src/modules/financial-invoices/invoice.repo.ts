@@ -1,7 +1,7 @@
 import { QueryTypes, type Transaction } from "sequelize";
 
 import { sequelize } from "../../infrastructure/database";
-import { BILLABLE_ORDER_STATUSES } from "./invoice.eligibility";
+import { BILLABLE_SQL_REPLACEMENTS, billableOrderSql } from "./invoice.eligibility";
 import { HIDDEN_STATUSES, type InvoiceStatus, type LineState } from "./invoice.constants";
 import type { AdjustmentRow, InvoiceRow, InvoiceTotals, LineRow, LineSnapshot, ReceiptRow } from "./invoice.types";
 
@@ -508,9 +508,9 @@ export class InvoiceRepository {
   }
 
   /** Delivery date of an order in the report's own terms (coalesce(deliveryDate, updatedAt)). */
-  public async findOrderForInvoicing(orderId: number, transaction: Tx): Promise<{ id: number; status: number; effectiveDeliveryDate: Date | string | null } | undefined> {
-    const rows = await sequelize.query<{ id: number; status: number; effectiveDeliveryDate: Date | string | null }>(
-      'SELECT id, status, COALESCE("deliveryDate", "updatedAt") AS "effectiveDeliveryDate" FROM orders WHERE id = :orderId AND "deletedAt" IS NULL',
+  public async findOrderForInvoicing(orderId: number, transaction: Tx): Promise<{ id: number; status: number; deliveryBy?: number | null; shipmentStatus?: number | null; effectiveDeliveryDate: Date | string | null } | undefined> {
+    const rows = await sequelize.query<{ id: number; status: number; deliveryBy: number | null; shipmentStatus: number | null; effectiveDeliveryDate: Date | string | null }>(
+      'SELECT id, status, "deliveryBy", "shipmentStatus", COALESCE("deliveryDate", "updatedAt") AS "effectiveDeliveryDate" FROM orders WHERE id = :orderId AND "deletedAt" IS NULL',
       { replacements: { orderId }, transaction, type: QueryTypes.SELECT },
     );
     return rows[0];
@@ -522,12 +522,12 @@ export class InvoiceRepository {
        FROM orders o
        JOIN "orderLines" ol ON ol."orderId" = o.id AND ol."deletedAt" IS NULL
        JOIN products p ON p.id = ol."productId"
-       WHERE o."deletedAt" IS NULL AND o.status IN (:billable) AND p."vendorId" = :vendorId
+       WHERE o."deletedAt" IS NULL AND ${billableOrderSql("o")} AND p."vendorId" = :vendorId
          AND (o.code ILIKE :q OR o."orderNumber"::text ILIKE :q)
          AND NOT EXISTS (SELECT 1 FROM financial_invoice_lines l WHERE l."orderId" = o.id AND l.state IN (:states))
        ORDER BY o.id DESC LIMIT 10`,
       {
-        replacements: { billable: BILLABLE_ORDER_STATUSES, q: `%${escapeLike(q)}%`, states: LOCKING_LINE_STATES, vendorId },
+        replacements: { ...BILLABLE_SQL_REPLACEMENTS, q: `%${escapeLike(q)}%`, states: LOCKING_LINE_STATES, vendorId },
         type: QueryTypes.SELECT,
       },
     );

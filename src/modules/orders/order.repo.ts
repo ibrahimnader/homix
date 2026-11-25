@@ -40,7 +40,7 @@ import {
 import type { CompanyDueKind, OrderDetailsResponse, OrderDetailsView, OrderFinancialReportQuery, OrderFinancialReportResponse, OrderFinancialReportSection, OrderFinancialReportSectionSummary, OrderFinancialReportVendorRow, OrderListItem, OrderListQuery, OrderListResponse, OrderMetaResponse, OrderStatusHistoryItem, OrderSummaryResponse, OrderTimelineItem } from "./order.types";
 import { calculateVendorDeliverySettlement, calculateWarehouseDeliverySettlement } from "./order-financial-settlement";
 import { listManagedOptions, MANAGED_OPTION_GROUP, replaceManagedOptions } from "../settings/managed-options";
-import { SHIPMENT_STATUS_LABELS } from "../shipments/shipment.constants";
+import { SHIPMENT_STATUS, SHIPMENT_STATUS_LABELS } from "../shipments/shipment.constants";
 import { lookupInvoiceLockedOrders } from "./order-regression-gate";
 
 const { sequelize } = require("../../infrastructure/database");
@@ -1061,6 +1061,16 @@ export class OrderRepository {
       sequelize.where(effectiveDeliveryDate, { [Op.gte]: cycleRange.start.utc().toDate() }),
       sequelize.where(effectiveDeliveryDate, { [Op.lte]: cycleRange.end.utc().toDate() }),
       sequelize.where(sequelize.col("Order.status"), { [Op.eq]: ORDER_STATUS.DELIVERED }),
+      /* Billable = order delivered AND, for Homix deliveries, shipment delivered too. Vendor-delivered orders have no
+         shipment lifecycle (shipmentStatus mostly NULL) and stay billable on the order status alone. Keep in sync with
+         invoice.eligibility.ts (isBillableOrder / billableOrderSql). */
+      {
+        [Op.or]: [
+          sequelize.where(sequelize.col("Order.deliveryBy"), { [Op.is]: null }),
+          sequelize.where(sequelize.col("Order.deliveryBy"), { [Op.ne]: DELIVERY_BY.HOMIX }),
+          sequelize.where(sequelize.col("Order.shipmentStatus"), { [Op.eq]: SHIPMENT_STATUS.DELIVERED }),
+        ],
+      },
     ];
 
     if (effectiveVendorId) {
@@ -1119,10 +1129,8 @@ export class OrderRepository {
       const paymentStatus = toNumber(plainOrder.paymentStatus) || null;
       const orderId = toNumber(plainOrder.id);
       const productId = toNumber(toPlain(firstLine.product).id) || null;
-      /* Every order in this report is already delivered (order status), so the two delivery tabs partition it by
-         who delivered: Homix (warehouse) or not (vendor). The shipment status is NOT part of the rule — 137 of the
-         414 orders delivered in November still had a stale shipment status (pending/blank), which dropped them
-         from the warehouse tab while the comprehensive tab counted them (29 vs 30 for the same vendor). */
+      /* Every order in this report is billable (order delivered and, for Homix deliveries, shipment delivered), so the two
+         delivery tabs partition it by who delivered: Homix (warehouse) or not (vendor). */
       const isWarehouseDelivery = toNumber(plainOrder.deliveryBy) === DELIVERY_BY.HOMIX;
       const isVendorDelivery = toNumber(plainOrder.deliveryBy) !== DELIVERY_BY.HOMIX;
       const vendorSettlement = isVendorDelivery

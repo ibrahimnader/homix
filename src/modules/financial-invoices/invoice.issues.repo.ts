@@ -2,6 +2,7 @@ import moment from "moment-timezone";
 import { QueryTypes } from "sequelize";
 
 import { sequelize } from "../../infrastructure/database";
+import { BILLABLE_SQL_REPLACEMENTS } from "./invoice.eligibility";
 import type { IssueInvoice, IssueLine, LiveOrder } from "./invoice.issues";
 import type { AdjustmentRow } from "./invoice.types";
 
@@ -9,6 +10,7 @@ const CAIRO = "Africa/Cairo";
 /** Hard cap so a no-filter request cannot pull the whole ledger into memory; the response says when it was hit. */
 export const ISSUES_MAX_INVOICES = 2000;
 const CHUNK = 1000;
+export const PENDING_SHIPMENTS_MAX = 500;
 
 export type IssuesLoad = {
   adjustments: Array<Pick<AdjustmentRow, "invoiceId" | "kind" | "amount" | "removedAt">>;
@@ -23,6 +25,11 @@ const chunks = <T>(items: T[]): T[][] => {
   const out: T[][] = [];
   for (let index = 0; index < items.length; index += CHUNK) out.push(items.slice(index, index + CHUNK));
   return out;
+};
+
+export type PendingShipmentOrder = {
+  code: string | null; deliveryDate: Date | string | null; id: number; orderNumber: string | null; shipmentStatus: number | null;
+  totalPrice: number | string | null; vendorId: number | null; vendorName: string | null;
 };
 
 /** Read-only, indexed loads (invoice period/vendor indexes, line invoiceId/orderId indexes). */
@@ -101,5 +108,26 @@ export class InvoiceIssuesRepository {
       for (const row of rows) orders.set(Number(row.id), row);
     }
     return { adjustments, invoices, lines, orders, scopeInvoiceIds, truncated };
+  }
+
+  /** Orders delivered (order status) by Homix whose shipment status is not DELIVERED: excluded from billing until fixed. */
+  public async findPendingShipmentOrders(filters: { endDate: string; startDate: string; vendorId?: number }): Promise<PendingShipmentOrder[]> {
+    return sequelize.query<PendingShipmentOrder>(
+      `SELECT o.id, o.code, o."orderNumber", o."shipmentStatus", o."totalPrice", COALESCE(o."deliveryDate", o."updatedAt") AS "deliveryDate",
+              v.id AS "vendorId", v.name AS "vendorName"
+       FROM orders o
+       LEFT JOIN LATERAL (
+         SELECT p."vendorId" FROM "orderLines" ol JOIN products p ON p.id = ol."productId"
+         WHERE ol."orderId" = o.id AND ol."deletedAt" IS NULL ORDER BY ol.id LIMIT 1
+       ) first_line ON TRUE
+       LEFT JOIN vendors v ON v.id = first_line."vendorId"
+       WHERE o."deletedAt" IS NULL AND o.status IN (:billable) AND o."deliveryBy" = :homixDeliveryBy
+         AND o."shipmentStatus" IS DISTINCT FROM :shipmentDelivered
+         AND COALESCE(o."deliveryDate", o."updatedAt") >= CAST(:startDate AS timestamptz)
+         AND COALESCE(o."deliveryDate", o."updatedAt") <= CAST(:endDate AS timestamptz)
+         ${filters.vendorId ? 'AND first_line."vendorId" = :vendorId' : ""}
+       ORDER BY COALESCE(o."deliveryDate", o."updatedAt"), o.id LIMIT ${PENDING_SHIPMENTS_MAX}`,
+      { replacements: { ...BILLABLE_SQL_REPLACEMENTS, endDate: filters.endDate, startDate: filters.startDate, vendorId: filters.vendorId ?? null }, type: QueryTypes.SELECT },
+    );
   }
 }

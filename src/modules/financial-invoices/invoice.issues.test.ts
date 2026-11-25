@@ -100,3 +100,30 @@ describe("detectInvoiceIssues", () => {
     expect(summarizeIssues(issues)).toEqual({ errors: 1, total: 2, warnings: 1 });
   });
 });
+
+describe("check 7: saved line whose order is no longer billable", () => {
+  const one = (live: LiveOrder | undefined, over: Partial<IssueLine> = {}) => {
+    const lines = [ln(1, 10, "OP1", over)];
+    return run([inv(1, 1, "2026-10-28")], lines, new Map(live ? [[10, live]] : []));
+  };
+  test("order not delivered anymore", () => {
+    const issues = one({ ...liveOk, status: 6 });
+    expect(types(issues)).toEqual(["order_changed"]);
+    expect(issues[0]!.details).toContain("لم يعد مسلّمًا");
+  });
+  test("Homix delivery whose shipment status is not delivered gets the shipment reason", () => {
+    for (const shipmentStatus of [1, null]) {
+      const issues = one({ ...liveOk, shipmentStatus });
+      expect(types(issues)).toEqual(["order_changed"]);
+      expect(issues[0]!.details).toContain("حالة شحنة الطلب");
+    }
+  });
+  test("vendor-delivered order without any shipment status stays clean", () => {
+    expect(one({ ...liveOk, deliveryBy: 2, shipmentStatus: null }, { isWarehouseDelivery: false })).toEqual([]);
+  });
+  test("deleted order and delivery-type change are still reported", () => {
+    expect(one({ ...liveOk, deletedAt: "2026-10-30" })[0]!.details).toBe("الطلب اتحذف");
+    expect(one(undefined)[0]!.details).toBe("الطلب اتحذف");
+    expect(one({ ...liveOk, deliveryBy: 2, shipmentStatus: null })[0]!.details).toContain("نوع التسليم");
+  });
+});

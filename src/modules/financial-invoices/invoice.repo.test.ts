@@ -94,3 +94,20 @@ describe("InvoiceRepository filters", () => {
     expect(sql).toContain("ORDER BY name");
   });
 });
+
+describe("InvoiceRepository billable-order SQL", () => {
+  test("add-order picker only offers billable orders (Homix deliveries need a delivered shipment)", async () => {
+    query.mockResolvedValue([]);
+    await new InvoiceRepository().searchOrderCandidates(3, "31");
+    const [sql, { replacements }] = lastCall();
+    expect(sql).toContain("o.status IN (:billable)");
+    expect(sql).toContain('o."deliveryBy" IS DISTINCT FROM :homixDeliveryBy OR o."shipmentStatus" = :shipmentDelivered');
+    expect(replacements).toMatchObject({ billable: [5], homixDeliveryBy: 1, shipmentDelivered: 4, vendorId: 3 });
+  });
+
+  test("findOrderForInvoicing loads delivery and shipment status", async () => {
+    query.mockResolvedValue([]);
+    await new InvoiceRepository().findOrderForInvoicing(5, {} as never);
+    expect(lastCall()[0]).toContain('"deliveryBy", "shipmentStatus"');
+  });
+});

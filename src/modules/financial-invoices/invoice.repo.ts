@@ -1,11 +1,41 @@
 import { QueryTypes, type Transaction } from "sequelize";
 
 import { sequelize } from "../../infrastructure/database";
-import { BILLABLE_SQL_REPLACEMENTS, billableOrderSql } from "./invoice.eligibility";
+import { BILLABLE_SQL_REPLACEMENTS, billableOrderSql, notBillableReason, type NotBillableReason } from "./invoice.eligibility";
 import { HIDDEN_STATUSES, type InvoiceStatus, type LineState } from "./invoice.constants";
 import type { AdjustmentRow, InvoiceRow, InvoiceTotals, LineRow, LineSnapshot, ReceiptRow } from "./invoice.types";
 
 export type Tx = Transaction;
+
+type OrderCandidateRow = {
+  billable: boolean; code: string | null; deliveryBy: number | null; id: number; invoiceCode: string | null; invoiceId: number | string | null;
+  invoiceStatus: string | null; lineState: string | null; orderNumber: string | null; periodEnd: Date | string | null;
+  shipmentStatus: number | null; status: number;
+};
+
+export type OrderCandidate = {
+  available: boolean;
+  code: string | null;
+  id: number;
+  /** the active invoice line that blocks the order (reason = already_invoiced) */
+  invoice?: { code: string | null; id: number; lineState: string; periodEnd: Date | string | null; status: string };
+  orderNumber: string | null;
+  reason?: "already_invoiced" | NotBillableReason;
+  status: number;
+};
+
+/** Verdict order: an active invoice line wins (it is what the user must act on), then delivery state. */
+export const toOrderCandidate = (row: OrderCandidateRow): OrderCandidate => {
+  const base = { code: row.code, id: Number(row.id), orderNumber: row.orderNumber, status: Number(row.status) };
+  if (row.invoiceId !== null && row.invoiceId !== undefined) {
+    return {
+      ...base, available: false, reason: "already_invoiced",
+      invoice: { code: row.invoiceCode, id: Number(row.invoiceId), lineState: String(row.lineState), periodEnd: row.periodEnd, status: String(row.invoiceStatus) },
+    };
+  }
+  if (row.billable) return { ...base, available: true };
+  return { ...base, available: false, reason: notBillableReason(row) ?? "order_not_delivered" };
+};
 
 export type InvoiceListFilters = {
   billingDay?: number;
@@ -516,21 +546,36 @@ export class InvoiceRepository {
     return rows[0];
   }
 
-  public async searchOrderCandidates(vendorId: number, q: string): Promise<Array<{ id: number; code: string | null; orderNumber: string | null; status: number }>> {
-    return sequelize.query(
-      `SELECT DISTINCT o.id, o.code, o."orderNumber", o.status
+  /**
+   * Picker search: EVERY order of the vendor matching the text (operation number, order number / name such as #HX1202),
+   * newest first, max 10, each with an availability verdict so the UI can explain why an order cannot be added.
+   */
+  public async searchOrderCandidates(vendorId: number, q: string): Promise<OrderCandidate[]> {
+    const text = q.trim().replace(/^#+/, "") || q.trim();
+    const rows = await sequelize.query<OrderCandidateRow>(
+      `SELECT o.id, o.code, o."orderNumber", o.status, o."deliveryBy", o."shipmentStatus",
+              ${billableOrderSql("o")} AS billable,
+              b."invoiceId", b."invoiceCode", b."invoiceStatus", b."periodEnd", b."lineState"
        FROM orders o
-       JOIN "orderLines" ol ON ol."orderId" = o.id AND ol."deletedAt" IS NULL
-       JOIN products p ON p.id = ol."productId"
-       WHERE o."deletedAt" IS NULL AND ${billableOrderSql("o")} AND p."vendorId" = :vendorId
-         AND (o.code ILIKE :q OR o."orderNumber"::text ILIKE :q)
-         AND NOT EXISTS (SELECT 1 FROM financial_invoice_lines l WHERE l."orderId" = o.id AND l.state IN (:states))
+       LEFT JOIN LATERAL (
+         SELECT i.id AS "invoiceId", i.code AS "invoiceCode", i.status AS "invoiceStatus", i."periodEnd", l.state AS "lineState"
+         FROM financial_invoice_lines l JOIN financial_invoices i ON i.id = l."invoiceId"
+         WHERE l."orderId" = o.id AND l.state IN (:states)
+         ORDER BY l.id DESC LIMIT 1
+       ) b ON TRUE
+       WHERE o."deletedAt" IS NULL
+         AND EXISTS (
+           SELECT 1 FROM "orderLines" ol JOIN products p ON p.id = ol."productId"
+           WHERE ol."orderId" = o.id AND ol."deletedAt" IS NULL AND p."vendorId" = :vendorId
+         )
+         AND (o.code ILIKE :q OR o."orderNumber"::text ILIKE :q OR o.name ILIKE :q)
        ORDER BY o.id DESC LIMIT 10`,
       {
-        replacements: { ...BILLABLE_SQL_REPLACEMENTS, q: `%${escapeLike(q)}%`, states: LOCKING_LINE_STATES, vendorId },
+        replacements: { ...BILLABLE_SQL_REPLACEMENTS, q: `%${escapeLike(text)}%`, states: LOCKING_LINE_STATES, vendorId },
         type: QueryTypes.SELECT,
       },
     );
+    return rows.map(toOrderCandidate);
   }
 
   /* ---------- consolidated invoices ---------- */

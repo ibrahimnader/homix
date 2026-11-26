@@ -2,7 +2,7 @@ jest.mock("../../infrastructure/database", () => ({ sequelize: { query: jest.fn(
 // eslint-disable-next-line import/first
 import { sequelize } from "../../infrastructure/database";
 // eslint-disable-next-line import/first
-import { InvoiceRepository } from "./invoice.repo";
+import { InvoiceRepository, toOrderCandidate } from "./invoice.repo";
 
 const query = sequelize.query as unknown as jest.Mock;
 const lastCall = () => query.mock.calls[0] as [string, { replacements: Record<string, unknown> }];
@@ -96,15 +96,49 @@ describe("InvoiceRepository filters", () => {
 });
 
 describe("InvoiceRepository billable-order SQL", () => {
-  test("add-order picker only offers billable orders (Homix deliveries need a delivered shipment)", async () => {
+  test("picker searches every vendor order (no billable/invoiced filter) and computes the verdict columns", async () => {
     query.mockResolvedValue([]);
     await new InvoiceRepository().searchOrderCandidates(3, "31");
     const [sql, { replacements }] = lastCall();
     expect(sql).toContain("o.status IN (:billable)");
     expect(sql).toContain('o."deliveryBy" IS DISTINCT FROM :homixDeliveryBy OR o."shipmentStatus" = :shipmentDelivered');
-    expect(replacements).toMatchObject({ billable: [5], homixDeliveryBy: 1, shipmentDelivered: 4, vendorId: 3 });
+    expect(sql).toContain("LEFT JOIN LATERAL");
+    expect(sql).not.toContain("NOT EXISTS");
+    expect(sql).toContain('p."vendorId" = :vendorId');
+    expect(sql).toContain("ORDER BY o.id DESC LIMIT 10");
+    expect(replacements).toMatchObject({ billable: [5], homixDeliveryBy: 1, shipmentDelivered: 4, vendorId: 3, states: ["included", "frozen", "removed"], q: "%31%" });
   });
 
+  test("picker text is LIKE-escaped, a leading # is ignored, and the vendor id scopes the query", async () => {
+    query.mockResolvedValue([]);
+    await new InvoiceRepository().searchOrderCandidates(9, "#HX_1%");
+    const [sql, { replacements }] = lastCall();
+    expect(sql).toContain("o.code ILIKE :q OR o.\"orderNumber\"::text ILIKE :q");
+    expect(replacements).toMatchObject({ q: "%HX\\_1\\%%", vendorId: 9 });
+  });
+
+  test("picker maps rows to verdicts", async () => {
+    const row = { billable: true, code: "35564", deliveryBy: 1, id: 7, invoiceCode: null, invoiceId: null, invoiceStatus: null, lineState: null, orderNumber: "HX1", periodEnd: null, shipmentStatus: 4, status: 5 };
+    query.mockResolvedValue([row]);
+    expect(await new InvoiceRepository().searchOrderCandidates(3, "35")).toEqual([{ available: true, code: "35564", id: 7, orderNumber: "HX1", status: 5 }]);
+  });
+});
+
+describe("toOrderCandidate verdicts", () => {
+  const base = { billable: true, code: "35564", deliveryBy: 1, id: 7, invoiceCode: null, invoiceId: null, invoiceStatus: null, lineState: null, orderNumber: "HX1", periodEnd: null, shipmentStatus: 4, status: 5 };
+  test("available", () => expect(toOrderCandidate(base)).toMatchObject({ available: true }));
+  test("already invoiced wins and carries the blocking invoice", () => {
+    const out = toOrderCandidate({ ...base, invoiceCode: "INV-2026-0001", invoiceId: "12", invoiceStatus: "reviewed", lineState: "included", periodEnd: "2026-11-13T21:59:59.999Z" });
+    expect(out).toEqual({
+      available: false, code: "35564", id: 7, orderNumber: "HX1", status: 5, reason: "already_invoiced",
+      invoice: { code: "INV-2026-0001", id: 12, lineState: "included", periodEnd: "2026-11-13T21:59:59.999Z", status: "reviewed" },
+    });
+  });
+  test("order not delivered", () => expect(toOrderCandidate({ ...base, billable: false, status: 2 })).toMatchObject({ available: false, reason: "order_not_delivered" }));
+  test("Homix shipment not delivered", () => expect(toOrderCandidate({ ...base, billable: false, shipmentStatus: 2 })).toMatchObject({ available: false, reason: "shipment_not_delivered" }));
+});
+
+describe("InvoiceRepository billable-order SQL (misc)", () => {
   test("findOrderForInvoicing loads delivery and shipment status", async () => {
     query.mockResolvedValue([]);
     await new InvoiceRepository().findOrderForInvoicing(5, {} as never);

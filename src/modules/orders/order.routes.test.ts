@@ -470,6 +470,28 @@ describe("orderRouter", () => {
     expect(conditions).toContainEqual(expect.objectContaining({ [Op.eq]: 5 }));
   });
 
+  it("a PAID vendor-delivered order: the vendor collected nothing, so Homix owes the vendor cost + his shipping (not the other way round)", async () => {
+    const lines = (cost: string) => [{
+      cost, quantity: 1, sku: "WOD38-FD",
+      product: { id: 901, vendor: { id: 9, name: "Wood Rate", shippingCost: 100 } },
+    }];
+    orderModel.findAll.mockResolvedValue([
+      // paid online, yet `toBeCollected` still holds total + shipping (real data: 2101.22 on a 1934.55 order)
+      makeOrder({ deliveryBy: 2, deliveryDate: "2026-07-12T00:00:00.000Z", id: 31, orderLines: lines("800"), paymentStatus: 2, status: 5, toBeCollected: "2101.22", totalPrice: "1934.55" }),
+      // cash on delivery: the vendor collected 2101.22 → he owes Homix the difference
+      makeOrder({ deliveryBy: 2, deliveryDate: "2026-07-12T00:00:00.000Z", id: 32, orderLines: lines("800"), paymentStatus: 1, status: 5, toBeCollected: "2101.22", totalPrice: "1934.55" }),
+    ]);
+
+    const response = await request(app).get("/orders/financialReport").query({ billingDay: 13, referenceDate: "2026-07-16" });
+
+    expect(response.status).toBe(200);
+    const byId = Object.fromEntries(response.body.data.vendorDeliveries.items[0].orders.map((order: { id: number }) => [order.id, order]));
+    expect(byId[31]).toMatchObject({ collectionTotal: 0, companyDue: 0, companyDueKind: "vendorOwes", vendorDue: 900 });
+    expect(byId[32]).toMatchObject({ collectionTotal: 2101.22, companyDue: 1201.22, vendorDue: 0 });
+    // paid → payable to the vendor, COD → owed to Homix; both lines sit on the same invoice
+    expect(response.body.data.summary).toMatchObject({ companyDue: 1201.22, vendorDue: 900 });
+  });
+
   it("uses the product line cost when an old seller order stored collection in totalCost", async () => {
     orderModel.findAll.mockResolvedValue([makeOrder({
       deliveryBy: 2,

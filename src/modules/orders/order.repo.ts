@@ -1119,11 +1119,17 @@ export class OrderRepository {
       const vendorShippingCost = Math.max(toNumber(vendor.shippingCost), 0);
       const vendorKey = vendorId ? String(vendorId) : `unknown:${vendorName}`;
       const collectionTotal = toNumber(plainOrder.totalPrice);
-      const vendorCollectionTotal = plainOrder.toBeCollected === null
-        || plainOrder.toBeCollected === undefined
-        || plainOrder.toBeCollected === ""
-        ? collectionTotal
-        : toNumber(plainOrder.toBeCollected);
+      /* What the VENDOR collected from the customer at delivery. A PAID order was prepaid to Homix, so the vendor
+         collected nothing — whatever stale amount `toBeCollected` still holds (paid orders keep total + shipping there).
+         Otherwise it is the amount to collect on delivery. */
+      const isPaidOrder = toNumber(plainOrder.paymentStatus) === PAYMENT_STATUS.PAID;
+      const vendorCollectionTotal = isPaidOrder
+        ? 0
+        : plainOrder.toBeCollected === null
+          || plainOrder.toBeCollected === undefined
+          || plainOrder.toBeCollected === ""
+          ? collectionTotal
+          : toNumber(plainOrder.toBeCollected);
       const fines = toNumber(plainOrder.fine);
       const warehouseCost = getFinancialOrderCost(plainOrder, orderLines);
       const paymentStatus = toNumber(plainOrder.paymentStatus) || null;

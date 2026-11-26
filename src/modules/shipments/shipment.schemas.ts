@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { confirmRegressionSchema } from "../orders/order-regression-guard";
 import { DEFAULT_PAGE_NUMBER, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PERFORMANCE_PERIODS } from "./shipment.constants";
-import { isValidDateInput } from "./shipment.helpers";
+import { isValidDateInput, toDateRangeBoundary } from "./shipment.helpers";
 
 const csvString = z.string().trim().min(1);
 const dateString = z.string().trim().refine(isValidDateInput, {
@@ -201,6 +201,9 @@ export const shipmentBulkUpdateSchema = z.object({
   data: z.object({
     confirmRegression: confirmRegressionSchema.optional(),
     deliveryBy: z.coerce.number().int().positive().optional(),
+    /* Actual delivery date («تاريخ التسليم الفعلي»). Same rule as the single edit (a free date, no range
+       check), stored as the start of that Cairo day. The financial cycle uses COALESCE(deliveryDate, updatedAt). */
+    deliveryDate: dateString.transform((value) => (toDateRangeBoundary(value, "start") as Date).toISOString()).optional(),
     governorate: z.string().trim().optional(),
     scheduledDeliveryDate: z.union([dateString, z.literal("")]).optional().nullable(),
     /* null clears the field on every selected row (UI: «تفريغ الحالة» / «بدون شركة»). */

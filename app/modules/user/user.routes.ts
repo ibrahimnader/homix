@@ -36,7 +36,14 @@ UserRouter.get("/meta", verifyToken, isNotVendor, requirePermission("users_view"
  *     tags:
  *       - Users
  *     summary: Get all admin users
- *     description: Returns the administrative user list. Vendor users are blocked from this endpoint.
+ *     description: Returns the administrative user list (admins, operations, logistics). Vendor users cannot call this endpoint. Pass includeVendors=true to also list the vendors' login accounts (same users_view permission).
+ *     parameters:
+ *       - in: query
+ *         name: includeVendors
+ *         required: false
+ *         schema:
+ *           type: boolean
+ *         description: Also return vendor accounts (used by the Users screen)
  *     responses:
  *       200:
  *         description: Users list

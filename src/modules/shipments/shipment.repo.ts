@@ -176,6 +176,36 @@ const logOrderFieldChange = async (
   });
 };
 
+/** Audit row for a date column (from/to as ISO instants); nothing is written when the instant is unchanged. */
+const logOrderDateChange = async (
+  orderId: number,
+  fromValue: unknown,
+  toValue: unknown,
+  userId: number | undefined,
+  field: string,
+): Promise<void> => {
+  const normalise = (value: unknown): string | null => {
+    if (value === null || value === undefined || value === "") return null;
+    const date = value instanceof Date ? value : new Date(String(value));
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  };
+  const from = normalise(fromValue);
+  const to = normalise(toValue);
+  if (from === to) {
+    return;
+  }
+
+  await logModel.create({
+    action: "update",
+    entityId: orderId,
+    entityType: "order",
+    field,
+    from,
+    to,
+    userId: userId ?? null,
+  });
+};
+
 type ShipmentSortField = (typeof SHIPMENT_SORTABLE_FIELDS)[number];
 type ShipmentSortDirection = 1 | -1;
 type ShipmentSortEntry = [ShipmentSortField, ShipmentSortDirection];
@@ -2572,6 +2602,9 @@ export class ShipmentRepository {
         nextPayload.shipmentStatus,
         userId,
       );
+    }
+    if (Object.prototype.hasOwnProperty.call(nextPayload, "deliveryDate")) {
+      await logOrderDateChange(shipmentId, plainShipmentBeforeUpdate.deliveryDate, nextPayload.deliveryDate, userId, "deliveryDate");
     }
     for (const row of buildAutoSyncLogRows(shipmentId, statusSync.derived, userId)) {
       await logModel.create(row);

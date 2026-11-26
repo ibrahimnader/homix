@@ -18,9 +18,12 @@ class UserController {
     }
   }
 
-  public static async getAllUsers(_req: Request, res: Response): Promise<Response> {
+  public static async getAllUsers(req: Request, res: Response): Promise<Response> {
     try {
-      const users = await UserService.getAdminUsers();
+      /* The default list is the team (admins, operations, logistics): it feeds pickers such as the account manager.
+         The Users screen asks for `?includeVendors=true` to also manage the vendors' login accounts. */
+      const includeVendors = String(req.query?.includeVendors ?? "").toLowerCase() === "true";
+      const users = includeVendors ? await UserService.getAllUsers() : await UserService.getAdminUsers();
       return res.status(200).json(users);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to fetch users";

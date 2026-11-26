@@ -1364,6 +1364,70 @@ describe("shipmentRouter", () => {
     });
   });
 
+  describe("bulk-update deliveryDate («تاريخ التسليم الفعلي»)", () => {
+    const CAIRO_DAY_START = "2026-11-09T22:00:00.000Z"; // 2026-11-10 00:00 Cairo (UTC+2)
+
+    it("applies the delivery date, stored as the start of the Cairo day, to every selected shipment", async () => {
+      const records = [makeShipmentRecord({ id: 9802 }), makeShipmentRecord({ id: 9803 })];
+      orderModel.findByPk.mockImplementation(async (id: number) => records.find((r) => r.toJSON().id === id) ?? null);
+
+      const response = await request(app).put("/shipments/bulk-update").send({ data: { deliveryDate: "2026-11-10" }, shipmentIds: [9802, 9803] });
+
+      expect(response.status).toBe(200);
+      records.forEach((record) => {
+        expect(record.update).toHaveBeenCalledWith(expect.objectContaining({ deliveryDate: CAIRO_DAY_START }));
+      });
+    });
+
+    it("normalises an ISO instant the same way the single edit sends it", async () => {
+      const record = makeShipmentRecord({ id: 9802 });
+      orderModel.findByPk.mockResolvedValue(record);
+
+      const response = await request(app).put("/shipments/bulk-update").send({ data: { deliveryDate: CAIRO_DAY_START }, shipmentIds: [9802] });
+
+      expect(response.status).toBe(200);
+      expect(record.update).toHaveBeenCalledWith(expect.objectContaining({ deliveryDate: CAIRO_DAY_START }));
+    });
+
+    it("writes one audit row (field deliveryDate, from/to) per shipment whose date changed", async () => {
+      const records = [
+        makeShipmentRecord({ id: 9802, deliveryDate: "2026-05-17T00:00:00.000Z" }),
+        makeShipmentRecord({ id: 9803, deliveryDate: null }),
+        makeShipmentRecord({ id: 9804, deliveryDate: CAIRO_DAY_START }),
+      ];
+      orderModel.findByPk.mockImplementation(async (id: number) => records.find((r) => r.toJSON().id === id) ?? null);
+
+      const response = await request(app).put("/shipments/bulk-update").send({ data: { deliveryDate: "2026-11-10" }, shipmentIds: [9802, 9803, 9804] });
+
+      expect(response.status).toBe(200);
+      const rows = logModel.create.mock.calls.map(([row]: [Record<string, unknown>]) => row).filter((row) => row.field === "deliveryDate");
+      expect(rows).toEqual([
+        expect.objectContaining({ action: "update", entityId: 9802, entityType: "order", from: "2026-05-17T00:00:00.000Z", to: CAIRO_DAY_START, userId: 1 }),
+        expect.objectContaining({ entityId: 9803, from: null, to: CAIRO_DAY_START }),
+      ]);
+    });
+
+    it.each([["not-a-date"], [""], ["2026-13-45"]])("rejects an invalid deliveryDate %p with 400 and writes nothing", async (value) => {
+      const record = makeShipmentRecord({ id: 9802 });
+      orderModel.findByPk.mockResolvedValue(record);
+
+      const response = await request(app).put("/shipments/bulk-update").send({ data: { deliveryDate: value }, shipmentIds: [9802] });
+
+      expect(response.status).toBe(400);
+      expect(record.update).not.toHaveBeenCalled();
+    });
+
+    it("combines with other bulk fields in one request", async () => {
+      const record = makeShipmentRecord({ id: 9802 });
+      orderModel.findByPk.mockResolvedValue(record);
+
+      const response = await request(app).put("/shipments/bulk-update").send({ data: { deliveryDate: "2026-11-10", shippingCompany: null }, shipmentIds: [9802] });
+
+      expect(response.status).toBe(200);
+      expect(record.update).toHaveBeenCalledWith(expect.objectContaining({ deliveryDate: CAIRO_DAY_START, shippingCompany: null }));
+    });
+  });
+
   it("marks the received amount as manual when the user changes it to zero", async () => {
     const shipmentRecord = makeShipmentRecord({
       id: 9802,

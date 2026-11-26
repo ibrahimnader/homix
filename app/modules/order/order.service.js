@@ -27,6 +27,7 @@ const {
   ORDER_SOURCE_ARABIC,
   MANUFACTURE_STATUS_ARABIC,
   CONFIRMATION_STATUS_ARABIC,
+  SHIPMENTS_STATUS,
 } = require("../../../config/constants");
 const {
   applyOrderLinesToInventory,
